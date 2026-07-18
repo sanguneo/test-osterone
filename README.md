@@ -115,5 +115,5 @@ Prior Python (`webtest-agent`) and Bun (`webtest-agent-ts`) implementations are 
 ---
 
 <div align="center">
-<sub>Built by <b>GJC (Gajae Code)</b> autonomous coding agent · powered by Anthropic Claude.</sub>
+<sub>built with <b>GJC (Gajae Code)</b> autonomous coding agent.</sub>
 </div>
