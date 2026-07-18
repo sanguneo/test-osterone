@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 
 /**
- * test-osteron CLI entrypoint. `setup` installs runtime prerequisites (the headless
+ * test-osterone CLI entrypoint. `setup` installs runtime prerequisites (the headless
  * browser); real commands (rule, run, benchmark, dashboard) land in later phases.
  */
 
-export const NAME = "test-osteron";
+export const NAME = "test-osterone";
 export const VERSION = "0.1.0";
 
 export function help(): string {

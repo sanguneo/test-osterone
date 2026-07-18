@@ -52,7 +52,7 @@ export function createDashboard(
 						`<tr><td>${esc(e.caseId)}</td><td class="v-${esc(e.verdict)}">${esc(e.verdict)}</td><td>${e.confidence}</td><td>${esc(e.env)}</td></tr>`,
 				)
 				.join("");
-			const body = `<!doctype html><meta charset="utf-8"><title>test-osteron</title><h1>test-osteron runs</h1><table><thead><tr><th>case</th><th>verdict</th><th>confidence</th><th>env</th></tr></thead><tbody>${rows}</tbody></table>`;
+			const body = `<!doctype html><meta charset="utf-8"><title>test-osterone</title><h1>test-osterone runs</h1><table><thead><tr><th>case</th><th>verdict</th><th>confidence</th><th>env</th></tr></thead><tbody>${rows}</tbody></table>`;
 			return new Response(body, { headers: { "content-type": "text/html; charset=utf-8" } });
 		}
 		return json({ error: "not found", path }, 404);

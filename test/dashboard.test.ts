@@ -84,7 +84,7 @@ test("GET / renders an HTML run table containing case ids", async () => {
 	const res = await handler(new Request("http://d/"));
 	expect(res.headers.get("content-type")).toContain("text/html");
 	const html = await res.text();
-	expect(html).toContain("osteron runs");
+	expect(html).toContain("test-osterone runs");
 	expect(html).toContain("C1");
 	expect(html).toContain("needs_review");
 });

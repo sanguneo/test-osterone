@@ -12,7 +12,7 @@ function esc(s: string): string {
 	);
 }
 
-export function toJUnitXml(results: StructuredResult[], suiteName = "test-osteron"): string {
+export function toJUnitXml(results: StructuredResult[], suiteName = "test-osterone"): string {
 	const failures = results.filter((r) => r.verdict === "fail").length;
 	const errors = results.filter((r) => r.verdict === "error").length;
 	const skipped = results.filter((r) => r.verdict === "needs_review").length;
