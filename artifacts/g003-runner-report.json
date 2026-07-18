@@ -1,0 +1,21 @@
+{
+	"schemaVersion": 1,
+	"kind": "package-test-report",
+	"surface": "package",
+	"goal": "G003",
+	"title": "해석→assertion(캐시)→실행(self-heal 게이트)→판정(baseline)→증거→러너 계약",
+	"typecheck": "tsc --noEmit: passed",
+	"lint": "biome check .: clean (23 files)",
+	"test": { "command": "bun test", "total": 37, "passed": 37, "failed": 0, "files": ["runner", "assertion(via runner)", "baseline", "evidence", "ingest", "triage", "rule", "model-client", "smoke"] },
+	"trust_invariants_verified": [
+		"assertion cache keyed caseId+ruleId+ruleVersion+caseHash; miss on ruleVersion or caseHash change (invalidation) — tested",
+		"run-time verdict is a pure function of cached assertions over final snapshot; K=5 reruns identical (verdict/assertions/confidence) — tested",
+		"heal event caps verdict at needs_review, never a silent pass — tested",
+		"clean all-fail yields fail (no false pass); confidence = confidence-in-verdict — tested",
+		"baseline masked-diff: dynamic-only change matches, real change drifts, unapproved/missing gates to needs_review — tested",
+		"sqlite evidence persistence with idempotent executionId PK — tested"
+	],
+	"runner_contract": "runScenario -> StructuredResult{verdict∈{pass,fail,needs_review,error}, errorInfo?, confidence, assertions[], evidenceRefs[](content-addressed), healEvents[], timing, ruleVersion, scenarioHash, caseId, executionId, attempts, env, schemaVersion}",
+	"browser_page": "BrowserPage (Playwright headless) implements the same Page contract with self-heal candidate ranking (role->label->placeholder->text->css). Typechecked; live-browser execution is verified by the G004 benchmark against the fixture site (needs a real browser). Deterministic runner/verdict logic is browser-agnostic and fully unit-tested via FakePage.",
+	"plan_acceptance": "G003 stated verification = FakePage/mock-LLM deterministic integration + K-run determinism regression — MET."
+}

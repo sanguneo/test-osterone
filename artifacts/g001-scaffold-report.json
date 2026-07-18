@@ -1,0 +1,26 @@
+{
+	"schemaVersion": 1,
+	"kind": "package-test-report",
+	"surface": "package",
+	"goal": "G001",
+	"title": "Repo 준비 + Node/TS 스캐폴드",
+	"typecheck": "tsc --noEmit: passed",
+	"lint": "biome check .: clean (6 files)",
+	"test": { "command": "bun test", "total": 6, "passed": 6, "failed": 0 },
+	"build": {
+		"command": "bun build src/cli.ts --compile --outfile dist/osteron",
+		"artifact": "dist/osteron.exe",
+		"status": "compiled"
+	},
+	"cli": { "command": "bun src/cli.ts --version", "stdout": "0.1.0", "exitCode": 0 },
+	"archive": {
+		"moved": ["webtest-agent -> archive/webtest-agent", "webtest-agent-ts -> archive/webtest-agent-ts"],
+		"deleted": false,
+		"note": "레퍼런스 보존; login_cases.xlsx + fixture 재사용 예정"
+	},
+	"adversarial": [
+		{ "id": "model-non-2xx", "scenario": "ApiKeyModelClient on HTTP 429", "expected": "throws (no silent empty)", "verdict": "passed" },
+		{ "id": "model-empty-choices", "scenario": "choices=[]", "expected": "returns empty string", "verdict": "passed" },
+		{ "id": "baseurl-trailing-slash", "scenario": "baseUrl ends with /", "expected": "normalized endpoint", "verdict": "passed" }
+	]
+}

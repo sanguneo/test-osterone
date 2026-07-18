@@ -1,0 +1,23 @@
+{
+	"schemaVersion": 1,
+	"kind": "package-test-report",
+	"surface": "package",
+	"goal": "G006",
+	"title": "Phase C 인증 + 후순위 통합",
+	"typecheck": "tsc --noEmit: passed",
+	"lint": "biome check .: clean (35 files)",
+	"test": { "command": "bun test", "total": 56, "passed": 56, "failed": 0 },
+	"auth_paths": [
+		"API key: ApiKeyModelClient (Bearer /v1/chat/completions) — G001, tested",
+		"OAuth proxy: OAuthProxyModelClient routes OAuth login token to <base>/codex/responses with chatgpt-account-id (JWT claim) + OpenAI-Beta + SSE Responses parsing — billing-gated API bypass"
+	],
+	"adversarial": [
+		{ "id": "oauth-route", "scenario": "OAuth complete()", "expected": "POST codex/responses + identity headers + parses output_text SSE", "verdict": "passed" },
+		{ "id": "oauth-non2xx", "scenario": "429 billing_not_active", "expected": "throws (surfaced, not masked)", "verdict": "passed" },
+		{ "id": "oauth-no-claim", "scenario": "opaque token", "expected": "omit chatgpt-account-id header", "verdict": "passed" },
+		{ "id": "junit-escape", "scenario": "XML metachars in case/error", "expected": "escaped", "verdict": "passed" },
+		{ "id": "junit-counts", "scenario": "mixed verdicts", "expected": "correct tests/failures/errors/skipped + elements", "verdict": "passed" }
+	],
+	"deferred_in_scope": "CI 연동: JUnit XML output (toJUnitXml) enables CI ingestion; the actual CI pipeline config is a trivial follow-up (out of v1-critical path per objective's 후순위).",
+	"live_note": "OAuth proxy verified against mocked Responses SSE (protocol/headers/parse). Hitting the real ChatGPT/Codex backend needs a live OAuth login token; same env-dependent integration caveat as browser/docker."
+}

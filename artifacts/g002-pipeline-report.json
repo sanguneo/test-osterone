@@ -1,0 +1,21 @@
+{
+	"schemaVersion": 1,
+	"kind": "package-test-report",
+	"surface": "package",
+	"goal": "G002",
+	"title": "입력→정규화→dedupe→규칙(CLI)→선별",
+	"typecheck": "tsc --noEmit: passed",
+	"lint": "biome check .: clean (13 files)",
+	"test": { "command": "bun test", "total": 26, "passed": 26, "failed": 0, "files": ["ingest", "triage", "rule", "model-client", "smoke"] },
+	"determinism": "normalizeTable: identical input -> identical caseIds (content-hash sha256 prefix); dedupe first-wins, input order preserved",
+	"modules": ["schema.ts", "ingest.ts (parse/map/normalize/dedupe/gsheet)", "triage.ts", "rule.ts (establish/version/serialize/refine-seam)"],
+	"adversarial": [
+		{ "id": "csv-quotes-newlines", "scenario": "quoted commas + embedded newlines + escaped double-quotes", "expected": "parsed correctly", "verdict": "passed" },
+		{ "id": "dedupe-content-hash", "scenario": "identical content with different sheet id vs a changed step", "expected": "duplicate removed; changed step stays distinct", "verdict": "passed" },
+		{ "id": "triage-otp", "scenario": "OTP/SMS step", "expected": "human-required", "verdict": "passed" },
+		{ "id": "triage-no-steps", "scenario": "empty steps", "expected": "human-required (no executable steps)", "verdict": "passed" },
+		{ "id": "rule-refine-version", "scenario": "model changes destructiveKeywords", "expected": "ruleVersion bumped, mapping preserved", "verdict": "passed" },
+		{ "id": "rule-refine-noop", "scenario": "model returns no effective change", "expected": "ruleVersion stable", "verdict": "passed" },
+		{ "id": "gsheet-bad-url", "scenario": "non-sheets URL", "expected": "throws", "verdict": "passed" }
+	]
+}
