@@ -7,7 +7,7 @@
 
 import { Database } from "bun:sqlite";
 
-import type { StructuredResult } from "./runner.ts";
+import type { StructuredResult } from "../execute/runner.ts";
 
 export interface ExecutionRow {
 	executionId: string;

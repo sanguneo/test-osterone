@@ -1,11 +1,10 @@
 import { expect, test } from "bun:test";
-
-import { MemoryAssertionCache } from "../src/assertion.ts";
-import { getOrAuthorAssertions } from "../src/interpret.ts";
-import { type FakeAction, FakePage, type PageSnapshot } from "../src/page.ts";
-import { bumpRuleVersion, establishRuleFromHeaders } from "../src/rule.ts";
-import { determinismView, type RunEnv, runScenario } from "../src/runner.ts";
-import type { NormalizedTC } from "../src/schema.ts";
+import { type FakeAction, FakePage, type PageSnapshot } from "../src/execute/page.ts";
+import { determinismView, type RunEnv, runScenario } from "../src/execute/runner.ts";
+import type { NormalizedTC } from "../src/intake/schema.ts";
+import { MemoryAssertionCache } from "../src/interpret/assertion.ts";
+import { getOrAuthorAssertions } from "../src/interpret/interpret.ts";
+import { bumpRuleVersion, establishRuleFromHeaders } from "../src/interpret/rule.ts";
 
 const RULE = establishRuleFromHeaders(["Test ID", "Title", "Steps", "Expected Result", "Role", "Environment"]);
 const ENV: RunEnv = { browser: "fake", viewport: "1280x800", baseUrl: "http://fixture" };

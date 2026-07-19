@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { VERSION } from "../src/cli.ts";
-import { ApiKeyModelClient, FakeModelClient, type ModelMessage } from "../src/model-client.ts";
+import { ApiKeyModelClient, FakeModelClient, type ModelMessage } from "../src/model/model-client.ts";
 
 test("VERSION is the scaffold baseline", () => {
 	expect(VERSION).toBe("0.1.0");

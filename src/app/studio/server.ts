@@ -16,17 +16,16 @@ import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { MemoryAssertionCache } from "../../src/assertion.ts";
-import { BrowserPage } from "../../src/browser-page.ts";
-import { ingestCsv, ingestGoogleSheet } from "../../src/ingest.ts";
-import { establishRuleFromHeaders } from "../../src/rule.ts";
-import { runScenario, type Verdict } from "../../src/runner.ts";
-import type { NormalizedTC } from "../../src/schema.ts";
-import { startFixture } from "../demo/fixture-app.ts";
+import { BrowserPage } from "../../execute/browser-page.ts";
+import { runScenario, type Verdict } from "../../execute/runner.ts";
+import { ingestCsv, ingestGoogleSheet } from "../../intake/ingest.ts";
+import type { NormalizedTC } from "../../intake/schema.ts";
+import { MemoryAssertionCache } from "../../interpret/assertion.ts";
+import { establishRuleFromHeaders } from "../../interpret/rule.ts";
+import { startFixture } from "../../testing/fixture-app.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const bundledCases = join(here, "../demo/cases.csv");
+const bundledCases = join(here, "../../testing/sample-cases.csv");
 
 interface CaseView {
 	caseId: string;

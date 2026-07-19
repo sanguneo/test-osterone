@@ -1,9 +1,8 @@
 import { expect, test } from "bun:test";
-
-import { MemoryBaselineStore } from "../src/baseline.ts";
-import { createDashboard } from "../src/dashboard.ts";
-import { SqliteEvidenceStore } from "../src/evidence.ts";
-import type { StructuredResult } from "../src/runner.ts";
+import { SqliteEvidenceStore } from "../src/evidence/evidence.ts";
+import type { StructuredResult } from "../src/execute/runner.ts";
+import { MemoryBaselineStore } from "../src/judge/baseline.ts";
+import { createDashboard } from "../src/report/dashboard.ts";
 
 function result(over: Partial<StructuredResult>): StructuredResult {
 	return {

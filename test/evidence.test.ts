@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
-import { SqliteEvidenceStore } from "../src/evidence.ts";
-import type { StructuredResult } from "../src/runner.ts";
+import { SqliteEvidenceStore } from "../src/evidence/evidence.ts";
+import type { StructuredResult } from "../src/execute/runner.ts";
 
 function result(over: Partial<StructuredResult> = {}): StructuredResult {
 	return {

@@ -3,7 +3,7 @@
  * verdict mapping: pass -> ok, fail -> <failure>, error -> <error>, needs_review -> <skipped>.
  */
 
-import type { StructuredResult } from "./runner.ts";
+import type { StructuredResult } from "../execute/runner.ts";
 
 function esc(s: string): string {
 	return s.replace(

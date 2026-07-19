@@ -1,11 +1,10 @@
 import { expect, test } from "bun:test";
-
-import { makeFixturePage } from "../src/fixture-model.ts";
-import { httpDispatch, inProcessDispatch, runScenarios } from "../src/host.ts";
-import { establishRuleFromHeaders } from "../src/rule.ts";
-import { determinismView, type RunEnv } from "../src/runner.ts";
-import type { NormalizedTC } from "../src/schema.ts";
-import { createWorkerHandler, type WorkerJob } from "../src/worker.ts";
+import { determinismView, type RunEnv } from "../src/execute/runner.ts";
+import type { NormalizedTC } from "../src/intake/schema.ts";
+import { establishRuleFromHeaders } from "../src/interpret/rule.ts";
+import { httpDispatch, inProcessDispatch, runScenarios } from "../src/orchestrate/host.ts";
+import { createWorkerHandler, type WorkerJob } from "../src/orchestrate/worker.ts";
+import { makeFixturePage } from "../src/testing/fixture-model.ts";
 
 const RULE = establishRuleFromHeaders(["Test ID", "Title", "Steps", "Expected Result"]);
 const ENV: RunEnv = { browser: "fixture-model", viewport: "1280x800", baseUrl: "http://fixture" };

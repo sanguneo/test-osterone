@@ -16,14 +16,13 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
-import { MemoryAssertionCache } from "../../src/assertion.ts";
-import { BrowserPage } from "../../src/browser-page.ts";
-import { csvToRawTable, ingestCsv } from "../../src/ingest.ts";
-import { establishRuleFromHeaders, type InterpretationRule } from "../../src/rule.ts";
-import { determinismView, runScenario, type StructuredResult } from "../../src/runner.ts";
-import type { NormalizedTC } from "../../src/schema.ts";
-import { startFixture } from "./fixture-app.ts";
+import { BrowserPage } from "../../src/execute/browser-page.ts";
+import { determinismView, runScenario, type StructuredResult } from "../../src/execute/runner.ts";
+import { csvToRawTable, ingestCsv } from "../../src/intake/ingest.ts";
+import type { NormalizedTC } from "../../src/intake/schema.ts";
+import { MemoryAssertionCache } from "../../src/interpret/assertion.ts";
+import { establishRuleFromHeaders, type InterpretationRule } from "../../src/interpret/rule.ts";
+import { startFixture } from "../../src/testing/fixture-app.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 function flagValue(name: string): string | undefined {
@@ -65,7 +64,7 @@ async function runPass(
 }
 
 async function main(): Promise<number> {
-	const csv = readFileSync(casesPath ?? join(here, "cases.csv"), "utf8");
+	const csv = readFileSync(casesPath ?? join(here, "../../src/testing/sample-cases.csv"), "utf8");
 	const { unique: cases, duplicates } = ingestCsv(csv);
 	const rule = establishRuleFromHeaders(csvToRawTable(csv).headers);
 	const cache = new MemoryAssertionCache();

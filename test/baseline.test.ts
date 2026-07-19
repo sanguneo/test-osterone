@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { MemoryBaselineStore, maskDynamic } from "../src/baseline.ts";
+import { MemoryBaselineStore, maskDynamic } from "../src/judge/baseline.ts";
 
 test("maskDynamic redacts timestamps, uuids, and long digit runs", () => {
 	const masked = maskDynamic("t 2026-07-17T14:00 id 550e8400-e29b-41d4-a716-446655440000 seq 1234567");

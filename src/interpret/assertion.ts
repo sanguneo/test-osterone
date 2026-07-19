@@ -6,7 +6,7 @@
  * content changes the key and forces re-authoring (cache invalidation).
  */
 
-import type { PageSnapshot } from "./page.ts";
+import type { PageSnapshot } from "../execute/page.ts";
 
 export type Assertion =
 	| { kind: "urlIncludes"; value: string }

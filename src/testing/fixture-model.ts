@@ -5,7 +5,7 @@
  * BrowserPage in the live G004 integration; this model is the deterministic stand-in.
  */
 
-import { type FakeAction, FakePage, type PageSnapshot } from "./page.ts";
+import { type FakeAction, FakePage, type PageSnapshot } from "../execute/page.ts";
 
 function roleOf(state: PageSnapshot): string {
 	return state.url.match(/#role=(\w+)/)?.[1] ?? "anon";

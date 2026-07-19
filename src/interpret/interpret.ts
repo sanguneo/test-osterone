@@ -4,9 +4,9 @@
  * cache so assertions are authored once per (caseId, ruleId, ruleVersion, caseHash).
  */
 
+import type { NormalizedTC } from "../intake/schema.ts";
 import { type Assertion, type AssertionCache, assertionCacheKey, dedupeAssertions } from "./assertion.ts";
 import type { InterpretationRule } from "./rule.ts";
-import type { NormalizedTC } from "./schema.ts";
 
 export type PageAction =
 	| { kind: "goto"; path: string }

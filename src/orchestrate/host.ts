@@ -5,8 +5,8 @@
  * the orchestration contract test asserts across the process boundary.
  */
 
-import type { Page } from "./page.ts";
-import type { RunEnv, StructuredResult, Verdict } from "./runner.ts";
+import type { Page } from "../execute/page.ts";
+import type { RunEnv, StructuredResult, Verdict } from "../execute/runner.ts";
 import { executeJob, type WorkerJob } from "./worker.ts";
 
 export type Dispatch = (job: WorkerJob) => Promise<StructuredResult>;

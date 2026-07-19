@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
-
-import { FakeModelClient } from "../src/model-client.ts";
-import { bumpRuleVersion, establishRuleFromHeaders, parseRule, refineRule, serializeRule } from "../src/rule.ts";
+import {
+	bumpRuleVersion,
+	establishRuleFromHeaders,
+	parseRule,
+	refineRule,
+	serializeRule,
+} from "../src/interpret/rule.ts";
+import { FakeModelClient } from "../src/model/model-client.ts";
 
 const HEADERS = ["Test ID", "Title", "Steps", "Expected Result", "Role", "Environment"];
 

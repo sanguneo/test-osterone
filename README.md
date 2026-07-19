@@ -87,7 +87,7 @@ bun install        # one-time (installs Chromium via postinstall)
 bun run demo
 ```
 
-It ingests `examples/demo/cases.csv`, authors deterministic assertions, and runs four cases against a local login app:
+It ingests `src/testing/sample-cases.csv`, authors deterministic assertions, and runs four cases against a local login app:
 
 ```
 case                                      verdict        conf  assert  heal
@@ -150,9 +150,20 @@ Two interchangeable clients behind one interface:
 ## Project layout
 
 ```
-src/        18 modules (ingest, rule, triage, interpret, runner, baseline, evidence, dashboard, host/worker, auth …)
-test/       unit + smoke suites (56/56)
-artifacts/  per-phase build reports (g001–g006)
+src/
+  intake/       spreadsheet ingest + schema
+  interpret/    rule · assertions · triage
+  execute/      page · headless browser · runner
+  judge/        golden baseline
+  evidence/     sqlite execution store
+  orchestrate/  host + worker (node/host protocol)
+  model/        model client + OAuth proxy
+  report/       dashboard · JUnit · benchmark
+  testing/      fixture app + fixture model
+  app/studio/   browser UI (Studio)
+  cli.ts · index.ts
+test/           unit + smoke suites (56/56)
+examples/demo/  CLI live-run example
 ```
 
 Prior Python (`webtest-agent`) and Bun (`webtest-agent-ts`) implementations are preserved under `archive/`; the fixture site + labeled cases are reused as a language-neutral benchmark asset.

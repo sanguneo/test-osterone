@@ -8,7 +8,7 @@ import {
 	normalizeTable,
 	parseCsv,
 	toCsvExportUrl,
-} from "../src/ingest.ts";
+} from "../src/intake/ingest.ts";
 
 test("parseCsv handles quotes, embedded commas, and embedded newlines", () => {
 	const csv = 'a,b\n"x,y","line1\nline2"\n';

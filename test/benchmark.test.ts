@@ -1,10 +1,9 @@
 import { expect, test } from "bun:test";
-
-import { evaluateGate, type LabelSet, runBenchmark } from "../src/benchmark.ts";
-import { makeFixturePage } from "../src/fixture-model.ts";
-import { establishRuleFromHeaders } from "../src/rule.ts";
-import type { RunEnv } from "../src/runner.ts";
-import type { NormalizedTC } from "../src/schema.ts";
+import type { RunEnv } from "../src/execute/runner.ts";
+import type { NormalizedTC } from "../src/intake/schema.ts";
+import { establishRuleFromHeaders } from "../src/interpret/rule.ts";
+import { evaluateGate, type LabelSet, runBenchmark } from "../src/report/benchmark.ts";
+import { makeFixturePage } from "../src/testing/fixture-model.ts";
 
 const RULE = establishRuleFromHeaders(["Test ID", "Title", "Steps", "Expected Result", "Role", "Environment"]);
 const ENV: RunEnv = { browser: "fixture-model", viewport: "1280x800", baseUrl: "http://fixture" };

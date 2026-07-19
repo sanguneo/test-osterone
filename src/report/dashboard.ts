@@ -6,8 +6,8 @@
  * `Bun.serve` for real use.
  */
 
-import type { MemoryBaselineStore } from "./baseline.ts";
-import type { SqliteEvidenceStore } from "./evidence.ts";
+import type { SqliteEvidenceStore } from "../evidence/evidence.ts";
+import type { MemoryBaselineStore } from "../judge/baseline.ts";
 
 function json(data: unknown, status = 200): Response {
 	return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });

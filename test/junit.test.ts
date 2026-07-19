@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
-
-import { toJUnitXml } from "../src/junit.ts";
-import type { StructuredResult } from "../src/runner.ts";
+import type { StructuredResult } from "../src/execute/runner.ts";
+import { toJUnitXml } from "../src/report/junit.ts";
 
 function r(over: Partial<StructuredResult>): StructuredResult {
 	return {

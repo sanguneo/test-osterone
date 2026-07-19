@@ -8,9 +8,9 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 
-import { mapColumns } from "./ingest.ts";
-import type { ModelClient } from "./model-client.ts";
-import type { TcField } from "./schema.ts";
+import { mapColumns } from "../intake/ingest.ts";
+import type { TcField } from "../intake/schema.ts";
+import type { ModelClient } from "../model/model-client.ts";
 
 export const INTENT_KINDS = ["navigate", "click", "input", "verify", "wait"] as const;
 export type IntentKind = (typeof INTENT_KINDS)[number];

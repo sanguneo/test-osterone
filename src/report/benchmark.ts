@@ -6,12 +6,12 @@
  * false-pass and determinism.
  */
 
-import { MemoryAssertionCache } from "./assertion.ts";
-import type { Page } from "./page.ts";
-import type { InterpretationRule } from "./rule.ts";
-import { determinismView, type RunEnv, runScenario, type Verdict } from "./runner.ts";
-import type { NormalizedTC } from "./schema.ts";
-import { triageDeterministic } from "./triage.ts";
+import type { Page } from "../execute/page.ts";
+import { determinismView, type RunEnv, runScenario, type Verdict } from "../execute/runner.ts";
+import type { NormalizedTC } from "../intake/schema.ts";
+import { MemoryAssertionCache } from "../interpret/assertion.ts";
+import type { InterpretationRule } from "../interpret/rule.ts";
+import { triageDeterministic } from "../interpret/triage.ts";
 
 export interface LabeledCase {
 	tc: NormalizedTC;

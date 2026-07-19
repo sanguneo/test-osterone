@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 
-import { codexResponsesUrl, getCodexAccountId, OAuthProxyModelClient, parseResponsesSse } from "../src/oauth-proxy.ts";
+import {
+	codexResponsesUrl,
+	getCodexAccountId,
+	OAuthProxyModelClient,
+	parseResponsesSse,
+} from "../src/model/oauth-proxy.ts";
 
 function jwt(accountId: string): string {
 	const p = Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: accountId } })).toString(

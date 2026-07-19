@@ -87,7 +87,7 @@ bun install        # 최초 1회 (postinstall이 Chromium 설치)
 bun run demo
 ```
 
-`examples/demo/cases.csv`를 읽어 결정적 assertion을 작성한 뒤, 로컬 로그인 앱을 상대로 네 개의 케이스를 실행합니다.
+`src/testing/sample-cases.csv`를 읽어 결정적 assertion을 작성한 뒤, 로컬 로그인 앱을 상대로 네 개의 케이스를 실행합니다.
 
 ```
 case                                      verdict        conf  assert  heal
@@ -150,9 +150,20 @@ bun run studio     # 켠 뒤 http://localhost:8686 접속
 ## 프로젝트 구조
 
 ```
-src/        18개 모듈 (ingest, rule, triage, interpret, runner, baseline, evidence, dashboard, host/worker, auth …)
-test/       유닛 + 스모크 스위트 (56/56)
-artifacts/  단계별 빌드 리포트 (g001–g006)
+src/
+  intake/       스프레드시트 인제스트 + 스키마
+  interpret/    규칙 · assertion · 선별(triage)
+  execute/      페이지 · 헤드리스 브라우저 · 러너
+  judge/        골든 baseline
+  evidence/     sqlite 실행 저장소
+  orchestrate/  호스트 + 워커 (노드/호스트 프로토콜)
+  model/        모델 클라이언트 + OAuth 프록시
+  report/       대시보드 · JUnit · 벤치마크
+  testing/      fixture 앱 + fixture 모델
+  app/studio/   브라우저 UI (Studio)
+  cli.ts · index.ts
+test/           유닛 + 스모크 스위트 (56/56)
+examples/demo/  CLI 라이브 실행 예제
 ```
 
 기존 Python(`webtest-agent`)·Bun(`webtest-agent-ts`) 구현은 `archive/`에 보존합니다. fixture 사이트와 라벨 케이스는 언어중립 벤치마크 자산으로 재사용합니다.

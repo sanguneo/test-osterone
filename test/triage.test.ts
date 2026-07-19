@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
 
-import { ingestCsv } from "../src/ingest.ts";
-import type { NormalizedTC } from "../src/schema.ts";
-import { triageAll, triageDeterministic } from "../src/triage.ts";
+import { ingestCsv } from "../src/intake/ingest.ts";
+import type { NormalizedTC } from "../src/intake/schema.ts";
+import { triageAll, triageDeterministic } from "../src/interpret/triage.ts";
 
 function tc(over: Partial<NormalizedTC>): NormalizedTC {
 	return {

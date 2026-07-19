@@ -7,11 +7,11 @@
  * A `FakePage` yields identical deterministic verdict/assertions/confidence across runs.
  */
 
-import { type AssertionCache, type AssertionResult, evaluateAssertion } from "./assertion.ts";
-import { getOrAuthorAssertions, parseStep } from "./interpret.ts";
+import type { NormalizedTC } from "../intake/schema.ts";
+import { type AssertionCache, type AssertionResult, evaluateAssertion } from "../interpret/assertion.ts";
+import { getOrAuthorAssertions, parseStep } from "../interpret/interpret.ts";
+import type { InterpretationRule } from "../interpret/rule.ts";
 import type { Page } from "./page.ts";
-import type { InterpretationRule } from "./rule.ts";
-import type { NormalizedTC } from "./schema.ts";
 
 export type Verdict = "pass" | "fail" | "needs_review" | "error";
 

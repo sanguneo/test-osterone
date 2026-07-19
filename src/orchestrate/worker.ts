@@ -6,11 +6,11 @@
  * an injected factory in tests) — so a job is plain serializable JSON.
  */
 
-import { MemoryAssertionCache } from "./assertion.ts";
-import type { Page } from "./page.ts";
-import type { InterpretationRule } from "./rule.ts";
-import { type RunEnv, runScenario, type StructuredResult } from "./runner.ts";
-import type { NormalizedTC } from "./schema.ts";
+import type { Page } from "../execute/page.ts";
+import { type RunEnv, runScenario, type StructuredResult } from "../execute/runner.ts";
+import type { NormalizedTC } from "../intake/schema.ts";
+import { MemoryAssertionCache } from "../interpret/assertion.ts";
+import type { InterpretationRule } from "../interpret/rule.ts";
 
 export interface WorkerJob {
 	tc: NormalizedTC;

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { ApiKeyModelClient } from "../src/model-client.ts";
+import { ApiKeyModelClient } from "../src/model/model-client.ts";
 
 test("ApiKeyModelClient throws on non-2xx (never silently returns empty)", async () => {
 	const fetchImpl = (async () => new Response("nope", { status: 429 })) as unknown as typeof fetch;

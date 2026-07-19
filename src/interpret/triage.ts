@@ -4,7 +4,7 @@
  * `TriageDecision` shape. Selection accuracy vs human labels is a v1 hard gate.
  */
 
-import type { NormalizedTC } from "./schema.ts";
+import type { NormalizedTC } from "../intake/schema.ts";
 
 export interface TriageDecision {
 	caseId: string;
