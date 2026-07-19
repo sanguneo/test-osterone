@@ -110,6 +110,19 @@ bun run run:live -- --url https://your.app --cases ./my-cases.csv
 
 > Requires **Node ≥ 22.7**. The demo executes the browser under Node (`node --experimental-transform-types`) because Playwright's browser launch currently hangs under Bun on Windows; the CLI and the deterministic engine run on Bun.
 
+## Studio — no-terminal browser UI (for non-developers)
+
+A point-and-click front door. Start it once; after that everything happens in the browser:
+
+```bash
+bun run studio     # then open http://localhost:8686
+```
+
+- Click **"샘플로 실행" (Run sample)** to run the bundled cases with zero input.
+- Or pick **구글 시트로 실행 (Run from Google Sheet)**: paste a Sheet shared "anyone with the link (Viewer)" plus the target site URL, then **실행 (Run)**.
+
+The deterministic engine runs each case against real headless Chromium and renders verdict badges, per-assertion detail, self-heal events, and the needs_review queue — no CSV escaping, no terminal after launch.
+
 ## Architecture
 
 - **Runtime:** single Node/TS stack (Playwright), shipped as a **single binary** via Bun.

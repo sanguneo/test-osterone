@@ -110,6 +110,19 @@ bun run run:live -- --url https://your.app --cases ./my-cases.csv
 
 > **Node ≥ 22.7** 이 필요합니다. 데모는 브라우저를 Node(`node --experimental-transform-types`)로 실행합니다. Playwright의 브라우저 런치가 현재 Windows의 Bun에서 멈추기 때문이며, CLI와 결정적 엔진은 Bun 위에서 동작합니다.
 
+## Studio — 터미널 없는 브라우저 UI (비개발자용)
+
+클릭만으로 쓰는 진입점입니다. 한 번만 켜두면 그다음은 전부 브라우저에서 이뤄집니다.
+
+```bash
+bun run studio     # 켠 뒤 http://localhost:8686 접속
+```
+
+- **샘플로 실행**을 누르면 입력 없이 번들 케이스가 바로 돌아갑니다.
+- 또는 **구글 시트로 실행**: "링크가 있는 모든 사용자(뷰어)"로 공유한 시트 URL과 테스트 대상 사이트 URL을 넣고 **실행**을 누르시면 됩니다.
+
+결정적 엔진이 각 케이스를 실제 헤드리스 Chromium으로 실행해 판정 배지·assertion 상세·self-heal 이벤트·needs_review 큐를 브라우저에 그려 줍니다. CSV 이스케이프도, 실행 후 터미널도 필요 없습니다.
+
 ## 아키텍처
 
 - **런타임:** Node/TS 단일 스택(Playwright)이며, Bun으로 **단일 바이너리**로 배포합니다.
