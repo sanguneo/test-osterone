@@ -102,7 +102,11 @@ false-pass  : 0 OK
 
 세 번째 케이스는 성공(Welcome)을 *기대*하지만 틀린 비밀번호를 넣습니다. 엔진은 거짓 통과 대신 `fail`을 냅니다. 네 번째는 없는 셀렉터를 클릭하는데, self-heal 게이트가 이를 `needs_review`로 묶습니다. 다시 돌려도 모든 판정이 완전히 동일합니다.
 
-내 사이트로 바꾸려면 `examples/demo/cases.csv`를 수정한 뒤 `DEMO_BASE_URL=https://your.app bun run demo`로 실행하시면 됩니다.
+내 사이트로 바꾸려면 케이스 파일을 만들고 베이스 URL을 넘기시면 됩니다.
+
+```bash
+bun run run:live -- --url https://your.app --cases ./my-cases.csv
+```
 
 > **Node ≥ 22.7** 이 필요합니다. 데모는 브라우저를 Node(`node --experimental-transform-types`)로 실행합니다. Playwright의 브라우저 런치가 현재 Windows의 Bun에서 멈추기 때문이며, CLI와 결정적 엔진은 Bun 위에서 동작합니다.
 

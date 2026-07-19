@@ -102,7 +102,11 @@ false-pass  : 0 OK
 
 The third case *expects* a welcome but supplies a wrong password — the engine returns `fail`, never a false pass. The fourth clicks a missing selector — the self-heal gate caps it at `needs_review`. Rerun and every verdict is byte-identical.
 
-Point it at your own site: edit `examples/demo/cases.csv`, then `DEMO_BASE_URL=https://your.app bun run demo`.
+Point it at your own site — write your own cases file and pass a base URL:
+
+```bash
+bun run run:live -- --url https://your.app --cases ./my-cases.csv
+```
 
 > Requires **Node ≥ 22.7**. The demo executes the browser under Node (`node --experimental-transform-types`) because Playwright's browser launch currently hangs under Bun on Windows; the CLI and the deterministic engine run on Bun.
 

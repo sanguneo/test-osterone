@@ -26,8 +26,14 @@ import type { NormalizedTC } from "../../src/schema.ts";
 import { startFixture } from "./fixture-app.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
+function flagValue(name: string): string | undefined {
+	const i = process.argv.indexOf(name);
+	return i !== -1 ? process.argv[i + 1] : undefined;
+}
+
 const headed = process.argv.includes("--headed");
-const externalUrl = process.env.DEMO_BASE_URL?.replace(/\/$/, "");
+const externalUrl = (flagValue("--url") ?? process.env.DEMO_BASE_URL)?.replace(/\/$/, "");
+const casesPath = flagValue("--cases") ?? process.env.DEMO_CASES;
 
 function pad(s: string, n: number): string {
 	return s.length >= n ? s.slice(0, n) : s + " ".repeat(n - s.length);
@@ -59,7 +65,7 @@ async function runPass(
 }
 
 async function main(): Promise<number> {
-	const csv = readFileSync(join(here, "cases.csv"), "utf8");
+	const csv = readFileSync(casesPath ?? join(here, "cases.csv"), "utf8");
 	const { unique: cases, duplicates } = ingestCsv(csv);
 	const rule = establishRuleFromHeaders(csvToRawTable(csv).headers);
 	const cache = new MemoryAssertionCache();
@@ -68,7 +74,7 @@ async function main(): Promise<number> {
 	const fixture = externalUrl ? null : await startFixture();
 	const baseUrl = externalUrl ?? fixture?.url ?? "";
 
-	console.log("test-osterone — live demo (real headless Chromium)");
+	console.log(`test-osterone — live ${externalUrl ? "run" : "demo"} (real headless Chromium)`);
 	console.log(`target : ${baseUrl}${externalUrl ? " (external)" : " (bundled fixture app)"}`);
 	console.log(`cases  : ${cases.length} unique${duplicates.length ? `, ${duplicates.length} deduped` : ""}\n`);
 
