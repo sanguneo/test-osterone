@@ -78,6 +78,34 @@ test-osterone setup
 
 > **Bun ≥ 1.3** 이 필요합니다. `rule`·`run`·`benchmark`·`dashboard` 명령은 이후 단계에서 추가됩니다. 현재 CLI는 `setup`·`--version`·`--help`를 제공합니다.
 
+## 직접 돌려보기 — 라이브 데모
+
+테스트할 프로젝트가 아직 없으신가요? 번들된 fixture 앱으로 전체 파이프라인이 **실제 헤드리스 Chromium**을 상대로 도는 모습을 바로 확인할 수 있습니다.
+
+```bash
+bun install        # 최초 1회 (postinstall이 Chromium 설치)
+bun run demo
+```
+
+`examples/demo/cases.csv`를 읽어 결정적 assertion을 작성한 뒤, 로컬 로그인 앱을 상대로 네 개의 케이스를 실행합니다.
+
+```
+case                                      verdict        conf  assert  heal
+Valid login shows welcome                 pass           1.00  2/2     -
+Invalid login shows error                 pass           1.00  2/2     -
+Wrong password must not pass as welcome   fail           1.00  0/2     -
+Missing button triggers self-heal gate    needs_review   0.50  1/1     click
+verdicts    : {"pass":2,"fail":1,"needs_review":1}
+determinism : 4/4 identical on rerun OK
+false-pass  : 0 OK
+```
+
+세 번째 케이스는 성공(Welcome)을 *기대*하지만 틀린 비밀번호를 넣습니다. 엔진은 거짓 통과 대신 `fail`을 냅니다. 네 번째는 없는 셀렉터를 클릭하는데, self-heal 게이트가 이를 `needs_review`로 묶습니다. 다시 돌려도 모든 판정이 완전히 동일합니다.
+
+내 사이트로 바꾸려면 `examples/demo/cases.csv`를 수정한 뒤 `DEMO_BASE_URL=https://your.app bun run demo`로 실행하시면 됩니다.
+
+> **Node ≥ 22.7** 이 필요합니다. 데모는 브라우저를 Node(`node --experimental-transform-types`)로 실행합니다. Playwright의 브라우저 런치가 현재 Windows의 Bun에서 멈추기 때문이며, CLI와 결정적 엔진은 Bun 위에서 동작합니다.
+
 ## 아키텍처
 
 - **런타임:** Node/TS 단일 스택(Playwright)이며, Bun으로 **단일 바이너리**로 배포합니다.

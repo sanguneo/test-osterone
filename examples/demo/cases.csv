@@ -1,0 +1,19 @@
+Test ID,Title,Steps,Expected
+TC1,Valid login shows welcome,"open /
+enter ""admin"" into ""Username""
+enter ""secret"" into ""Password""
+click ""Log in""
+verify page shows ""Welcome""","Welcome, admin. Dashboard loaded."
+TC2,Invalid login shows error,"open /
+enter ""admin"" into ""Username""
+enter ""wrongpass"" into ""Password""
+click ""Log in""
+verify page shows ""Invalid credentials""","Invalid credentials. Please try again."
+TC3,Wrong password must not pass as welcome,"open /
+enter ""admin"" into ""Username""
+enter ""wrongpass"" into ""Password""
+click ""Log in""
+verify page shows ""Welcome""","Welcome, admin. Dashboard loaded."
+TC4,Missing button triggers self-heal gate,"open /
+click ""Save changes""
+verify page shows ""Sign in""",Sign in

@@ -78,6 +78,34 @@ test-osterone setup
 
 > Requires **Bun ≥ 1.3**. `rule`, `run`, `benchmark`, and `dashboard` commands land in later phases; the CLI today exposes `setup`, `--version`, `--help`.
 
+## Try it — live demo
+
+No project to test yet? A bundled fixture app lets you watch the full pipeline run against a **real headless Chromium** browser:
+
+```bash
+bun install        # one-time (installs Chromium via postinstall)
+bun run demo
+```
+
+It ingests `examples/demo/cases.csv`, authors deterministic assertions, and runs four cases against a local login app:
+
+```
+case                                      verdict        conf  assert  heal
+Valid login shows welcome                 pass           1.00  2/2     -
+Invalid login shows error                 pass           1.00  2/2     -
+Wrong password must not pass as welcome   fail           1.00  0/2     -
+Missing button triggers self-heal gate    needs_review   0.50  1/1     click
+verdicts    : {"pass":2,"fail":1,"needs_review":1}
+determinism : 4/4 identical on rerun OK
+false-pass  : 0 OK
+```
+
+The third case *expects* a welcome but supplies a wrong password — the engine returns `fail`, never a false pass. The fourth clicks a missing selector — the self-heal gate caps it at `needs_review`. Rerun and every verdict is byte-identical.
+
+Point it at your own site: edit `examples/demo/cases.csv`, then `DEMO_BASE_URL=https://your.app bun run demo`.
+
+> Requires **Node ≥ 22.7**. The demo executes the browser under Node (`node --experimental-transform-types`) because Playwright's browser launch currently hangs under Bun on Windows; the CLI and the deterministic engine run on Bun.
+
 ## Architecture
 
 - **Runtime:** single Node/TS stack (Playwright), shipped as a **single binary** via Bun.
