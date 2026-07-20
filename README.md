@@ -122,7 +122,7 @@ Model connection is **global** (connect once, applies everywhere). Everything el
 
 - **Projects** — save a reusable project: **name, one or more TC sources (Google Sheet URL / pasted CSV / uploaded `.xlsx` — pick which sheets), target site URL, environment, test account (id/password), reference repo, default AI toggle**. Multiple sources are ingested and **de-duplicated across all of them**. Persisted to `~/.test-osterone/studio-projects.json`; the account + repo are passed to AI step interpretation as context.
 - **TC read & dedupe** — **TC 읽기 & 중복 확인** ingests the project's sheet/CSV with the current column mapping and shows the detected columns, the structured cases, and **which cases were de-duplicated**, before you run.
-- **Run** — pick a project, optionally tick **AI 스텝 해석**, and **실행 (Run)**.
+- **Run** — pick a project, optionally tick **AI 스텝 해석**, and **실행 (Run)**. Results **stream in per case** (NDJSON) — verdicts and a running pass/fail/needs_review tally appear live as each case finishes, instead of blocking until the whole suite is done.
 
 The deterministic engine runs each case against real headless Chromium and renders verdict badges, per-assertion detail, self-heal events, and the needs_review queue — no CSV escaping, no terminal after launch.
 

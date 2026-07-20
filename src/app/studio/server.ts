@@ -313,11 +313,12 @@ async function ingestGoogleSheetText(sheetUrl: string): Promise<string> {
 }
 
 /** Ingest → rule → run each case against a real headless browser. Pure engine reuse. */
-export async function runBatch(input: RunInput): Promise<RunView> {
+export async function runBatch(input: RunInput, onProgress?: (ev: Record<string, unknown>) => void): Promise<RunView> {
 	const st = stateFor(input.projectId ?? "sample");
 	const ai = !!input.aiInterpret;
 	if (ai && !modelClient) throw new Error("Connect a model first to use AI step interpretation.");
 	const { cases, baseUrl, stop } = await loadCases(input, st.rule.mapping);
+	onProgress?.({ type: "start", total: cases.length, baseUrl, interpreter: ai ? "ai" : "rule" });
 	const baselineEnv = input.env?.trim() || (input.sample ? "sample" : baseUrl);
 	const caseById = new Map(cases.map((c) => [c.caseId, c]));
 	for (const c of cases) st.reviewQueue.delete(c.caseId);
@@ -367,7 +368,7 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 				});
 			}
 			counts[r.verdict] += 1;
-			results.push({
+			const view: CaseView = {
 				caseId: r.caseId,
 				title: tc.title || r.caseId,
 				verdict: r.verdict,
@@ -376,7 +377,9 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 				total: r.assertions.length,
 				heal: r.healEvents,
 				assertions: r.assertions.map((a) => ({ detail: a.detail, passed: a.passed })),
-			});
+			};
+			results.push(view);
+			onProgress?.({ type: "case", index: results.length - 1, total: cases.length, result: view });
 		}
 	} finally {
 		await page.close();
@@ -416,17 +419,21 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		return send(res, 200, PAGE, "text/html");
 	}
 	if (req.method === "GET" && url.pathname === "/api/history") {
-		return send(res, 200, JSON.stringify(history));
+		return send(res, 200, JSON.stringify(stateFor(url.searchParams.get("projectId") || "sample").history));
 	}
 	if (req.method === "POST" && url.pathname === "/api/run") {
+		const input = JSON.parse((await readBody(req)) || "{}") as RunInput;
+		res.writeHead(200, { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache" });
+		const emit = (ev: Record<string, unknown>) => res.write(`${JSON.stringify(ev)}\n`);
 		try {
-			const input = JSON.parse((await readBody(req)) || "{}") as RunInput;
-			const view = await runBatch(input);
-			return send(res, 200, JSON.stringify(view));
+			const view = await runBatch(input, emit);
+			emit({ type: "done", view });
 		} catch (err) {
 			console.error("run failed:", (err as Error).stack ?? err);
-			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+			emit({ type: "error", error: (err as Error).message });
 		}
+		res.end();
+		return;
 	}
 	if (req.method === "GET" && url.pathname === "/api/status") {
 		return send(res, 200, JSON.stringify(statusPayload(url.searchParams.get("projectId") || "sample")));
@@ -963,13 +970,40 @@ const PAGE = `<!doctype html>
     out+='</tbody></table></div>';
     $("out").innerHTML=out;
   }
+  function renderLive(acc,total){
+    var c=acc.counts;
+    var out='<div class="card"><div class="summary"><b>진행 '+acc.results.length+'/'+total+'</b>';
+    out+='<span class="chip" style="color:var(--pass)">pass <b>'+(c.pass||0)+'</b></span>';
+    out+='<span class="chip" style="color:var(--fail)">fail <b>'+(c.fail||0)+'</b></span>';
+    out+='<span class="chip" style="color:var(--review)">needs_review <b>'+(c.needs_review||0)+'</b></span>';
+    out+='<span class="chip" style="color:var(--error)">error <b>'+(c.error||0)+'</b></span></div>';
+    out+='<table><thead><tr><th>케이스</th><th>판정</th><th>신뢰도</th><th>assert</th></tr></thead><tbody>';
+    acc.results.forEach(function(r){ out+='<tr><td>'+esc(r.title)+'</td><td>'+badge(r.verdict)+'</td><td>'+r.confidence.toFixed(2)+'</td><td>'+r.passed+'/'+r.total+'</td></tr>'; });
+    out+='</tbody></table></div>';
+    $("out").innerHTML=out;
+  }
   $("run").onclick=async function(){
     var p=null; for (var i=0;i<projects.length;i++) if (projects[i].id===selId) p=projects[i];
     if(!p) p={id:"sample",sources:[]};
     var body={ sample:p.id==="sample", sources:p.sources||[], aiInterpret:$("run-ai").checked, baseUrl:p.baseUrl||"", env:p.env||"", username:p.username||"", password:p.password||"", referenceRepo:p.referenceRepo||"", projectId:selId };
-    $("run").disabled=true; $("status").className="muted"; $("status").textContent="실제 브라우저로 실행 중…";
-    try { var res=await fetch("/api/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); var data=await res.json(); if(!res.ok) throw new Error(data.error||"실행 실패"); $("status").textContent="완료"; render(data); loadQueue(); }
-    catch(e){ $("status").textContent=""; $("out").innerHTML='<div class="card err">오류: '+esc(e.message)+'</div>'; }
+    $("run").disabled=true; $("status").className="muted"; $("status").textContent="실행 중…"; $("out").innerHTML="";
+    var acc={ counts:{pass:0,fail:0,needs_review:0,error:0}, results:[] }; var total=0;
+    try {
+      var res=await fetch("/api/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+      if(!res.body) throw new Error("스트림 없음");
+      var reader=res.body.getReader(), dec=new TextDecoder(), buf="";
+      while(true){
+        var chunk=await reader.read(); if(chunk.done) break;
+        buf+=dec.decode(chunk.value,{stream:true});
+        var lines=buf.split("\n"); buf=lines.pop();
+        for(var li=0;li<lines.length;li++){ var ln=lines[li].trim(); if(!ln) continue; var ev=JSON.parse(ln);
+          if(ev.type==="start"){ total=ev.total; $("status").textContent="실행 중… 0/"+total; }
+          else if(ev.type==="case"){ acc.results.push(ev.result); acc.counts[ev.result.verdict]=(acc.counts[ev.result.verdict]||0)+1; $("status").textContent="실행 중… "+acc.results.length+"/"+total; renderLive(acc,total); }
+          else if(ev.type==="done"){ $("status").textContent="완료"; render(ev.view); loadQueue(); }
+          else if(ev.type==="error"){ throw new Error(ev.error||"실행 실패"); }
+        }
+      }
+    } catch(e){ $("status").textContent=""; $("out").innerHTML='<div class="card err">오류: '+esc(e.message)+'</div>'; }
     finally { $("run").disabled=false; }
   };
 
