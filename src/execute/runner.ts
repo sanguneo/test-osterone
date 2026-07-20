@@ -9,6 +9,7 @@
 
 import type { NormalizedTC } from "../intake/schema.ts";
 import { type AssertionCache, type AssertionResult, evaluateAssertion } from "../interpret/assertion.ts";
+import type { AuthoredPlan } from "../interpret/author.ts";
 import { getOrAuthorAssertions, parseStep } from "../interpret/interpret.ts";
 import type { InterpretationRule } from "../interpret/rule.ts";
 import type { Page } from "./page.ts";
@@ -46,6 +47,8 @@ export interface RunOptions {
 	/** Deterministic overrides for tests. */
 	executionId?: string;
 	now?: () => number;
+	/** Pre-authored plan (AI author-time). When present, replaces deterministic step parsing + assertions. */
+	plan?: AuthoredPlan;
 }
 
 function round2(n: number): number {
@@ -74,10 +77,10 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 	};
 
 	try {
-		const { assertions } = getOrAuthorAssertions(tc, opts.rule, opts.cache);
+		const actions = opts.plan ? opts.plan.actions : tc.steps.map((step) => parseStep(step, opts.rule));
+		const assertions = opts.plan ? opts.plan.assertions : getOrAuthorAssertions(tc, opts.rule, opts.cache).assertions;
 
-		for (const step of tc.steps) {
-			const action = parseStep(step, opts.rule);
+		for (const action of actions) {
 			try {
 				if (action.kind === "goto") await opts.page.goto(action.path);
 				else if (action.kind === "click") await opts.page.click(action.target);

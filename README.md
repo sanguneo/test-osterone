@@ -125,6 +125,8 @@ The deterministic engine runs each case against real headless Chromium and rende
 
 **Model connection (optional).** Click **Codex 로그인** to reuse a local Codex/ChatGPT login (OAuth proxy — token and model are read from `~/.codex`), or paste an access token / API key. Once connected, **AI 규칙 다듬기** refines the interpretation rule in natural language (e.g. "recognize 누르기 as a click"). It is **conversational** — each turn builds on the last (e.g. "undo that") — and after every turn the UI shows an **intent diff** and flags **ambiguous or empty intents**, so the rule converges to an optimal, interpretable form. Changes bump the rule version and apply to later runs; **초기화** resets the conversation.
 
+**AI step interpretation.** Tick **AI 스텝 해석** on a run to let the connected model turn free natural-language steps (no quotes, no DSL) into a deterministic plan (actions + assertions). The plan is **authored once and cached**, then the engine replays it deterministically — identical `pass` / `fail` / `needs_review` semantics, false-pass still 0. The bundled sample ships a quote-free variant to demonstrate it.
+
 ## Architecture
 
 - **Runtime:** single Node/TS stack (Playwright), shipped as a **single binary** via Bun.

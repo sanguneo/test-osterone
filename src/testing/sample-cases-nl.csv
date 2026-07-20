@@ -1,0 +1,19 @@
+Test ID,Title,Steps,Expected
+TC1,Valid login shows welcome,"Open the home page
+Type admin into the Username field
+Type secret into the Password field
+Click the Log in button
+Confirm the page shows the welcome message","Welcome, admin. Dashboard loaded."
+TC2,Invalid login shows error,"Open the home page
+Type admin into the Username field
+Type wrongpass into the Password field
+Click the Log in button
+Confirm an invalid credentials error is shown","Invalid credentials. Please try again."
+TC3,Wrong password must not pass as welcome,"Open the home page
+Type admin into the Username field
+Type wrongpass into the Password field
+Click the Log in button
+Confirm the welcome message appears","Welcome, admin. Dashboard loaded."
+TC4,Missing button triggers self-heal gate,"Open the home page
+Click the Save changes button
+Confirm the Sign in heading is visible",Sign in

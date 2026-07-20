@@ -165,7 +165,7 @@ function sanitizeStrings(value: unknown, fallback: string[]): string[] {
 	return Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [...fallback];
 }
 
-function extractJsonObject(text: string): Record<string, unknown> | null {
+export function extractJsonObject(text: string): Record<string, unknown> | null {
 	const t = text.trim();
 	try {
 		const o = JSON.parse(t);

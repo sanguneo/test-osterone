@@ -21,6 +21,7 @@ import { runScenario, type Verdict } from "../../execute/runner.ts";
 import { ingestCsv, ingestGoogleSheet } from "../../intake/ingest.ts";
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
+import { getOrAuthorPlan, MemoryPlanCache } from "../../interpret/author.ts";
 import { establishRuleFromHeaders, type InterpretationRule, refineRule, ruleLint } from "../../interpret/rule.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
 import { ApiKeyModelClient, type ModelClient, type ModelMessage } from "../../model/model-client.ts";
@@ -29,6 +30,7 @@ import { startFixture } from "../../testing/fixture-app.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bundledCases = join(here, "../../testing/sample-cases.csv");
+const bundledCasesNl = join(here, "../../testing/sample-cases-nl.csv");
 
 interface CaseView {
 	caseId: string;
@@ -45,6 +47,7 @@ interface RunView {
 	at: number;
 	source: string;
 	baseUrl: string;
+	interpreter: "ai" | "rule";
 	counts: Record<Verdict, number>;
 	results: CaseView[];
 }
@@ -53,6 +56,7 @@ export interface RunInput {
 	source: "sample" | "sheet";
 	sheetUrl?: string;
 	baseUrl?: string;
+	aiInterpret?: boolean;
 }
 
 const history: RunView[] = [];
@@ -78,6 +82,8 @@ let auth: AuthState | null = null;
 let rule: InterpretationRule = establishRuleFromHeaders([]);
 // Conversation so far, so each refine turn sees prior context (interpretable, iterative).
 const refineChat: ModelMessage[] = [];
+// AI-authored plans, cached author-once per (case, rule version) so re-runs are deterministic.
+const planCache = new MemoryPlanCache();
 
 function statusPayload(): Record<string, unknown> {
 	return {
@@ -138,11 +144,14 @@ async function loadCases(input: RunInput): Promise<{ cases: NormalizedTC[]; base
 		return { cases: unique, baseUrl, stop: () => {} };
 	}
 	const fixture = await startFixture();
-	return { cases: ingestCsv(readFileSync(bundledCases, "utf8")).unique, baseUrl: fixture.url, stop: fixture.stop };
+	const file = input.aiInterpret ? bundledCasesNl : bundledCases;
+	return { cases: ingestCsv(readFileSync(file, "utf8")).unique, baseUrl: fixture.url, stop: fixture.stop };
 }
 
 /** Ingest → rule → run each case against a real headless browser. Pure engine reuse. */
 export async function runBatch(input: RunInput): Promise<RunView> {
+	const ai = !!input.aiInterpret;
+	if (ai && !modelClient) throw new Error("Connect a model first to use AI step interpretation.");
 	const { cases, baseUrl, stop } = await loadCases(input);
 	const cache = new MemoryAssertionCache();
 	const page = await BrowserPage.create({ baseUrl, headless: true, timeoutMs: 4000 });
@@ -150,11 +159,13 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 	const results: CaseView[] = [];
 	try {
 		for (const tc of cases) {
+			const plan = ai && modelClient ? (await getOrAuthorPlan(tc, rule, planCache, modelClient)).plan : undefined;
 			const r = await runScenario(tc, {
 				page,
 				rule,
 				cache,
 				env: { browser: "chromium", viewport: "1280x800", baseUrl },
+				plan,
 			});
 			counts[r.verdict] += 1;
 			results.push({
@@ -172,7 +183,14 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 		await page.close();
 		stop();
 	}
-	const view: RunView = { at: Date.now(), source: input.source, baseUrl, counts, results };
+	const view: RunView = {
+		at: Date.now(),
+		source: input.source,
+		baseUrl,
+		interpreter: ai ? "ai" : "rule",
+		counts,
+		results,
+	};
 	history.unshift(view);
 	if (history.length > 20) history.length = 20;
 	return view;
@@ -346,6 +364,9 @@ const PAGE = `<!doctype html>
           <input id="baseUrl" type="text" placeholder="https://your.app" /></div>
       </div>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:14px;cursor:pointer">
+      <input type="checkbox" id="ai" /> <span>AI 스텝 해석 <span class="muted">— 따옴표 없는 자연어 스텝 (모델 연결 필요)</span></span>
+    </label>
     <button id="run" class="run" type="button">실행</button>
     <span id="status" class="muted" style="margin-left:12px"></span>
   </div>
@@ -365,6 +386,7 @@ const PAGE = `<!doctype html>
     out += '<div class="card">';
     out += '<div class="summary">';
     out += '<span class="chip">대상 <b>'+esc(view.baseUrl)+'</b></span>';
+    out += '<span class="chip">해석 <b>'+esc(view.interpreter==="ai"?"AI":"규칙")+'</b></span>';
     out += '<span class="chip" style="color:var(--pass)">pass <b>'+(c.pass||0)+'</b></span>';
     out += '<span class="chip" style="color:var(--fail)">fail <b>'+(c.fail||0)+'</b></span>';
     out += '<span class="chip" style="color:var(--review)">needs_review <b>'+(c.needs_review||0)+'</b></span>';
@@ -381,7 +403,7 @@ const PAGE = `<!doctype html>
   }
 
   $("run").onclick = async function(){
-    var body = { source: mode, sheetUrl: $("sheetUrl") ? $("sheetUrl").value.trim() : "", baseUrl: $("baseUrl") ? $("baseUrl").value.trim() : "" };
+    var body = { source: mode, aiInterpret: $("ai") ? $("ai").checked : false, sheetUrl: $("sheetUrl") ? $("sheetUrl").value.trim() : "", baseUrl: $("baseUrl") ? $("baseUrl").value.trim() : "" };
     $("run").disabled = true; $("status").textContent = "실제 브라우저로 실행 중…"; $("status").className="muted";
     try {
       var res = await fetch("/api/run", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify(body) });

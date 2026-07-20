@@ -34,6 +34,14 @@ export {
 	MemoryAssertionCache,
 } from "./interpret/assertion.ts";
 export {
+	type AuthoredPlan,
+	type AuthoredPlanResult,
+	authorPlanAI,
+	getOrAuthorPlan,
+	MemoryPlanCache,
+	type PlanCache,
+} from "./interpret/author.ts";
+export {
 	type AuthoredAssertions,
 	authorAssertions,
 	getOrAuthorAssertions,
