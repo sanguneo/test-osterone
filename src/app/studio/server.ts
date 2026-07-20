@@ -581,14 +581,14 @@ const PAGE = `<!doctype html>
   <span class="tag">AI가 쓰고, 결정적 엔진이 판정합니다 — 터미널 없이</span></header>
 <div class="layout">
   <nav class="side">
-    <button data-tab="run" class="on" type="button">실행 &amp; 결과</button>
-    <button data-tab="projects" type="button">프로젝트</button>
-    <button data-tab="model" type="button">모델 연결 <span id="nav-auth" style="float:right">●</span></button>
-    <button data-tab="rules" type="button">AI 규칙 (대화)</button>
-    <button data-tab="review" type="button">리뷰 큐 <span id="nav-review" style="float:right;color:var(--review)"></span></button>
+    <button data-tab="projects" class="on" type="button">1 · 프로젝트</button>
+    <button data-tab="model" type="button">2 · 모델 연결 <span id="nav-auth" style="float:right">●</span></button>
+    <button data-tab="rules" type="button">3 · AI 규칙·해석</button>
+    <button data-tab="run" type="button">4 · 실행 & 결과</button>
+    <button data-tab="review" type="button">5 · 리뷰 큐 <span id="nav-review" style="float:right;color:var(--review)"></span></button>
   </nav>
   <div class="content">
-    <section id="tab-run" class="tab active">
+    <section id="tab-run" class="tab">
       <h2 class="sec">실행 &amp; 결과</h2>
       <div class="card">
         <label>프로젝트</label>
@@ -600,10 +600,11 @@ const PAGE = `<!doctype html>
         <button id="run" class="run" type="button">실행</button>
         <span id="status" class="muted" style="margin-left:12px"></span>
       </div>
+      <div id="run-preview"></div>
       <div id="out"></div>
     </section>
 
-    <section id="tab-projects" class="tab">
+    <section id="tab-projects" class="tab active">
       <h2 class="sec">프로젝트</h2>
       <div class="card"><div id="proj-list"></div></div>
       <div class="card">
@@ -713,6 +714,7 @@ const PAGE = `<!doctype html>
     for (var k=0;k<navs.length;k++) navs[k].classList.toggle("on", navs[k].getAttribute("data-tab")===t);
     var secs = document.querySelectorAll("section.tab");
     for (var s=0;s<secs.length;s++) secs[s].classList.toggle("active", secs[s].id==="tab-"+t);
+    if (t==="run" && typeof loadRunPreview==="function") loadRunPreview();
   };
 
   // ---- projects ----
@@ -737,7 +739,23 @@ const PAGE = `<!doctype html>
     $("run-meta").textContent = "소스: " + fmtSource(p);
     $("run-ai").checked = !!p.aiInterpret;
   }
-  $("run-project").onchange = onSelectProject;
+  function selectedProject(){ for (var i=0;i<projects.length;i++) if (projects[i].id===selId) return projects[i]; return projects[0]; }
+  async function loadRunPreview(){
+    var p=selectedProject(); if(!p){ $("run-preview").innerHTML=""; return; }
+    $("run-preview").innerHTML='<div class="muted" style="margin:10px 0">실행 대상 케이스 확인 중…</div>';
+    try {
+      var res=await fetch("/api/tc/preview",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({source:p.source,sheetUrl:p.sheetUrl,csvText:p.csvText,baseUrl:p.baseUrl,aiInterpret:$("run-ai").checked})});
+      var d=await res.json(); if(!res.ok) throw new Error(d.error||"읽기 실패");
+      var out='<div class="card"><div class="summary"><b>실행 대상 케이스</b> <span class="chip">고유 <b>'+d.counts.unique+'</b></span><span class="chip" style="color:var(--review)">중복 <b>'+d.counts.duplicates+'</b></span></div>';
+      out+='<table><thead><tr><th>제목</th><th>스텝</th><th>기대결과</th></tr></thead><tbody>';
+      d.unique.slice(0,20).forEach(function(c){ out+='<tr><td>'+esc(c.title||c.caseId)+'</td><td class="detail">'+esc((c.steps||[]).join(" · "))+'</td><td class="detail">'+esc(c.expected)+'</td></tr>'; });
+      out+='</tbody></table>';
+      if (d.duplicates&&d.duplicates.length) out+='<div class="detail" style="margin-top:8px;color:var(--review)">중복 제거: '+d.duplicates.map(function(x){return esc(x.title)+" ↔ "+esc(x.duplicateOf);}).join(", ")+'</div>';
+      out+='</div>'; $("run-preview").innerHTML=out;
+    } catch(e){ $("run-preview").innerHTML='<div class="detail err" style="margin:8px 0">케이스 미리보기 실패: '+esc(e.message)+'</div>'; }
+  }
+  $("run-project").onchange = function(){ onSelectProject(); loadRunPreview(); };
+  $("run-ai").onchange = loadRunPreview;
   function setEditSource(s){ editSource=s;
     $("ps-sample").classList.toggle("on",s==="sample"); $("ps-sheet").classList.toggle("on",s==="sheet"); $("ps-csv").classList.toggle("on",s==="csv");
     $("proj-sheet-fields").style.display=s==="sheet"?"block":"none";
