@@ -134,6 +134,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			const view = await runBatch(input);
 			return send(res, 200, JSON.stringify(view));
 		} catch (err) {
+			console.error("run failed:", (err as Error).stack ?? err);
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
 	}
