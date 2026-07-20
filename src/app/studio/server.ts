@@ -64,10 +64,8 @@ export interface RunInput {
 	password?: string;
 	referenceRepo?: string;
 	aiInterpret?: boolean;
+	projectId?: string;
 }
-
-const history: RunView[] = [];
-
 const DEFAULT_OAUTH_MODEL = "gpt-5.6-sol";
 const DEFAULT_APIKEY_MODEL = "gpt-4o-mini";
 
@@ -85,13 +83,6 @@ interface AuthInput {
 
 let modelClient: ModelClient | null = null;
 let auth: AuthState | null = null;
-// Server-held interpretation rule; AI "rule refine" mutates it and later runs use it.
-let rule: InterpretationRule = establishRuleFromHeaders([]);
-// Conversation so far, so each refine turn sees prior context (interpretable, iterative).
-const refineChat: ModelMessage[] = [];
-// AI-authored plans, cached author-once per (case, rule version) so re-runs are deterministic.
-const planCache = new MemoryPlanCache();
-const baseline = new MemoryBaselineStore();
 
 interface ReviewItem {
 	caseId: string;
@@ -104,8 +95,32 @@ interface ReviewItem {
 	ruleVersion: number;
 	env: string;
 }
-// needs_review (+error) evidence from the latest run, awaiting human approval.
-const reviewQueue = new Map<string, ReviewItem>();
+
+/** Per-project runtime state: interpretation rule, refine conversation, caches, baselines, review queue, history. */
+interface ProjectState {
+	rule: InterpretationRule;
+	refineChat: ModelMessage[];
+	planCache: MemoryPlanCache;
+	baseline: MemoryBaselineStore;
+	reviewQueue: Map<string, ReviewItem>;
+	history: RunView[];
+}
+const projectStates = new Map<string, ProjectState>();
+function stateFor(projectId: string): ProjectState {
+	let st = projectStates.get(projectId);
+	if (!st) {
+		st = {
+			rule: establishRuleFromHeaders([]),
+			refineChat: [],
+			planCache: new MemoryPlanCache(),
+			baseline: new MemoryBaselineStore(),
+			reviewQueue: new Map(),
+			history: [],
+		};
+		projectStates.set(projectId, st);
+	}
+	return st;
+}
 
 // One headless Chromium reused across runs (a fresh context per run) — no per-run cold start.
 let browserInstance: Awaited<ReturnType<typeof launchBrowser>> | null = null;
@@ -174,15 +189,17 @@ function sanitizeProject(raw: unknown): Project {
 let userProjects: Project[] = loadProjects();
 const allProjects = (): Project[] => [SAMPLE_PROJECT, ...userProjects];
 
-function statusPayload(): Record<string, unknown> {
+function statusPayload(projectId: string): Record<string, unknown> {
+	const st = stateFor(projectId);
 	return {
 		connected: !!modelClient,
 		auth,
-		ruleVersion: rule.ruleVersion,
-		intents: rule.intents,
-		mapping: rule.mapping,
-		warnings: ruleLint(rule),
-		chat: refineChat,
+		projectId,
+		ruleVersion: st.rule.ruleVersion,
+		intents: st.rule.intents,
+		mapping: st.rule.mapping,
+		warnings: ruleLint(st.rule),
+		chat: st.refineChat,
 	};
 }
 
@@ -224,13 +241,16 @@ function connect(input: AuthInput): AuthState {
 	return { mode: mode === "codex" ? "codex (oauth)" : "oauth token", accountId: getCodexAccountId(accessToken), model };
 }
 
-async function loadCases(input: RunInput): Promise<{ cases: NormalizedTC[]; baseUrl: string; stop: () => void }> {
+async function loadCases(
+	input: RunInput,
+	mapping: InterpretationRule["mapping"],
+): Promise<{ cases: NormalizedTC[]; baseUrl: string; stop: () => void }> {
 	if (input.source === "sheet" || input.source === "csv") {
 		const baseUrl = (input.baseUrl ?? "").replace(/\/$/, "");
 		if (!baseUrl) throw new Error("Target site URL is required.");
 		const text = input.source === "csv" ? (input.csvText ?? "") : await ingestGoogleSheetText(input.sheetUrl ?? "");
 		if (!text.trim()) throw new Error(input.source === "csv" ? "CSV content is required." : "Sheet is empty.");
-		const { unique } = ingestCsv(text, rule.mapping);
+		const { unique } = ingestCsv(text, mapping);
 		if (unique.length === 0) throw new Error("No test cases found (check headers / column mapping).");
 		return { cases: unique, baseUrl, stop: () => {} };
 	}
@@ -249,12 +269,13 @@ async function ingestGoogleSheetText(sheetUrl: string): Promise<string> {
 
 /** Ingest → rule → run each case against a real headless browser. Pure engine reuse. */
 export async function runBatch(input: RunInput): Promise<RunView> {
+	const st = stateFor(input.projectId ?? "sample");
 	const ai = !!input.aiInterpret;
 	if (ai && !modelClient) throw new Error("Connect a model first to use AI step interpretation.");
-	const { cases, baseUrl, stop } = await loadCases(input);
+	const { cases, baseUrl, stop } = await loadCases(input, st.rule.mapping);
 	const baselineEnv = input.env?.trim() || (input.source === "sample" ? "sample" : baseUrl);
 	const caseById = new Map(cases.map((c) => [c.caseId, c]));
-	for (const c of cases) reviewQueue.delete(c.caseId);
+	for (const c of cases) st.reviewQueue.delete(c.caseId);
 	const cache = new MemoryAssertionCache();
 	const page = await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser() });
 	const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
@@ -264,7 +285,7 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 			const plan =
 				ai && modelClient
 					? (
-							await getOrAuthorPlan(tc, rule, planCache, modelClient, {
+							await getOrAuthorPlan(tc, st.rule, st.planCache, modelClient, {
 								referenceRepo: input.referenceRepo,
 								username: input.username,
 								password: input.password,
@@ -273,11 +294,11 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 					: undefined;
 			const r = await runScenario(tc, {
 				page,
-				rule,
+				rule: st.rule,
 				cache,
 				env: { browser: "chromium", viewport: "1280x800", baseUrl },
 				plan,
-				baseline,
+				baseline: st.baseline,
 				baselineEnv,
 			});
 			if (r.verdict === "needs_review" || r.verdict === "error") {
@@ -288,7 +309,7 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 						: r.assertions.length === 0
 							? "no assertions authored"
 							: "baseline pending approval";
-				reviewQueue.set(r.caseId, {
+				st.reviewQueue.set(r.caseId, {
 					caseId: r.caseId,
 					title: caseById.get(r.caseId)?.title || r.caseId,
 					verdict: r.verdict,
@@ -324,8 +345,8 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 		counts,
 		results,
 	};
-	history.unshift(view);
-	if (history.length > 20) history.length = 20;
+	st.history.unshift(view);
+	if (st.history.length > 20) st.history.length = 20;
 	return view;
 }
 
@@ -363,43 +384,51 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		}
 	}
 	if (req.method === "GET" && url.pathname === "/api/status") {
-		return send(res, 200, JSON.stringify(statusPayload()));
+		return send(res, 200, JSON.stringify(statusPayload(url.searchParams.get("projectId") || "sample")));
 	}
 	if (req.method === "POST" && url.pathname === "/api/auth") {
 		try {
-			auth = connect(JSON.parse((await readBody(req)) || "{}") as AuthInput);
-			return send(res, 200, JSON.stringify(statusPayload()));
+			const body = JSON.parse((await readBody(req)) || "{}") as AuthInput & { projectId?: string };
+			auth = connect(body);
+			return send(res, 200, JSON.stringify(statusPayload(body.projectId || "sample")));
 		} catch (err) {
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
 	}
 	if (req.method === "POST" && url.pathname === "/api/refine/reset") {
-		refineChat.length = 0;
-		rule = establishRuleFromHeaders([]);
-		return send(res, 200, JSON.stringify(statusPayload()));
+		const { projectId } = JSON.parse((await readBody(req)) || "{}") as { projectId?: string };
+		const pid = projectId || "sample";
+		const st = stateFor(pid);
+		st.refineChat.length = 0;
+		st.rule = establishRuleFromHeaders([]);
+		return send(res, 200, JSON.stringify(statusPayload(pid)));
 	}
 	if (req.method === "POST" && url.pathname === "/api/refine") {
 		if (!modelClient) return send(res, 400, JSON.stringify({ error: "Connect a model first." }));
 		try {
-			const { instruction } = JSON.parse((await readBody(req)) || "{}") as { instruction?: string };
+			const { instruction, projectId } = JSON.parse((await readBody(req)) || "{}") as {
+				instruction?: string;
+				projectId?: string;
+			};
 			if (!instruction?.trim()) return send(res, 400, JSON.stringify({ error: "Instruction is required." }));
-			const prev = rule;
-			const result = await refineRule(rule, instruction, modelClient, [...refineChat]);
-			rule = result.rule;
-			refineChat.push({ role: "user", content: instruction }, { role: "assistant", content: result.message });
-			if (refineChat.length > 20) refineChat.splice(0, refineChat.length - 20);
+			const st = stateFor(projectId || "sample");
+			const prev = st.rule;
+			const result = await refineRule(st.rule, instruction, modelClient, [...st.refineChat]);
+			st.rule = result.rule;
+			st.refineChat.push({ role: "user", content: instruction }, { role: "assistant", content: result.message });
+			if (st.refineChat.length > 20) st.refineChat.splice(0, st.refineChat.length - 20);
 			return send(
 				res,
 				200,
 				JSON.stringify({
 					message: result.message,
 					changed: result.changed,
-					ruleVersion: rule.ruleVersion,
-					intents: rule.intents,
-					mapping: rule.mapping,
-					diff: intentDiff(prev, rule),
-					warnings: ruleLint(rule),
-					chat: refineChat,
+					ruleVersion: st.rule.ruleVersion,
+					intents: st.rule.intents,
+					mapping: st.rule.mapping,
+					diff: intentDiff(prev, st.rule),
+					warnings: ruleLint(st.rule),
+					chat: st.refineChat,
 				}),
 			);
 		} catch (err) {
@@ -410,7 +439,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 	if (req.method === "POST" && url.pathname === "/api/sheet/analyze") {
 		if (!modelClient) return send(res, 400, JSON.stringify({ error: "Connect a model first." }));
 		try {
-			const { sheetUrl } = JSON.parse((await readBody(req)) || "{}") as { sheetUrl?: string };
+			const { sheetUrl, projectId } = JSON.parse((await readBody(req)) || "{}") as {
+				sheetUrl?: string;
+				projectId?: string;
+			};
 			if (!sheetUrl?.trim()) return send(res, 400, JSON.stringify({ error: "Sheet URL is required." }));
 			const csvRes = await fetch(toCsvExportUrl(sheetUrl));
 			if (!csvRes.ok) return send(res, 400, JSON.stringify({ error: `sheet fetch failed: ${csvRes.status}` }));
@@ -421,24 +453,25 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				`Map this spreadsheet's columns to test-case fields. Set "mapping" to {field: EXACT header name} for any of ` +
 				`id,title,step,expected,priority,role,env that a column matches; omit fields with no column. ` +
 				`Headers: ${JSON.stringify(table.headers)}. Example row: ${JSON.stringify(sample)}.`;
-			const result = await refineRule(rule, instruction, modelClient, [...refineChat]);
-			rule = result.rule;
-			refineChat.push(
+			const st = stateFor(projectId || "sample");
+			const result = await refineRule(st.rule, instruction, modelClient, [...st.refineChat]);
+			st.rule = result.rule;
+			st.refineChat.push(
 				{ role: "user", content: `시트 해석 요청 · 헤더: ${table.headers.join(", ")}` },
 				{ role: "assistant", content: result.message },
 			);
-			if (refineChat.length > 20) refineChat.splice(0, refineChat.length - 20);
+			if (st.refineChat.length > 20) st.refineChat.splice(0, st.refineChat.length - 20);
 			return send(
 				res,
 				200,
 				JSON.stringify({
 					headers: table.headers,
 					sample,
-					mapping: rule.mapping,
-					ruleVersion: rule.ruleVersion,
+					mapping: st.rule.mapping,
+					ruleVersion: st.rule.ruleVersion,
 					message: result.message,
-					warnings: ruleLint(rule),
-					chat: refineChat,
+					warnings: ruleLint(st.rule),
+					chat: st.refineChat,
 				}),
 			);
 		} catch (err) {
@@ -457,13 +490,14 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 						: readFileSync(cfg.aiInterpret ? bundledCasesNl : bundledCases, "utf8");
 			if (!text.trim()) return send(res, 400, JSON.stringify({ error: "No TC content to read." }));
 			const headers = csvToRawTable(text).headers;
-			const { all, unique, duplicates } = ingestCsv(text, rule.mapping);
+			const st = stateFor(cfg.projectId || "sample");
+			const { all, unique, duplicates } = ingestCsv(text, st.rule.mapping);
 			return send(
 				res,
 				200,
 				JSON.stringify({
 					headers,
-					mapping: { ...mapColumns(headers), ...rule.mapping },
+					mapping: { ...mapColumns(headers), ...st.rule.mapping },
 					counts: { total: all.length, unique: unique.length, duplicates: duplicates.length },
 					unique: unique.map((c) => ({
 						caseId: c.caseId,
@@ -483,17 +517,26 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		}
 	}
 	if (req.method === "GET" && url.pathname === "/api/review/queue") {
-		return send(res, 200, JSON.stringify([...reviewQueue.values()]));
+		const st = stateFor(url.searchParams.get("projectId") || "sample");
+		return send(res, 200, JSON.stringify([...st.reviewQueue.values()]));
 	}
 	if (req.method === "POST" && url.pathname === "/api/review/approve") {
 		try {
-			const { caseId } = JSON.parse((await readBody(req)) || "{}") as { caseId?: string };
-			const item = caseId ? reviewQueue.get(caseId) : undefined;
+			const { caseId, projectId } = JSON.parse((await readBody(req)) || "{}") as {
+				caseId?: string;
+				projectId?: string;
+			};
+			const st = stateFor(projectId || "sample");
+			const item = caseId ? st.reviewQueue.get(caseId) : undefined;
 			if (!item) return send(res, 404, JSON.stringify({ error: "unknown case in review queue" }));
 			// The run's gate() already proposed a full-text pending baseline; approving flips it.
-			baseline.approve(item.caseId, item.ruleVersion, item.env);
-			reviewQueue.delete(item.caseId);
-			return send(res, 200, JSON.stringify({ approved: true, caseId: item.caseId, queue: [...reviewQueue.values()] }));
+			st.baseline.approve(item.caseId, item.ruleVersion, item.env);
+			st.reviewQueue.delete(item.caseId);
+			return send(
+				res,
+				200,
+				JSON.stringify({ approved: true, caseId: item.caseId, queue: [...st.reviewQueue.values()] }),
+			);
 		} catch (err) {
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
@@ -575,25 +618,28 @@ const PAGE = `<!doctype html>
   .warn { font-size:12px; color:var(--review); border:1px solid rgba(255,176,32,.4); border-radius:6px; padding:2px 8px; }
   .linkbtn { background:none; border:0; color:var(--dim); cursor:pointer; font-size:12px; text-decoration:underline; }
   .add { color:var(--pass); } .rem { color:var(--fail); }
+  .side-sep { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin:16px 8px 6px; }
+  .side-select { width:100%; padding:8px 10px; background:#12151a; border:1px solid var(--line); border-radius:8px; color:var(--ink); font-size:13px; margin-bottom:6px; }
+  .side button.global { border:1px solid var(--line); }
 </style></head>
 <body>
 <header><h1>test-osterone <span style="color:var(--lime)">Studio</span></h1>
   <span class="tag">AI가 쓰고, 결정적 엔진이 판정합니다 — 터미널 없이</span></header>
 <div class="layout">
   <nav class="side">
-    <button data-tab="projects" class="on" type="button">1 · 프로젝트</button>
-    <button data-tab="model" type="button">2 · 모델 연결 <span id="nav-auth" style="float:right">●</span></button>
-    <button data-tab="rules" type="button">3 · AI 규칙·해석</button>
-    <button data-tab="run" type="button">4 · 실행 & 결과</button>
-    <button data-tab="review" type="button">5 · 리뷰 큐 <span id="nav-review" style="float:right;color:var(--review)"></span></button>
+    <button data-tab="model" class="global" type="button">모델 연결 <span id="nav-auth" style="float:right">●</span></button>
+    <div class="side-sep">현재 프로젝트</div>
+    <select id="cur-project" class="side-select"></select>
+    <button data-tab="projects" class="on" type="button">1 · 프로젝트 정보</button>
+    <button data-tab="rules" type="button">2 · 규칙·해석</button>
+    <button data-tab="run" type="button">3 · 실행 & 결과</button>
+    <button data-tab="review" type="button">4 · 리뷰 큐 <span id="nav-review" style="float:right;color:var(--review)"></span></button>
   </nav>
   <div class="content">
     <section id="tab-run" class="tab">
       <h2 class="sec">실행 &amp; 결과</h2>
       <div class="card">
-        <label>프로젝트</label>
-        <select id="run-project"></select>
-        <div id="run-meta" class="muted" style="margin-top:8px;font-size:12.5px"></div>
+        <div id="run-meta" class="muted" style="font-size:12.5px">왼쪽 사이드바에서 현재 프로젝트를 선택하세요.</div>
         <label style="display:flex;align-items:center;gap:8px;margin-top:14px;cursor:pointer">
           <input type="checkbox" id="run-ai" /> <span>AI 스텝 해석 <span class="muted">— 따옴표 없는 자연어 (모델 연결 필요)</span></span>
         </label>
@@ -714,7 +760,9 @@ const PAGE = `<!doctype html>
     for (var k=0;k<navs.length;k++) navs[k].classList.toggle("on", navs[k].getAttribute("data-tab")===t);
     var secs = document.querySelectorAll("section.tab");
     for (var s=0;s<secs.length;s++) secs[s].classList.toggle("active", secs[s].id==="tab-"+t);
-    if (t==="run" && typeof loadRunPreview==="function") loadRunPreview();
+    if (t==="run") loadRunPreview();
+    else if (t==="rules") refreshStatus();
+    else if (t==="review") loadQueue();
   };
 
   // ---- projects ----
@@ -722,7 +770,7 @@ const PAGE = `<!doctype html>
   function fmtSource(p){ return p.source==="sheet" ? ("시트 · "+(p.baseUrl||"대상 미설정")) : p.source==="csv" ? ("CSV · "+(p.baseUrl||"대상 미설정")) : "샘플 (번들 데모)"; }
   function fillProjects(list){
     projects = list || [];
-    $("run-project").innerHTML = projects.map(function(p){ return '<option value="'+esc(p.id)+'"'+(p.id===selId?" selected":"")+'>'+esc(p.name)+'</option>'; }).join("");
+    $("cur-project").innerHTML = projects.map(function(p){ return '<option value="'+esc(p.id)+'"'+(p.id===selId?" selected":"")+'>'+esc(p.name)+'</option>'; }).join("");
     $("proj-list").innerHTML = projects.map(function(p){
       var actions = p.id==="sample" ? '<span class="muted" style="font-size:12px">기본</span>'
         : '<button class="mini" data-edit="'+esc(p.id)+'">편집</button> <button class="mini" data-del="'+esc(p.id)+'">삭제</button>';
@@ -733,7 +781,7 @@ const PAGE = `<!doctype html>
     onSelectProject();
   }
   function onSelectProject(){
-    selId = $("run-project").value || "sample";
+    selId = $("cur-project").value || "sample";
     var p = null; for (var i=0;i<projects.length;i++) if (projects[i].id===selId) p=projects[i];
     if (!p) p = projects[0]; if (!p) return;
     $("run-meta").textContent = "소스: " + fmtSource(p);
@@ -744,7 +792,7 @@ const PAGE = `<!doctype html>
     var p=selectedProject(); if(!p){ $("run-preview").innerHTML=""; return; }
     $("run-preview").innerHTML='<div class="muted" style="margin:10px 0">실행 대상 케이스 확인 중…</div>';
     try {
-      var res=await fetch("/api/tc/preview",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({source:p.source,sheetUrl:p.sheetUrl,csvText:p.csvText,baseUrl:p.baseUrl,aiInterpret:$("run-ai").checked})});
+      var res=await fetch("/api/tc/preview",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({source:p.source,sheetUrl:p.sheetUrl,csvText:p.csvText,baseUrl:p.baseUrl,aiInterpret:$("run-ai").checked,projectId:selId})});
       var d=await res.json(); if(!res.ok) throw new Error(d.error||"읽기 실패");
       var out='<div class="card"><div class="summary"><b>실행 대상 케이스</b> <span class="chip">고유 <b>'+d.counts.unique+'</b></span><span class="chip" style="color:var(--review)">중복 <b>'+d.counts.duplicates+'</b></span></div>';
       out+='<table><thead><tr><th>제목</th><th>스텝</th><th>기대결과</th></tr></thead><tbody>';
@@ -754,7 +802,7 @@ const PAGE = `<!doctype html>
       out+='</div>'; $("run-preview").innerHTML=out;
     } catch(e){ $("run-preview").innerHTML='<div class="detail err" style="margin:8px 0">케이스 미리보기 실패: '+esc(e.message)+'</div>'; }
   }
-  $("run-project").onchange = function(){ onSelectProject(); loadRunPreview(); };
+  $("cur-project").onchange = function(){ onSelectProject(); loadRunPreview(); if(typeof refreshStatus==="function") refreshStatus(); loadQueue(); };
   $("run-ai").onchange = loadRunPreview;
   function setEditSource(s){ editSource=s;
     $("ps-sample").classList.toggle("on",s==="sample"); $("ps-sheet").classList.toggle("on",s==="sheet"); $("ps-csv").classList.toggle("on",s==="csv");
@@ -770,10 +818,10 @@ const PAGE = `<!doctype html>
   function editProject(id){ var p=null; for (var i=0;i<projects.length;i++) if (projects[i].id===id) p=projects[i]; if(!p) return;
     $("proj-id").value=p.id; $("proj-name").value=p.name; $("proj-sheet").value=p.sheetUrl||""; $("proj-csv").value=p.csvText||""; $("proj-base").value=p.baseUrl||""; $("proj-env").value=p.env||""; $("proj-user").value=p.username||""; $("proj-pass").value=p.password||""; $("proj-repo").value=p.referenceRepo||""; $("proj-ai").checked=!!p.aiInterpret; setEditSource(p.source); $("proj-editor-title").textContent="프로젝트 편집"; $("proj-preview").innerHTML="";
   }
-  function editorBody(){ return { id: $("proj-id").value||undefined, name: $("proj-name").value.trim()||"Untitled", source: editSource, sheetUrl: $("proj-sheet").value.trim(), csvText: $("proj-csv").value, baseUrl: $("proj-base").value.trim(), env: $("proj-env").value.trim(), username: $("proj-user").value.trim(), password: $("proj-pass").value, referenceRepo: $("proj-repo").value.trim(), aiInterpret: $("proj-ai").checked }; }
+  function editorBody(){ return { id: $("proj-id").value||undefined, projectId: $("proj-id").value||"sample", name: $("proj-name").value.trim()||"Untitled", source: editSource, sheetUrl: $("proj-sheet").value.trim(), csvText: $("proj-csv").value, baseUrl: $("proj-base").value.trim(), env: $("proj-env").value.trim(), username: $("proj-user").value.trim(), password: $("proj-pass").value, referenceRepo: $("proj-repo").value.trim(), aiInterpret: $("proj-ai").checked }; }
   $("proj-save").onclick=async function(){
     $("proj-save").disabled=true;
-    try { var res=await fetch("/api/projects",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(editorBody())}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"저장 실패"); selId=d.saved.id; fillProjects(d.projects); $("run-project").value=selId; onSelectProject(); $("proj-status").className="muted"; $("proj-status").textContent="저장됨"; }
+    try { var res=await fetch("/api/projects",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(editorBody())}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"저장 실패"); selId=d.saved.id; fillProjects(d.projects); $("cur-project").value=selId; onSelectProject(); refreshStatus(); loadQueue(); $("proj-status").className="muted"; $("proj-status").textContent="저장됨"; }
     catch(e){ $("proj-status").className="err"; $("proj-status").textContent=e.message; }
     finally { $("proj-save").disabled=false; }
   };
@@ -817,7 +865,7 @@ const PAGE = `<!doctype html>
   $("run").onclick=async function(){
     var p=null; for (var i=0;i<projects.length;i++) if (projects[i].id===selId) p=projects[i];
     if(!p) p={source:"sample",sheetUrl:"",baseUrl:""};
-    var body={ source:p.source, aiInterpret:$("run-ai").checked, sheetUrl:p.sheetUrl||"", csvText:p.csvText||"", baseUrl:p.baseUrl||"", env:p.env||"", username:p.username||"", password:p.password||"", referenceRepo:p.referenceRepo||"" };
+    var body={ source:p.source, aiInterpret:$("run-ai").checked, sheetUrl:p.sheetUrl||"", csvText:p.csvText||"", baseUrl:p.baseUrl||"", env:p.env||"", username:p.username||"", password:p.password||"", referenceRepo:p.referenceRepo||"", projectId:selId };
     $("run").disabled=true; $("status").className="muted"; $("status").textContent="실제 브라우저로 실행 중…";
     try { var res=await fetch("/api/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); var data=await res.json(); if(!res.ok) throw new Error(data.error||"실행 실패"); $("status").textContent="완료"; render(data); loadQueue(); }
     catch(e){ $("status").textContent=""; $("out").innerHTML='<div class="card err">오류: '+esc(e.message)+'</div>'; }
@@ -846,17 +894,17 @@ const PAGE = `<!doctype html>
     renderWarnings(s.warnings); renderChat(s.chat); renderMapping(s.mapping);
   }
   $("connect").onclick=async function(){
-    var body={ mode: authMode==="key"?"apikey":(authMode==="token"?"token":"codex"), token:$("token")?$("token").value.trim():"", apiKey:$("apiKey")?$("apiKey").value.trim():"" };
+    var body={ mode: authMode==="key"?"apikey":(authMode==="token"?"token":"codex"), token:$("token")?$("token").value.trim():"", apiKey:$("apiKey")?$("apiKey").value.trim():"", projectId:selId };
     $("connect").disabled=true; $("auth-status").className="muted"; $("auth-status").textContent="연결 중…";
     try { var res=await fetch("/api/auth",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"연결 실패"); $("auth-status").textContent=""; renderStatus(d); }
     catch(e){ $("auth-status").className="err"; $("auth-status").textContent=e.message; }
     finally { $("connect").disabled=false; }
   };
-  $("refine-reset").onclick=async function(){ try { var res=await fetch("/api/refine/reset",{method:"POST"}); renderStatus(await res.json()); $("refine-status").textContent=""; } catch(e){ $("refine-status").className="err"; $("refine-status").textContent=e.message; } };
+  $("refine-reset").onclick=async function(){ try { var res=await fetch("/api/refine/reset",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({projectId:selId})}); renderStatus(await res.json()); $("refine-status").textContent=""; } catch(e){ $("refine-status").className="err"; $("refine-status").textContent=e.message; } };
   $("refine").onclick=async function(){
     var ins=$("instruction").value.trim(); if(!ins){ $("refine-status").className="err"; $("refine-status").textContent="지시를 입력하세요."; return; }
     $("refine").disabled=true; $("refine-status").className="muted"; $("refine-status").textContent="AI가 규칙을 다듬는 중…";
-    try { var res=await fetch("/api/refine",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instruction:ins})}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"실패");
+    try { var res=await fetch("/api/refine",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instruction:ins,projectId:selId})}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"실패");
       $("instruction").value=""; renderChat(d.chat); renderWarnings(d.warnings); renderIntents(d.ruleVersion,d.intents); renderMapping(d.mapping);
       $("refine-status").className="muted"; $("refine-status").innerHTML=(d.changed?"규칙 v"+d.ruleVersion+" 갱신 · ":"변경 없음 · ")+diffText(d.diff);
     } catch(e){ $("refine-status").className="err"; $("refine-status").textContent=e.message; }
@@ -867,7 +915,7 @@ const PAGE = `<!doctype html>
     var p=null; for (var i=0;i<projects.length;i++) if (projects[i].id===selId) p=projects[i];
     if(!p||p.source!=="sheet"||!p.sheetUrl){ $("analyze-status").className="err"; $("analyze-status").textContent="실행 탭에서 시트 프로젝트를 먼저 선택하세요."; return; }
     $("analyze").disabled=true; $("analyze-status").className="muted"; $("analyze-status").textContent="시트 헤더를 AI가 해석하는 중…";
-    try { var res=await fetch("/api/sheet/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({sheetUrl:p.sheetUrl})}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"실패");
+    try { var res=await fetch("/api/sheet/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({sheetUrl:p.sheetUrl,projectId:selId})}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"실패");
       renderMapping(d.mapping); renderChat(d.chat); renderWarnings(d.warnings);
       $("analyze-status").className="muted"; $("analyze-status").textContent="헤더: "+(d.headers||[]).join(", ");
     } catch(e){ $("analyze-status").className="err"; $("analyze-status").textContent=e.message; }
@@ -892,16 +940,15 @@ const PAGE = `<!doctype html>
     $("review").innerHTML=out;
     var btns=$("review").querySelectorAll(".approve"); for (var i=0;i<btns.length;i++) btns[i].onclick=function(){ approve(this.getAttribute("data-case"), this); };
   }
-  async function loadQueue(){ try { var res=await fetch("/api/review/queue"); renderQueue(await res.json()); } catch(e){} }
+  async function loadQueue(){ try { var res=await fetch("/api/review/queue?projectId="+encodeURIComponent(selId)); renderQueue(await res.json()); } catch(e){} }
   async function approve(caseId, btn){ if(btn){ btn.disabled=true; btn.textContent="승인 중…"; }
-    try { var res=await fetch("/api/review/approve",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({caseId:caseId})}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"승인 실패"); renderQueue(d.queue); }
+    try { var res=await fetch("/api/review/approve",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({caseId:caseId,projectId:selId})}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"승인 실패"); renderQueue(d.queue); }
     catch(e){ if(btn){ btn.disabled=false; btn.textContent="baseline 승인"; } alert(e.message); }
   }
 
   // init
-  fetch("/api/projects").then(function(r){return r.json();}).then(fillProjects).catch(function(){});
-  fetch("/api/status").then(function(r){return r.json();}).then(renderStatus).catch(function(){});
-  loadQueue();
+  function refreshStatus(){ fetch("/api/status?projectId="+encodeURIComponent(selId)).then(function(r){return r.json();}).then(renderStatus).catch(function(){}); }
+  fetch("/api/projects").then(function(r){return r.json();}).then(function(list){ fillProjects(list); refreshStatus(); loadQueue(); }).catch(function(){ refreshStatus(); loadQueue(); });
 </script>
 </body></html>`;
 
