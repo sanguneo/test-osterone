@@ -66,13 +66,25 @@ export function csvToRawTable(text: string): RawTable {
 }
 
 const FIELD_ALIASES: Record<TcField, string[]> = {
-	id: ["test id", "tc id", "case id", "tcid", "id"],
-	title: ["title", "name", "summary", "test case", "scenario"],
-	step: ["steps", "step", "actions", "action", "procedure"],
-	expected: ["expected result", "expected", "result", "assertion"],
-	priority: ["priority", "prio", "severity"],
-	role: ["role", "persona", "account", "user"],
-	env: ["environment", "env", "stage"],
+	id: ["test id", "tc id", "case id", "tcid", "id", "번호", "순번"],
+	title: ["title", "name", "summary", "test case", "scenario", "소분류", "테스트 항목", "항목", "제목", "시나리오명"],
+	step: [
+		"steps",
+		"step",
+		"actions",
+		"action",
+		"procedure",
+		"사전조건",
+		"절차",
+		"단계",
+		"재현 절차",
+		"테스트 절차",
+		"시나리오",
+	],
+	expected: ["expected result", "expected", "result", "assertion", "예상결과", "기대결과", "기대 결과"],
+	priority: ["priority", "prio", "severity", "중요도", "우선순위"],
+	role: ["role", "persona", "account", "user", "담당자"],
+	env: ["environment", "env", "stage", "환경"],
 };
 
 /** Deterministic header→field mapping: exact alias match first, then substring. */

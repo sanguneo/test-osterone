@@ -100,3 +100,20 @@ test("ingestGoogleSheet fetches the CSV export and ingests it", async () => {
 	expect(all).toHaveLength(1);
 	expect(all[0]?.title).toBe("t");
 });
+
+test("mapColumns + ingest handle Korean QA headers (번호/소분류/사전조건/예상결과/중요도)", () => {
+	const csv =
+		'번호,대분류,소분류,중요도,사전조건,예상결과\n1,전자결재,첨부파일,상,"1. 인쇄버튼 접근\n2. 파일 내보내기",첨부되어야함\n';
+	const m = mapColumns(csvToRawTable(csv).headers);
+	expect(m.id).toBe("번호");
+	expect(m.title).toBe("소분류");
+	expect(m.step).toBe("사전조건");
+	expect(m.expected).toBe("예상결과");
+	expect(m.priority).toBe("중요도");
+	const { unique } = ingestCsv(csv);
+	expect(unique).toHaveLength(1);
+	expect(unique[0]?.title).toBe("첨부파일");
+	expect(unique[0]?.steps).toEqual(["1. 인쇄버튼 접근", "2. 파일 내보내기"]);
+	expect(unique[0]?.expected).toBe("첨부되어야함");
+	expect(unique[0]?.priority).toBe("상");
+});
