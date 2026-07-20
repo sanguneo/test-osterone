@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserPage } from "../../execute/browser-page.ts";
+import { BrowserPage, launchBrowser } from "../../execute/browser-page.ts";
 import { runScenario, type Verdict } from "../../execute/runner.ts";
 import { ingestCsv, ingestGoogleSheet } from "../../intake/ingest.ts";
 import type { NormalizedTC } from "../../intake/schema.ts";
@@ -101,6 +101,13 @@ interface ReviewItem {
 // needs_review (+error) evidence from the latest run, awaiting human approval.
 const reviewQueue = new Map<string, ReviewItem>();
 
+// One headless Chromium reused across runs (a fresh context per run) — no per-run cold start.
+let browserInstance: Awaited<ReturnType<typeof launchBrowser>> | null = null;
+async function sharedBrowser(): Promise<Awaited<ReturnType<typeof launchBrowser>>> {
+	if (!browserInstance) browserInstance = await launchBrowser(true);
+	return browserInstance;
+}
+
 function statusPayload(): Record<string, unknown> {
 	return {
 		connected: !!modelClient,
@@ -173,7 +180,7 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 	const caseById = new Map(cases.map((c) => [c.caseId, c]));
 	for (const c of cases) reviewQueue.delete(c.caseId);
 	const cache = new MemoryAssertionCache();
-	const page = await BrowserPage.create({ baseUrl, headless: true, timeoutMs: 4000 });
+	const page = await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser() });
 	const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
 	const results: CaseView[] = [];
 	try {
@@ -593,7 +600,13 @@ async function main(): Promise<number> {
 		for (const r of view.results) console.log(`  ${r.verdict.padEnd(13)} ${r.passed}/${r.total}  ${r.title}`);
 		const ok = view.counts.pass === 2 && view.counts.fail === 1 && view.counts.needs_review === 1;
 		console.log(ok ? "SELFTEST OK" : "SELFTEST MISMATCH");
+		await browserInstance?.close();
 		return ok ? 0 : 1;
+	}
+	for (const sig of ["SIGINT", "SIGTERM"] as const) {
+		process.on(sig, () => {
+			void browserInstance?.close().finally(() => process.exit(0));
+		});
 	}
 	const port = Number(process.env.PORT ?? 8686);
 	createServer((req, res) => {

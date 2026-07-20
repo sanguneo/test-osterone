@@ -2,7 +2,7 @@
 
 export { VERSION } from "./cli.ts";
 export { type ExecutionRow, SqliteEvidenceStore } from "./evidence/evidence.ts";
-export { BrowserPage, type BrowserPageOptions } from "./execute/browser-page.ts";
+export { BrowserPage, type BrowserPageOptions, launchBrowser } from "./execute/browser-page.ts";
 export { type FakeAction, FakePage, type Page, type PageSnapshot } from "./execute/page.ts";
 export {
 	determinismView,

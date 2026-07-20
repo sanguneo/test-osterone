@@ -18,6 +18,13 @@ export interface BrowserPageOptions {
 	headless?: boolean;
 	viewport?: { width: number; height: number };
 	timeoutMs?: number;
+	/** Reuse a shared browser (a fresh context is created per page); close() then only closes the context. */
+	browser?: Browser;
+}
+
+/** Launch a standalone Chromium the caller owns and reuses across runs (avoids per-run cold starts). */
+export function launchBrowser(headless = true): Promise<Browser> {
+	return chromium.launch({ headless });
 }
 
 export class BrowserPage implements Page {
@@ -27,13 +34,22 @@ export class BrowserPage implements Page {
 		private readonly pwPage: PwPage,
 		private readonly baseUrl: string,
 		private readonly timeoutMs: number,
+		private readonly ownsBrowser: boolean,
 	) {}
 
 	static async create(opts: BrowserPageOptions): Promise<BrowserPage> {
-		const browser = await chromium.launch({ headless: opts.headless ?? true });
+		const ownsBrowser = !opts.browser;
+		const browser = opts.browser ?? (await chromium.launch({ headless: opts.headless ?? true }));
 		const context = await browser.newContext({ viewport: opts.viewport ?? { width: 1280, height: 800 } });
 		const pwPage = await context.newPage();
-		return new BrowserPage(browser, context, pwPage, opts.baseUrl.replace(/\/$/, ""), opts.timeoutMs ?? 5000);
+		return new BrowserPage(
+			browser,
+			context,
+			pwPage,
+			opts.baseUrl.replace(/\/$/, ""),
+			opts.timeoutMs ?? 5000,
+			ownsBrowser,
+		);
 	}
 
 	async goto(path: string): Promise<void> {
@@ -76,6 +92,6 @@ export class BrowserPage implements Page {
 
 	async close(): Promise<void> {
 		await this.context.close();
-		await this.browser.close();
+		if (this.ownsBrowser) await this.browser.close();
 	}
 }
