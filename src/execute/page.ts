@@ -11,6 +11,8 @@ export interface PageSnapshot {
 	text: string;
 	/** DOM/HTML snapshot used for evidence + content-addressed refs. */
 	html: string;
+	/** Optional base64 PNG data URL (real browser only) — evidence for human review. */
+	screenshot?: string;
 }
 
 export interface Page {

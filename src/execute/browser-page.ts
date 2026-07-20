@@ -54,7 +54,11 @@ export class BrowserPage implements Page {
 			.locator("body")
 			.innerText()
 			.catch(() => "");
-		return { url: this.pwPage.url(), text, html: await this.pwPage.content() };
+		const screenshot = await this.pwPage
+			.screenshot({ type: "png" })
+			.then((buf) => `data:image/png;base64,${buf.toString("base64")}`)
+			.catch(() => undefined);
+		return { url: this.pwPage.url(), text, html: await this.pwPage.content(), screenshot };
 	}
 
 	/** Self-heal candidate ranking: try the most specific locator first, widen to raw css last. */

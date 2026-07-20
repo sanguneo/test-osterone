@@ -127,6 +127,8 @@ The deterministic engine runs each case against real headless Chromium and rende
 
 **AI step interpretation.** Tick **AI 스텝 해석** on a run to let the connected model turn free natural-language steps (no quotes, no DSL) into a deterministic plan (actions + assertions). The plan is **authored once and cached**, then the engine replays it deterministically — identical `pass` / `fail` / `needs_review` semantics, false-pass still 0. The bundled sample ships a quote-free variant to demonstrate it.
 
+**Review queue.** `needs_review` cases surface with their evidence — a **screenshot**, the page text, and the reason (self-heal, missing baseline, …). Approve the baseline once and a matching re-run **passes**; if the page drifts it is re-flagged. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
+
 ## Architecture
 
 - **Runtime:** single Node/TS stack (Playwright), shipped as a **single binary** via Bun.

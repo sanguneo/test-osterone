@@ -12,7 +12,8 @@ import { type AssertionCache, type AssertionResult, evaluateAssertion } from "..
 import type { AuthoredPlan } from "../interpret/author.ts";
 import { getOrAuthorAssertions, parseStep } from "../interpret/interpret.ts";
 import type { InterpretationRule } from "../interpret/rule.ts";
-import type { Page } from "./page.ts";
+import type { MemoryBaselineStore } from "../judge/baseline.ts";
+import type { Page, PageSnapshot } from "./page.ts";
 
 export type Verdict = "pass" | "fail" | "needs_review" | "error";
 
@@ -37,6 +38,7 @@ export interface StructuredResult {
 	scenarioHash: string;
 	attempts: number;
 	env: RunEnv;
+	snapshot?: PageSnapshot;
 }
 
 export interface RunOptions {
@@ -49,6 +51,10 @@ export interface RunOptions {
 	now?: () => number;
 	/** Pre-authored plan (AI author-time). When present, replaces deterministic step parsing + assertions. */
 	plan?: AuthoredPlan;
+	/** Optional golden-baseline store: an approved match lifts a needs_review to pass; drift keeps it. */
+	baseline?: MemoryBaselineStore;
+	/** Stable env key for baselines (defaults to env.baseUrl, which may be ephemeral). */
+	baselineEnv?: string;
 }
 
 function round2(n: number): number {
@@ -112,6 +118,15 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			confidence = round2(1 - passRatio);
 		}
 
+		if (verdict === "needs_review" && opts.baseline) {
+			const env = opts.baselineEnv ?? opts.env.baseUrl;
+			// gate() proposes a pending baseline on first sight; an approved + masked match lifts to pass.
+			if (opts.baseline.gate(tc.caseId, opts.rule.ruleVersion, env, snap.text).status === "match") {
+				verdict = "pass";
+				confidence = 0.9;
+			}
+		}
+
 		return {
 			...base,
 			verdict,
@@ -121,6 +136,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			healEvents,
 			timing: { ms: now() - start },
 			attempts: 1,
+			snapshot: snap,
 		};
 	} catch (err) {
 		return {

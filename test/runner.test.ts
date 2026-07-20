@@ -5,6 +5,7 @@ import type { NormalizedTC } from "../src/intake/schema.ts";
 import { MemoryAssertionCache } from "../src/interpret/assertion.ts";
 import { getOrAuthorAssertions } from "../src/interpret/interpret.ts";
 import { bumpRuleVersion, establishRuleFromHeaders } from "../src/interpret/rule.ts";
+import { MemoryBaselineStore } from "../src/judge/baseline.ts";
 
 const RULE = establishRuleFromHeaders(["Test ID", "Title", "Steps", "Expected Result", "Role", "Environment"]);
 const ENV: RunEnv = { browser: "fake", viewport: "1280x800", baseUrl: "http://fixture" };
@@ -138,4 +139,26 @@ test("plan: a provided AI plan replays its actions + assertions and ignores raw 
 	expect(r.verdict).toBe("pass");
 	expect(r.assertions).toHaveLength(1);
 	expect(r.assertions[0]?.passed).toBe(true);
+});
+
+test("baseline gate: unapproved stays needs_review; approving lifts a matching re-run to pass", async () => {
+	const store = new MemoryBaselineStore(() => 0);
+	const tc = loginTC({ contentHash: "hash-baseline", steps: ["Navigate to /login", 'Click "Nonexistent Button"'] });
+	const run2 = () =>
+		runScenario(tc, {
+			page: new FakePage({ url: "", text: "", html: "" }, loginReducer),
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			baseline: store,
+			baselineEnv: "test",
+		});
+	const first = await run2(); // heal -> needs_review; gate proposes a pending baseline
+	expect(first.verdict).toBe("needs_review");
+	store.approve(tc.caseId, RULE.ruleVersion, "test");
+	const second = await run2(); // approved + same masked snapshot -> pass
+	expect(second.verdict).toBe("pass");
+	expect(second.confidence).toBe(0.9);
 });

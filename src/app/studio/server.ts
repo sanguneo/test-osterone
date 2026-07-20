@@ -23,6 +23,7 @@ import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
 import { getOrAuthorPlan, MemoryPlanCache } from "../../interpret/author.ts";
 import { establishRuleFromHeaders, type InterpretationRule, refineRule, ruleLint } from "../../interpret/rule.ts";
+import { MemoryBaselineStore } from "../../judge/baseline.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
 import { ApiKeyModelClient, type ModelClient, type ModelMessage } from "../../model/model-client.ts";
 import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
@@ -84,6 +85,21 @@ let rule: InterpretationRule = establishRuleFromHeaders([]);
 const refineChat: ModelMessage[] = [];
 // AI-authored plans, cached author-once per (case, rule version) so re-runs are deterministic.
 const planCache = new MemoryPlanCache();
+const baseline = new MemoryBaselineStore();
+
+interface ReviewItem {
+	caseId: string;
+	title: string;
+	verdict: Verdict;
+	reason: string;
+	url: string;
+	text: string;
+	screenshot?: string;
+	ruleVersion: number;
+	env: string;
+}
+// needs_review (+error) evidence from the latest run, awaiting human approval.
+const reviewQueue = new Map<string, ReviewItem>();
 
 function statusPayload(): Record<string, unknown> {
 	return {
@@ -153,6 +169,9 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 	const ai = !!input.aiInterpret;
 	if (ai && !modelClient) throw new Error("Connect a model first to use AI step interpretation.");
 	const { cases, baseUrl, stop } = await loadCases(input);
+	const baselineEnv = input.source === "sample" ? "sample" : baseUrl;
+	const caseById = new Map(cases.map((c) => [c.caseId, c]));
+	for (const c of cases) reviewQueue.delete(c.caseId);
 	const cache = new MemoryAssertionCache();
 	const page = await BrowserPage.create({ baseUrl, headless: true, timeoutMs: 4000 });
 	const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
@@ -166,7 +185,29 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 				cache,
 				env: { browser: "chromium", viewport: "1280x800", baseUrl },
 				plan,
+				baseline,
+				baselineEnv,
 			});
+			if (r.verdict === "needs_review" || r.verdict === "error") {
+				const reason = r.healEvents.length
+					? `self-heal: ${r.healEvents[0]?.split(":")[0]}`
+					: r.verdict === "error"
+						? (r.errorInfo ?? "error")
+						: r.assertions.length === 0
+							? "no assertions authored"
+							: "baseline pending approval";
+				reviewQueue.set(r.caseId, {
+					caseId: r.caseId,
+					title: caseById.get(r.caseId)?.title || r.caseId,
+					verdict: r.verdict,
+					reason,
+					url: r.snapshot?.url ?? "",
+					text: (r.snapshot?.text ?? "").slice(0, 600),
+					screenshot: r.snapshot?.screenshot,
+					ruleVersion: r.ruleVersion,
+					env: baselineEnv,
+				});
+			}
 			counts[r.verdict] += 1;
 			results.push({
 				caseId: r.caseId,
@@ -273,6 +314,22 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
 	}
+	if (req.method === "GET" && url.pathname === "/api/review/queue") {
+		return send(res, 200, JSON.stringify([...reviewQueue.values()]));
+	}
+	if (req.method === "POST" && url.pathname === "/api/review/approve") {
+		try {
+			const { caseId } = JSON.parse((await readBody(req)) || "{}") as { caseId?: string };
+			const item = caseId ? reviewQueue.get(caseId) : undefined;
+			if (!item) return send(res, 404, JSON.stringify({ error: "unknown case in review queue" }));
+			// The run's gate() already proposed a full-text pending baseline; approving flips it.
+			baseline.approve(item.caseId, item.ruleVersion, item.env);
+			reviewQueue.delete(item.caseId);
+			return send(res, 200, JSON.stringify({ approved: true, caseId: item.caseId, queue: [...reviewQueue.values()] }));
+		} catch (err) {
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
 	return send(res, 404, JSON.stringify({ error: "not found" }));
 }
 
@@ -310,6 +367,11 @@ const PAGE = `<!doctype html>
   .detail { color:var(--dim); font-size:12.5px; margin-top:3px; } .detail .x{ color:var(--fail);} .detail .o{ color:var(--pass);}
   .heal { color:var(--review); font-size:12px; } .muted{ color:var(--dim); } .err{ color:var(--fail); }
   code { background:#12151a; padding:1px 6px; border-radius:5px; }
+  .rev-item { border:1px solid var(--line); border-radius:10px; padding:12px; margin-top:10px; display:flex; gap:14px; }
+  .rev-item img { width:200px; height:auto; border:1px solid var(--line); border-radius:6px; align-self:flex-start; }
+  .rev-body { flex:1; min-width:0; } .rev-body .why { color:var(--review); font-size:12.5px; margin:4px 0; }
+  .rev-body .txt { color:var(--dim); font-size:12px; white-space:pre-wrap; max-height:96px; overflow:auto; background:#12151a; padding:6px 8px; border-radius:6px; }
+  .approve { margin-top:10px; padding:8px 16px; background:var(--lime); color:#10130a; border:0; border-radius:8px; font-weight:700; cursor:pointer; }
   .chatlog { max-height:220px; overflow:auto; margin:10px 0; display:flex; flex-direction:column; gap:8px; }
   .msg { padding:8px 11px; border-radius:8px; font-size:13.5px; max-width:88%; }
   .msg.u { align-self:flex-end; background:#22303a; } .msg.a { align-self:flex-start; background:#12151a; border:1px solid var(--line); }
@@ -371,6 +433,7 @@ const PAGE = `<!doctype html>
     <span id="status" class="muted" style="margin-left:12px"></span>
   </div>
   <div id="out"></div>
+  <div id="review"></div>
 </main>
 <script>
   var mode = "sample";
@@ -410,11 +473,41 @@ const PAGE = `<!doctype html>
       var data = await res.json();
       if (!res.ok) throw new Error(data.error || "실행 실패");
       $("status").textContent = "완료";
-      render(data);
+      render(data); loadQueue();
     } catch (e) {
       $("status").textContent = ""; $("out").innerHTML = '<div class="card err">오류: '+esc(e.message)+'</div>';
     } finally { $("run").disabled = false; }
   };
+
+  function renderQueue(items){
+    if (!items || !items.length){ $("review").innerHTML=""; return; }
+    var out = '<div class="card"><div class="summary"><b>리뷰 큐 (needs_review)</b> <span class="muted">'+items.length+'건 · 증거 확인 후 승인하면 재실행 시 통과</span></div>';
+    items.forEach(function(it){
+      out += '<div class="rev-item" id="rev-'+esc(it.caseId)+'">';
+      if (it.screenshot) out += '<img src="'+it.screenshot+'" alt="screenshot" />';
+      out += '<div class="rev-body"><div>'+badge(it.verdict)+' <b>'+esc(it.title)+'</b></div>';
+      out += '<div class="why">사유: '+esc(it.reason)+(it.url?' · '+esc(it.url):'')+'</div>';
+      out += '<div class="txt">'+esc(it.text||'(빈 페이지)')+'</div>';
+      out += '<button class="approve" data-case="'+esc(it.caseId)+'">baseline 승인</button>';
+      out += '</div></div>';
+    });
+    out += '</div>';
+    $("review").innerHTML = out;
+    var btns = $("review").querySelectorAll(".approve");
+    for (var i=0;i<btns.length;i++) btns[i].onclick = function(){ approve(this.getAttribute("data-case"), this); };
+  }
+  async function loadQueue(){
+    try { var res = await fetch("/api/review/queue"); renderQueue(await res.json()); } catch(e){}
+  }
+  async function approve(caseId, btn){
+    if (btn){ btn.disabled = true; btn.textContent = "승인 중…"; }
+    try {
+      var res = await fetch("/api/review/approve", { method:"POST", headers:{"content-type":"application/json"}, body: JSON.stringify({ caseId: caseId }) });
+      var data = await res.json(); if(!res.ok) throw new Error(data.error||"승인 실패");
+      renderQueue(data.queue);
+    } catch(e){ if(btn){ btn.disabled=false; btn.textContent="baseline 승인"; } alert(e.message); }
+  }
+  loadQueue();
 
   var authMode = "codex";
   function setAuthMode(m){ authMode=m;
