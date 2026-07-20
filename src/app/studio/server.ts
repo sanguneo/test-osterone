@@ -652,7 +652,13 @@ const PAGE = `<!doctype html>
 
     <section id="tab-projects" class="tab active">
       <h2 class="sec">프로젝트</h2>
-      <div class="card"><div id="proj-list"></div></div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <b>저장된 프로젝트</b>
+          <button id="proj-add" class="run" type="button" style="margin-top:0;padding:8px 14px;font-size:13px">+ 새 프로젝트</button>
+        </div>
+        <div id="proj-list"></div>
+      </div>
       <div class="card">
         <b id="proj-editor-title">새 프로젝트</b>
         <input type="hidden" id="proj-id" />
@@ -815,6 +821,7 @@ const PAGE = `<!doctype html>
   $("ps-csv").onclick=function(){ setEditSource("csv"); };
   function newProject(){ ["proj-name","proj-sheet","proj-csv","proj-base","proj-env","proj-user","proj-pass","proj-repo"].forEach(function(id){ $(id).value=""; }); $("proj-id").value=""; $("proj-ai").checked=false; setEditSource("sample"); $("proj-editor-title").textContent="새 프로젝트"; $("proj-status").className="muted"; $("proj-status").textContent=""; $("proj-preview").innerHTML=""; }
   $("proj-new").onclick=newProject;
+  $("proj-add").onclick=function(){ newProject(); $("proj-name").focus(); };
   function editProject(id){ var p=null; for (var i=0;i<projects.length;i++) if (projects[i].id===id) p=projects[i]; if(!p) return;
     $("proj-id").value=p.id; $("proj-name").value=p.name; $("proj-sheet").value=p.sheetUrl||""; $("proj-csv").value=p.csvText||""; $("proj-base").value=p.baseUrl||""; $("proj-env").value=p.env||""; $("proj-user").value=p.username||""; $("proj-pass").value=p.password||""; $("proj-repo").value=p.referenceRepo||""; $("proj-ai").checked=!!p.aiInterpret; setEditSource(p.source); $("proj-editor-title").textContent="프로젝트 편집"; $("proj-preview").innerHTML="";
   }
