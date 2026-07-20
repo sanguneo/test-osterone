@@ -3,3 +3,5 @@ dist/
 *.exe
 *.log
 .DS_Store
+
+.ui-craft/
