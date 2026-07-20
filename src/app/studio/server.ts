@@ -21,7 +21,10 @@ import { runScenario, type Verdict } from "../../execute/runner.ts";
 import { ingestCsv, ingestGoogleSheet } from "../../intake/ingest.ts";
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
-import { establishRuleFromHeaders } from "../../interpret/rule.ts";
+import { establishRuleFromHeaders, type InterpretationRule, refineRule } from "../../interpret/rule.ts";
+import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
+import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts";
+import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
 import { startFixture } from "../../testing/fixture-app.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -54,6 +57,52 @@ export interface RunInput {
 
 const history: RunView[] = [];
 
+const DEFAULT_OAUTH_MODEL = "gpt-5.6-sol";
+const DEFAULT_APIKEY_MODEL = "gpt-4o-mini";
+
+interface AuthState {
+	mode: string;
+	accountId?: string;
+	model: string;
+}
+interface AuthInput {
+	mode?: "codex" | "token" | "apikey";
+	token?: string;
+	apiKey?: string;
+	model?: string;
+}
+
+let modelClient: ModelClient | null = null;
+let auth: AuthState | null = null;
+// Server-held interpretation rule; AI "rule refine" mutates it and later runs use it.
+let rule: InterpretationRule = establishRuleFromHeaders([]);
+
+function statusPayload(): Record<string, unknown> {
+	return { connected: !!modelClient, auth, ruleVersion: rule.ruleVersion, intents: rule.intents };
+}
+
+/** Provision a model client from Codex login / pasted token / API key. */
+function connect(input: AuthInput): AuthState {
+	const mode = input.mode ?? "codex";
+	if (mode === "apikey") {
+		const apiKey = (input.apiKey ?? "").trim();
+		if (!apiKey) throw new Error("API key is required.");
+		const model = input.model?.trim() || DEFAULT_APIKEY_MODEL;
+		modelClient = new ApiKeyModelClient({ apiKey, model });
+		return { mode: "api-key", model };
+	}
+	let accessToken = (input.token ?? "").trim();
+	if (!accessToken && mode === "codex") {
+		const login = readCodexLogin();
+		if (!login) throw new Error("No local Codex login found — run `codex login`, or paste a token.");
+		accessToken = login.accessToken;
+	}
+	if (!accessToken) throw new Error("Access token is required.");
+	const model = input.model?.trim() || (mode === "codex" ? readCodexModel() : undefined) || DEFAULT_OAUTH_MODEL;
+	modelClient = new OAuthProxyModelClient({ accessToken, model });
+	return { mode: mode === "codex" ? "codex (oauth)" : "oauth token", accountId: getCodexAccountId(accessToken), model };
+}
+
 async function loadCases(input: RunInput): Promise<{ cases: NormalizedTC[]; baseUrl: string; stop: () => void }> {
 	if (input.source === "sheet") {
 		if (!input.sheetUrl) throw new Error("Google Sheet URL is required.");
@@ -70,7 +119,6 @@ async function loadCases(input: RunInput): Promise<{ cases: NormalizedTC[]; base
 /** Ingest → rule → run each case against a real headless browser. Pure engine reuse. */
 export async function runBatch(input: RunInput): Promise<RunView> {
 	const { cases, baseUrl, stop } = await loadCases(input);
-	const rule = establishRuleFromHeaders([]); // intents drive interpretation; column mapping already applied at ingest
 	const cache = new MemoryAssertionCache();
 	const page = await BrowserPage.create({ baseUrl, headless: true, timeoutMs: 4000 });
 	const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
@@ -138,6 +186,39 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
 	}
+	if (req.method === "GET" && url.pathname === "/api/status") {
+		return send(res, 200, JSON.stringify(statusPayload()));
+	}
+	if (req.method === "POST" && url.pathname === "/api/auth") {
+		try {
+			auth = connect(JSON.parse((await readBody(req)) || "{}") as AuthInput);
+			return send(res, 200, JSON.stringify(statusPayload()));
+		} catch (err) {
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
+	if (req.method === "POST" && url.pathname === "/api/refine") {
+		if (!modelClient) return send(res, 400, JSON.stringify({ error: "Connect a model first." }));
+		try {
+			const { instruction } = JSON.parse((await readBody(req)) || "{}") as { instruction?: string };
+			if (!instruction?.trim()) return send(res, 400, JSON.stringify({ error: "Instruction is required." }));
+			const result = await refineRule(rule, instruction, modelClient);
+			rule = result.rule;
+			return send(
+				res,
+				200,
+				JSON.stringify({
+					message: result.message,
+					changed: result.changed,
+					ruleVersion: rule.ruleVersion,
+					intents: rule.intents,
+				}),
+			);
+		} catch (err) {
+			console.error("refine failed:", (err as Error).stack ?? err);
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
 	return send(res, 404, JSON.stringify({ error: "not found" }));
 }
 
@@ -156,6 +237,8 @@ const PAGE = `<!doctype html>
   label { display:block; font-size:13px; color:var(--dim); margin:12px 0 6px; }
   input[type=text] { width:100%; padding:10px 12px; background:#12151a; border:1px solid var(--line);
       border-radius:8px; color:var(--ink); font-size:14px; }
+  textarea { width:100%; padding:10px 12px; background:#12151a; border:1px solid var(--line);
+      border-radius:8px; color:var(--ink); font-size:14px; font-family:inherit; resize:vertical; }
   .row { display:flex; gap:18px; flex-wrap:wrap; } .row > div { flex:1 1 260px; }
   .modes { display:flex; gap:10px; margin-bottom:4px; }
   .modes button { flex:1; padding:10px; border:1px solid var(--line); background:#12151a; color:var(--dim);
@@ -178,6 +261,28 @@ const PAGE = `<!doctype html>
 <header><h1>test-osterone <span style="color:var(--lime)">Studio</span></h1>
   <span class="tag">AI가 쓰고, 결정적 엔진이 판정합니다 — 터미널 없이</span></header>
 <main>
+  <div class="card" id="model-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <b>모델 연결 <span class="muted" style="font-weight:400">· AI 규칙 다듬기용 (선택)</span></b>
+      <span id="auth-badge" class="chip muted">미연결</span>
+    </div>
+    <div class="modes" style="margin-top:12px">
+      <button id="a-codex" class="on" type="button">Codex 로그인</button>
+      <button id="a-token" type="button">토큰 직접 입력</button>
+      <button id="a-key" type="button">API Key</button>
+    </div>
+    <div id="a-token-f" style="display:none"><label>ChatGPT/Codex 액세스 토큰</label><input id="token" type="text" placeholder="eyJ…" /></div>
+    <div id="a-key-f" style="display:none"><label>OpenAI API Key</label><input id="apiKey" type="text" placeholder="sk-…" /></div>
+    <button id="connect" class="run" type="button" style="margin-top:14px">연결</button>
+    <span id="auth-status" class="muted" style="margin-left:12px"></span>
+    <div id="refine-box" style="display:none;margin-top:18px;border-top:1px solid var(--line);padding-top:16px">
+      <label>AI로 규칙 다듬기 <span class="muted">예: "click은 '누르기'로도 인식해"</span></label>
+      <textarea id="instruction" rows="2" placeholder="자연어로 규칙 지시…"></textarea>
+      <button id="refine" class="run" type="button" style="margin-top:10px">다듬기</button>
+      <span id="refine-status" class="muted" style="margin-left:12px"></span>
+      <div id="intents" class="detail" style="margin-top:10px"></div>
+    </div>
+  </div>
   <div class="card">
     <div class="modes">
       <button id="m-sample" class="on" type="button">샘플로 실행 (번들 데모)</button>
@@ -238,6 +343,58 @@ const PAGE = `<!doctype html>
       $("status").textContent = ""; $("out").innerHTML = '<div class="card err">오류: '+esc(e.message)+'</div>';
     } finally { $("run").disabled = false; }
   };
+
+  var authMode = "codex";
+  function setAuthMode(m){ authMode=m;
+    ["codex","token","key"].forEach(function(x){ $("a-"+x).classList.toggle("on", x===m); });
+    $("a-token-f").style.display = m==="token"?"block":"none";
+    $("a-key-f").style.display = m==="key"?"block":"none";
+  }
+  $("a-codex").onclick=function(){setAuthMode("codex");};
+  $("a-token").onclick=function(){setAuthMode("token");};
+  $("a-key").onclick=function(){setAuthMode("key");};
+
+  function renderIntents(ruleVersion, intents){
+    $("intents").innerHTML = "규칙 v"+ruleVersion+" · " + Object.keys(intents||{}).map(function(k){ return "<code>"+esc(k)+"</code> "+esc((intents[k]||[]).join(", ")); }).join("&nbsp;&nbsp;");
+  }
+  function renderStatus(s){
+    if (s.connected && s.auth){
+      $("auth-badge").className="chip"; $("auth-badge").style.color="var(--lime)";
+      $("auth-badge").textContent="연결됨 · "+s.auth.mode+(s.auth.accountId?(" · "+s.auth.accountId):"")+" · "+s.auth.model;
+      $("refine-box").style.display="block";
+    } else {
+      $("auth-badge").className="chip muted"; $("auth-badge").style.color=""; $("auth-badge").textContent="미연결";
+      $("refine-box").style.display="none";
+    }
+    if (s.intents) renderIntents(s.ruleVersion, s.intents);
+  }
+
+  $("connect").onclick=async function(){
+    var body={ mode: authMode==="key"?"apikey":(authMode==="token"?"token":"codex"),
+      token: $("token")?$("token").value.trim():"", apiKey: $("apiKey")?$("apiKey").value.trim():"" };
+    $("connect").disabled=true; $("auth-status").className="muted"; $("auth-status").textContent="연결 중…";
+    try {
+      var res=await fetch("/api/auth",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
+      var data=await res.json(); if(!res.ok) throw new Error(data.error||"연결 실패");
+      $("auth-status").textContent=""; renderStatus(data);
+    } catch(e){ $("auth-status").className="err"; $("auth-status").textContent=e.message; }
+    finally { $("connect").disabled=false; }
+  };
+
+  $("refine").onclick=async function(){
+    var ins=$("instruction").value.trim();
+    if(!ins){ $("refine-status").className="err"; $("refine-status").textContent="지시를 입력하세요."; return; }
+    $("refine").disabled=true; $("refine-status").className="muted"; $("refine-status").textContent="AI가 규칙을 다듬는 중…";
+    try {
+      var res=await fetch("/api/refine",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instruction:ins})});
+      var data=await res.json(); if(!res.ok) throw new Error(data.error||"실패");
+      $("refine-status").className="muted"; $("refine-status").textContent=(data.changed?"규칙 갱신됨 · ":"변경 없음 · ")+(data.message||"");
+      renderIntents(data.ruleVersion, data.intents);
+    } catch(e){ $("refine-status").className="err"; $("refine-status").textContent=e.message; }
+    finally { $("refine").disabled=false; }
+  };
+
+  fetch("/api/status").then(function(r){return r.json();}).then(renderStatus).catch(function(){});
 </script>
 </body></html>`;
 

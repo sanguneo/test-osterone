@@ -13,7 +13,7 @@ export interface OAuthProxyOptions {
 	baseUrl?: string;
 	model: string;
 	fetchImpl?: typeof fetch;
-	maxTokens?: number;
+
 	originator?: string;
 }
 
@@ -78,7 +78,7 @@ export class OAuthProxyModelClient implements ModelClient {
 	private readonly accessToken: string;
 	private readonly model: string;
 	private readonly fetchImpl: typeof fetch;
-	private readonly maxTokens: number;
+
 	private readonly originator: string;
 
 	constructor(opts: OAuthProxyOptions) {
@@ -86,7 +86,7 @@ export class OAuthProxyModelClient implements ModelClient {
 		this.accessToken = opts.accessToken;
 		this.model = opts.model;
 		this.fetchImpl = opts.fetchImpl ?? fetch;
-		this.maxTokens = opts.maxTokens ?? 512;
+
 		this.originator = opts.originator ?? "codex_cli_rs";
 	}
 
@@ -117,7 +117,6 @@ export class OAuthProxyModelClient implements ModelClient {
 				model: this.model,
 				instructions,
 				input,
-				max_output_tokens: this.maxTokens,
 				stream: true,
 				store: false,
 			}),
