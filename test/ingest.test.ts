@@ -117,3 +117,12 @@ test("mapColumns + ingest handle Korean QA headers (번호/소분류/사전조�
 	expect(unique[0]?.expected).toBe("첨부되어야함");
 	expect(unique[0]?.priority).toBe("상");
 });
+
+test("ingestCsv applies a mapping override (AI-refined rule.mapping) over auto-detection", () => {
+	const csv = "col_a,col_b,col_c\nT1,do the thing,it works\n";
+	expect(ingestCsv(csv).unique[0]?.title).toBe(""); // headers don't auto-map
+	const over = ingestCsv(csv, { title: "col_a", step: "col_b", expected: "col_c" }).unique[0];
+	expect(over?.title).toBe("T1");
+	expect(over?.steps).toEqual(["do the thing"]);
+	expect(over?.expected).toBe("it works");
+});

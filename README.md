@@ -129,6 +129,8 @@ The deterministic engine runs each case against real headless Chromium and rende
 
 **AI step interpretation.** Tick **AI 스텝 해석** on a run to let the connected model turn free natural-language steps (no quotes, no DSL) into a deterministic plan (actions + assertions). The plan is **authored once and cached**, then the engine replays it deterministically — identical `pass` / `fail` / `needs_review` semantics, false-pass still 0. The bundled sample ships a quote-free variant to demonstrate it.
 
+**AI sheet interpretation (column mapping).** For a Google Sheet project, **시트 해석** in the AI Rules tab sends the sheet's headers + a sample row to the model, which proposes a column mapping (`id/title/step/expected/priority/…` → your header names) and writes it into the rule. You can adjust it conversationally ("use 중분류 as the title, not 소분류"). Crucially the mapping is **applied at ingestion**, so a conversationally-established interpretation actually drives how the sheet is read — verified live against a Korean QA sheet.
+
 **Review queue.** `needs_review` cases surface with their evidence — a **screenshot**, the page text, and the reason (self-heal, missing baseline, …). Approve the baseline once and a matching re-run **passes**; if the page drifts it is re-flagged. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
 
 ## Architecture

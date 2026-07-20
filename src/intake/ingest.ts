@@ -163,9 +163,16 @@ export function dedupe(tcs: NormalizedTC[]): DedupeResult {
 	return { unique, duplicates };
 }
 
-/** Convenience: CSV text → normalized + deduped cases. */
-export function ingestCsv(text: string): { all: NormalizedTC[] } & DedupeResult {
-	const all = normalizeTable(csvToRawTable(text));
+/** Convenience: CSV text → normalized + deduped cases. `mappingOverride` (e.g. an AI-refined
+ * rule.mapping) wins over auto-detected columns, so a conversationally-established sheet
+ * interpretation actually drives ingestion. */
+export function ingestCsv(
+	text: string,
+	mappingOverride: Partial<Record<TcField, string>> = {},
+): { all: NormalizedTC[] } & DedupeResult {
+	const table = csvToRawTable(text);
+	const mapping = { ...mapColumns(table.headers), ...mappingOverride };
+	const all = normalizeTable(table, mapping);
 	return { all, ...dedupe(all) };
 }
 
@@ -181,8 +188,9 @@ export function toCsvExportUrl(sheetUrl: string): string {
 export async function ingestGoogleSheet(
 	sheetUrl: string,
 	fetchImpl: typeof fetch = fetch,
+	mappingOverride: Partial<Record<TcField, string>> = {},
 ): Promise<{ all: NormalizedTC[] } & DedupeResult> {
 	const res = await fetchImpl(toCsvExportUrl(sheetUrl));
 	if (!res.ok) throw new Error(`gsheet fetch failed: ${res.status}`);
-	return ingestCsv(await res.text());
+	return ingestCsv(await res.text(), mappingOverride);
 }

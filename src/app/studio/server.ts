@@ -19,7 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserPage, launchBrowser } from "../../execute/browser-page.ts";
 import { runScenario, type Verdict } from "../../execute/runner.ts";
-import { ingestCsv, ingestGoogleSheet } from "../../intake/ingest.ts";
+import { csvToRawTable, ingestCsv, ingestGoogleSheet, toCsvExportUrl } from "../../intake/ingest.ts";
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
 import { getOrAuthorPlan, MemoryPlanCache } from "../../interpret/author.ts";
@@ -160,6 +160,7 @@ function statusPayload(): Record<string, unknown> {
 		auth,
 		ruleVersion: rule.ruleVersion,
 		intents: rule.intents,
+		mapping: rule.mapping,
 		warnings: ruleLint(rule),
 		chat: refineChat,
 	};
@@ -208,7 +209,7 @@ async function loadCases(input: RunInput): Promise<{ cases: NormalizedTC[]; base
 		if (!input.sheetUrl) throw new Error("Google Sheet URL is required.");
 		const baseUrl = (input.baseUrl ?? "").replace(/\/$/, "");
 		if (!baseUrl) throw new Error("Target site URL is required.");
-		const { unique } = await ingestGoogleSheet(input.sheetUrl);
+		const { unique } = await ingestGoogleSheet(input.sheetUrl, undefined, rule.mapping);
 		if (unique.length === 0) throw new Error("No test cases found in the sheet (check sharing = anyone with link).");
 		return { cases: unique, baseUrl, stop: () => {} };
 	}
@@ -357,6 +358,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 					changed: result.changed,
 					ruleVersion: rule.ruleVersion,
 					intents: rule.intents,
+					mapping: rule.mapping,
 					diff: intentDiff(prev, rule),
 					warnings: ruleLint(rule),
 					chat: refineChat,
@@ -364,6 +366,45 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			);
 		} catch (err) {
 			console.error("refine failed:", (err as Error).stack ?? err);
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
+	if (req.method === "POST" && url.pathname === "/api/sheet/analyze") {
+		if (!modelClient) return send(res, 400, JSON.stringify({ error: "Connect a model first." }));
+		try {
+			const { sheetUrl } = JSON.parse((await readBody(req)) || "{}") as { sheetUrl?: string };
+			if (!sheetUrl?.trim()) return send(res, 400, JSON.stringify({ error: "Sheet URL is required." }));
+			const csvRes = await fetch(toCsvExportUrl(sheetUrl));
+			if (!csvRes.ok) return send(res, 400, JSON.stringify({ error: `sheet fetch failed: ${csvRes.status}` }));
+			const table = csvToRawTable(await csvRes.text());
+			if (table.headers.length === 0) return send(res, 400, JSON.stringify({ error: "no headers in sheet" }));
+			const sample = table.rows[0] ?? {};
+			const instruction =
+				`Map this spreadsheet's columns to test-case fields. Set "mapping" to {field: EXACT header name} for any of ` +
+				`id,title,step,expected,priority,role,env that a column matches; omit fields with no column. ` +
+				`Headers: ${JSON.stringify(table.headers)}. Example row: ${JSON.stringify(sample)}.`;
+			const result = await refineRule(rule, instruction, modelClient, [...refineChat]);
+			rule = result.rule;
+			refineChat.push(
+				{ role: "user", content: `시트 해석 요청 · 헤더: ${table.headers.join(", ")}` },
+				{ role: "assistant", content: result.message },
+			);
+			if (refineChat.length > 20) refineChat.splice(0, refineChat.length - 20);
+			return send(
+				res,
+				200,
+				JSON.stringify({
+					headers: table.headers,
+					sample,
+					mapping: rule.mapping,
+					ruleVersion: rule.ruleVersion,
+					message: result.message,
+					warnings: ruleLint(rule),
+					chat: refineChat,
+				}),
+			);
+		} catch (err) {
+			console.error("analyze failed:", (err as Error).stack ?? err);
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
 	}
@@ -539,6 +580,14 @@ const PAGE = `<!doctype html>
       <div class="card">
         <div id="rules-locked" class="muted">먼저 <b>모델 연결</b> 탭에서 모델을 연결하세요.</div>
         <div id="refine-box" style="display:none">
+          <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <b>시트 해석 (열 매핑)</b>
+              <button id="analyze" class="mini" type="button">선택 프로젝트 시트 AI 해석</button>
+            </div>
+            <div id="mapping" class="detail" style="margin-top:6px">(매핑 없음)</div>
+            <span id="analyze-status" class="muted"></span>
+          </div>
           <div style="display:flex;justify-content:space-between;align-items:center">
             <label style="margin:0">지시 <span class="muted">예: "누르기도 click으로", "그건 되돌려"</span></label>
             <button id="refine-reset" type="button" class="linkbtn">초기화</button>
@@ -651,6 +700,7 @@ const PAGE = `<!doctype html>
   function renderWarnings(w){ $("warnings").innerHTML=(w||[]).map(function(x){ return '<span class="warn">⚠ '+esc(x)+'</span>'; }).join(""); }
   function renderChat(chat){ $("chat").innerHTML=(chat||[]).map(function(m){ return '<div class="msg '+(m.role==="user"?"u":"a")+'">'+esc(m.content)+'</div>'; }).join(""); $("chat").scrollTop=$("chat").scrollHeight; }
   function diffText(diff){ return Object.keys(diff||{}).map(function(k){ var d=diff[k],s=[]; if(d.added&&d.added.length)s.push('<span class="add">+'+esc(d.added.join(", "))+'</span>'); if(d.removed&&d.removed.length)s.push('<span class="rem">-'+esc(d.removed.join(", "))+'</span>'); return "<code>"+esc(k)+"</code> "+s.join(" "); }).join("&nbsp;&nbsp;"); }
+  function renderMapping(m){ var keys=Object.keys(m||{}); $("mapping").innerHTML = keys.length ? keys.map(function(k){ return "<code>"+esc(k)+"</code> → "+esc(m[k]); }).join("&nbsp;&nbsp;") : "(매핑 없음 — 헤더 자동감지 사용)"; }
   function renderStatus(s){
     var on = s.connected && s.auth;
     $("auth-badge").className = on?"chip":"chip muted"; $("auth-badge").style.color = on?"var(--lime)":"";
@@ -659,7 +709,7 @@ const PAGE = `<!doctype html>
     $("rules-locked").style.display = on?"none":"block";
     $("refine-box").style.display = on?"block":"none";
     if (s.intents) renderIntents(s.ruleVersion, s.intents);
-    renderWarnings(s.warnings); renderChat(s.chat);
+    renderWarnings(s.warnings); renderChat(s.chat); renderMapping(s.mapping);
   }
   $("connect").onclick=async function(){
     var body={ mode: authMode==="key"?"apikey":(authMode==="token"?"token":"codex"), token:$("token")?$("token").value.trim():"", apiKey:$("apiKey")?$("apiKey").value.trim():"" };
@@ -673,10 +723,21 @@ const PAGE = `<!doctype html>
     var ins=$("instruction").value.trim(); if(!ins){ $("refine-status").className="err"; $("refine-status").textContent="지시를 입력하세요."; return; }
     $("refine").disabled=true; $("refine-status").className="muted"; $("refine-status").textContent="AI가 규칙을 다듬는 중…";
     try { var res=await fetch("/api/refine",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instruction:ins})}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"실패");
-      $("instruction").value=""; renderChat(d.chat); renderWarnings(d.warnings); renderIntents(d.ruleVersion,d.intents);
+      $("instruction").value=""; renderChat(d.chat); renderWarnings(d.warnings); renderIntents(d.ruleVersion,d.intents); renderMapping(d.mapping);
       $("refine-status").className="muted"; $("refine-status").innerHTML=(d.changed?"규칙 v"+d.ruleVersion+" 갱신 · ":"변경 없음 · ")+diffText(d.diff);
     } catch(e){ $("refine-status").className="err"; $("refine-status").textContent=e.message; }
     finally { $("refine").disabled=false; }
+  };
+
+  $("analyze").onclick=async function(){
+    var p=null; for (var i=0;i<projects.length;i++) if (projects[i].id===selId) p=projects[i];
+    if(!p||p.source!=="sheet"||!p.sheetUrl){ $("analyze-status").className="err"; $("analyze-status").textContent="실행 탭에서 시트 프로젝트를 먼저 선택하세요."; return; }
+    $("analyze").disabled=true; $("analyze-status").className="muted"; $("analyze-status").textContent="시트 헤더를 AI가 해석하는 중…";
+    try { var res=await fetch("/api/sheet/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({sheetUrl:p.sheetUrl})}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"실패");
+      renderMapping(d.mapping); renderChat(d.chat); renderWarnings(d.warnings);
+      $("analyze-status").className="muted"; $("analyze-status").textContent="헤더: "+(d.headers||[]).join(", ");
+    } catch(e){ $("analyze-status").className="err"; $("analyze-status").textContent=e.message; }
+    finally { $("analyze").disabled=false; }
   };
 
   // ---- review queue ----
