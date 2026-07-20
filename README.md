@@ -120,7 +120,7 @@ bun run studio     # then open http://localhost:8686
 
 Model connection is **global** (connect once, applies everywhere). Everything else is **per-project** and isolated (each project has its own rule/mapping, refine conversation, baselines, and review queue). Sidebar: global **모델 연결 (Model)** + a current-project selector, then per-project steps **1 프로젝트 정보 → 2 규칙·해석 → 3 실행 & 결과 → 4 리뷰 큐**:
 
-- **Projects** — save a reusable project: **name, source (sample / Google Sheet / pasted CSV), target site URL, environment, test account (id/password), reference repo, default AI toggle**. Persisted to `~/.test-osterone/studio-projects.json`; the bundled **샘플 (sample)** project is always available. The account + repo are passed to AI step interpretation as context (e.g. to author login steps).
+- **Projects** — save a reusable project: **name, one or more TC sources (Google Sheet URL / pasted CSV / uploaded `.xlsx` — pick which sheets), target site URL, environment, test account (id/password), reference repo, default AI toggle**. Multiple sources are ingested and **de-duplicated across all of them**. Persisted to `~/.test-osterone/studio-projects.json`; the account + repo are passed to AI step interpretation as context.
 - **TC read & dedupe** — **TC 읽기 & 중복 확인** ingests the project's sheet/CSV with the current column mapping and shows the detected columns, the structured cases, and **which cases were de-duplicated**, before you run.
 - **Run** — pick a project, optionally tick **AI 스텝 해석**, and **실행 (Run)**.
 

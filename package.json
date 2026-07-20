@@ -29,6 +29,7 @@
 		"typescript": "^7.0.2"
 	},
 	"dependencies": {
-		"playwright": "^1.61.1"
+		"playwright": "^1.61.1",
+		"xlsx": "^0.18.5"
 	}
 }
