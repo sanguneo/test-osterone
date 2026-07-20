@@ -25,9 +25,12 @@ async function j<T>(url: string, opts?: RequestInit): Promise<T> {
 const q = (pid: string) => `projectId=${encodeURIComponent(pid)}`;
 
 export const api = {
+	sheetContent: (projectId: string, sheetId: string) =>
+		j<{ csvText: string }>(`/api/sheet/content?projectId=${encodeURIComponent(projectId)}&sheetId=${encodeURIComponent(sheetId)}`),
 	status: (pid: string) => j<Status>(`/api/status?${q(pid)}`),
-	history: (pid: string) => j<RunView[]>(`/api/history?${q(pid)}`),
-	connect: (body: { mode: string; token?: string; apiKey?: string; model?: string; projectId: string }) =>
+	history: (pid: string, sheetId?: string) =>
+		j<RunView[]>(`/api/history?${q(pid)}${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ""}`),
+	connect: (body: { mode: string; token?: string; apiKey?: string; model?: string; baseUrl?: string; projectId: string }) =>
 		j<Status>("/api/auth", post(body)),
 	projects: () => j<Project[]>("/api/projects"),
 	saveProject: (p: Partial<Project> & { projectId: string; sample?: boolean }) =>
@@ -36,13 +39,16 @@ export const api = {
 	preview: (cfg: RunInput) => j<PreviewResult>("/api/tc/preview", post(cfg)),
 	refine: (instruction: string, projectId: string) => j<RefineResult>("/api/refine", post({ instruction, projectId })),
 	refineReset: (projectId: string) => j<Status>("/api/refine/reset", post({ projectId })),
-	analyze: (body: { sheetUrl?: string; csvText?: string; projectId: string }) =>
+	analyze: (body: { sheetUrl?: string; csvText?: string; projectId: string; sheetId: string }) =>
 		j<AnalyzeResult>("/api/sheet/analyze", post(body)),
-	reviewQueue: (pid: string) => j<ReviewItem[]>(`/api/review/queue?${q(pid)}`),
-	reviewApprove: (caseId: string, projectId: string) =>
-		j<{ queue: ReviewItem[] }>("/api/review/approve", post({ caseId, projectId })),
-	reviewApproveAll: (projectId: string) =>
-		j<{ approved: number; queue: ReviewItem[] }>("/api/review/approve-all", post({ projectId })),
+	reviewQueue: (pid: string, sheetId?: string, all?: boolean) =>
+		j<ReviewItem[]>(
+			`/api/review/queue?${q(pid)}${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ""}${all ? "&all=1" : ""}`,
+		),
+	reviewApprove: (caseId: string, projectId: string, sheetId?: string) =>
+		j<{ queue: ReviewItem[] }>("/api/review/approve", post({ caseId, projectId, sheetId })),
+	reviewApproveAll: (projectId: string, sheetId?: string) =>
+		j<{ approved: number; queue: ReviewItem[] }>("/api/review/approve-all", post({ projectId, sheetId })),
 	xlsxConvert: (base64: string) => j<{ sheets: XlsxSheet[] }>("/api/xlsx/convert", post({ base64 })),
 
 	/** Stream a run: emits start / case / done / error events as they arrive. */

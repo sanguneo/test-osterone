@@ -17,6 +17,11 @@ export interface AuthoredPlan {
 	assertions: Assertion[];
 }
 
+export interface PlanCacheEntry {
+	key: string;
+	plan: AuthoredPlan;
+}
+
 export interface PlanCache {
 	get(key: string): AuthoredPlan | undefined;
 	set(key: string, plan: AuthoredPlan): void;
@@ -30,6 +35,17 @@ export class MemoryPlanCache implements PlanCache {
 	}
 	set(key: string, plan: AuthoredPlan): void {
 		this.store.set(key, structuredClone(plan));
+	}
+
+	/** Snapshot every cached plan for durable persistence. */
+	entries(): PlanCacheEntry[] {
+		return [...this.store.entries()].map(([key, plan]) => ({ key, plan: structuredClone(plan) }));
+	}
+
+	/** Replace cached plans from a persisted snapshot (keeps deterministic replay across restarts). */
+	load(entries: PlanCacheEntry[]): void {
+		this.store.clear();
+		for (const { key, plan } of entries) this.store.set(key, structuredClone(plan));
 	}
 }
 

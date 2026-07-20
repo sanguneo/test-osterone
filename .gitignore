@@ -17,5 +17,8 @@ dist/
 AGENTS.md
 GEMINI.md
 
+# gjc workflow session/runtime state (not product)
+.gjc/
+
 # session handover (meta, not product)
 HANDOVER.md

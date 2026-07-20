@@ -6,6 +6,7 @@ export function RulesPanel({
 	status,
 	selId,
 	project,
+	selSheetId,
 	connected,
 	onStatus,
 	goToModel,
@@ -13,6 +14,7 @@ export function RulesPanel({
 	status: Status | null;
 	selId: string;
 	project?: Project;
+	selSheetId: string;
 	connected: boolean;
 	onStatus: (s: Status) => void;
 	goToModel: () => void;
@@ -47,7 +49,7 @@ export function RulesPanel({
 	}
 
 	async function analyze() {
-		const src = project?.sources?.[0];
+		const src = project?.sheets?.find((s) => s.id === selSheetId) ?? project?.sheets?.[0];
 		if (!src) {
 			setAnalyzeMsg("TC 소스가 있는 프로젝트를 먼저 선택하세요.");
 			return;
@@ -57,7 +59,9 @@ export function RulesPanel({
 		setAnalyzeMsg("시트 헤더를 AI가 해석하는 중…");
 		try {
 			const d = await api.analyze(
-				src.kind === "sheet" ? { sheetUrl: src.sheetUrl, projectId: selId } : { csvText: src.csvText, projectId: selId },
+				src.kind === "sheet"
+					? { sheetUrl: src.sheetUrl, projectId: selId, sheetId: src.id }
+					: { csvText: src.csvText, projectId: selId, sheetId: src.id },
 			);
 			setAnalyzeMsg(`헤더: ${d.headers.join(", ")}`);
 			onStatus(await api.status(selId));
@@ -116,6 +120,9 @@ export function RulesPanel({
 								.map(([k, v]) => `${k}→${v}`)
 								.join("   ")
 						: "(매핑 없음 — 헤더 자동감지 사용)"}
+				</div>
+				<div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+					AI 열 매핑은 <b>이 시트</b>에 저장됩니다 (프로젝트 규칙과 별개).
 				</div>
 				{analyzeMsg && (
 					<div className={analyzeErr ? "err" : "muted"} style={{ marginTop: 4, fontSize: 12.5 }}>

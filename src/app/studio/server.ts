@@ -30,13 +30,25 @@ import {
 } from "../../intake/ingest.ts";
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
-import { getOrAuthorPlan, MemoryPlanCache } from "../../interpret/author.ts";
+import { getOrAuthorPlan } from "../../interpret/author.ts";
 import { establishRuleFromHeaders, type InterpretationRule, refineRule, ruleLint } from "../../interpret/rule.ts";
-import { MemoryBaselineStore } from "../../judge/baseline.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
-import { ApiKeyModelClient, type ModelClient, type ModelMessage } from "../../model/model-client.ts";
+import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts";
 import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
 import { startFixture } from "../../testing/fixture-app.ts";
+import { deleteProjectSheets, deleteSheetContent, readSheetContent, writeSheetContent } from "./sheet-store.ts";
+import {
+	type CaseView,
+	deleteProjectState,
+	loadProjectState,
+	newProjectState,
+	type ProjectState,
+	persistProjectState,
+	type ReviewItem,
+	type RunView,
+	resolveSheetId,
+	sheetState,
+} from "./store.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bundledCases = join(here, "../../testing/sample-cases.csv");
@@ -86,35 +98,22 @@ const XLSX = createRequire(import.meta.url)("xlsx") as {
 	utils: { sheet_to_csv: (ws: unknown) => string };
 };
 
-interface CaseView {
-	caseId: string;
-	title: string;
-	verdict: Verdict;
-	confidence: number;
-	passed: number;
-	total: number;
-	heal: string[];
-	assertions: { detail: string; passed: boolean }[];
-}
-
-interface RunView {
-	at: number;
-	source: string;
-	baseUrl: string;
-	interpreter: "ai" | "rule";
-	counts: Record<Verdict, number>;
-	results: CaseView[];
-}
-
-export interface TcSource {
+export interface TestSheet {
+	id: string;
+	name: string;
 	kind: "sheet" | "csv";
-	label: string;
 	sheetUrl: string;
 	csvText: string;
+	baseUrl?: string;
+	env?: string;
+	mapping?: InterpretationRule["mapping"];
 }
 export interface RunInput {
 	sample?: boolean;
-	sources?: TcSource[];
+	sheets?: TestSheet[];
+	/** @deprecated legacy alias for `sheets`; accepted for one release. */
+	sources?: TestSheet[];
+	sheetId?: string;
 	baseUrl?: string;
 	env?: string;
 	username?: string;
@@ -130,53 +129,47 @@ interface AuthState {
 	mode: string;
 	accountId?: string;
 	model: string;
+	endpoint?: string;
 }
 interface AuthInput {
 	mode?: "codex" | "token" | "apikey";
 	token?: string;
 	apiKey?: string;
 	model?: string;
+	baseUrl?: string;
 }
 
 let modelClient: ModelClient | null = null;
 let auth: AuthState | null = null;
 
-interface ReviewItem {
-	caseId: string;
-	title: string;
-	verdict: Verdict;
-	reason: string;
-	url: string;
-	text: string;
-	screenshot?: string;
-	ruleVersion: number;
-	env: string;
-}
-
-/** Per-project runtime state: interpretation rule, refine conversation, caches, baselines, review queue, history. */
-interface ProjectState {
-	rule: InterpretationRule;
-	refineChat: ModelMessage[];
-	planCache: MemoryPlanCache;
-	baseline: MemoryBaselineStore;
-	reviewQueue: Map<string, ReviewItem>;
-	history: RunView[];
-}
 const projectStates = new Map<string, ProjectState>();
 function stateFor(projectId: string): ProjectState {
 	let st = projectStates.get(projectId);
 	if (!st) {
-		st = {
-			rule: establishRuleFromHeaders([]),
-			refineChat: [],
-			planCache: new MemoryPlanCache(),
-			baseline: new MemoryBaselineStore(),
-			reviewQueue: new Map(),
-			history: [],
-		};
+		st = newProjectState();
+		// Sample is an ephemeral bundled demo — never persist it, so selftest determinism holds.
+		if (projectId !== "sample") {
+			const project = allProjects().find((p) => p.id === projectId);
+			const defaultSheetId = resolveSheetId(project);
+			loadProjectState(projectId, st, undefined, defaultSheetId);
+			if (project) {
+				const ids = new Set(project.sheets.map((s) => s.id));
+				for (const k of [...st.sheets.keys()]) if (!ids.has(k)) st.sheets.delete(k);
+			}
+		}
 		projectStates.set(projectId, st);
 	}
 	return st;
+}
+
+/** Persist a project's runtime state (best-effort). Sample stays ephemeral. */
+function saveState(projectId: string, st: ProjectState): void {
+	if (projectId === "sample") return;
+	try {
+		persistProjectState(projectId, st);
+	} catch (err) {
+		console.error("state persist failed:", (err as Error).message);
+	}
 }
 
 // One headless Chromium reused across runs (a fresh context per run) — no per-run cold start.
@@ -189,7 +182,7 @@ async function sharedBrowser(): Promise<Awaited<ReturnType<typeof launchBrowser>
 interface Project {
 	id: string;
 	name: string;
-	sources: TcSource[];
+	sheets: TestSheet[];
 	baseUrl: string;
 	env: string;
 	username: string;
@@ -201,7 +194,7 @@ interface Project {
 const SAMPLE_PROJECT: Project = {
 	id: "sample",
 	name: "샘플 (번들 데모)",
-	sources: [],
+	sheets: [{ id: "sample-sheet", name: "샘플 케이스", kind: "csv", sheetUrl: "", csvText: "" }],
 	baseUrl: "",
 	env: "sample",
 	username: "",
@@ -223,27 +216,56 @@ function persistProjects(): void {
 	mkdirSync(dirname(projectsFile), { recursive: true });
 	writeFileSync(projectsFile, JSON.stringify(userProjects, null, 2));
 }
-function sanitizeSource(raw: unknown): TcSource {
+const SHEET_MAP_FIELDS = new Set(["id", "title", "step", "expected", "priority", "role", "env"]);
+function sanitizeSheetMapping(raw: unknown): InterpretationRule["mapping"] {
 	const o = (raw ?? {}) as Record<string, unknown>;
-	return {
-		kind: o.kind === "csv" ? "csv" : "sheet",
-		label: String(o.label ?? "").slice(0, 60),
+	const out: Record<string, string> = {};
+	for (const [k, v] of Object.entries(o)) {
+		if (SHEET_MAP_FIELDS.has(k) && typeof v === "string" && v.trim()) out[k] = v.trim().slice(0, 60);
+	}
+	return out as InterpretationRule["mapping"];
+}
+function sanitizeSheet(raw: unknown): TestSheet {
+	const o = (raw ?? {}) as Record<string, unknown>;
+	const kind = o.kind === "csv" ? "csv" : "sheet";
+	const sheet: TestSheet = {
+		id: typeof o.id === "string" && o.id ? o.id : `sh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+		name: String(o.name ?? o.label ?? (kind === "sheet" ? "시트" : "CSV")).slice(0, 60),
+		kind,
 		sheetUrl: String(o.sheetUrl ?? "").slice(0, 500),
 		csvText: String(o.csvText ?? "").slice(0, 200000),
 	};
+	const baseUrl = String(o.baseUrl ?? "")
+		.slice(0, 300)
+		.trim();
+	if (baseUrl) sheet.baseUrl = baseUrl;
+	const env = String(o.env ?? "")
+		.slice(0, 60)
+		.trim();
+	if (env) sheet.env = env;
+	const mapping = sanitizeSheetMapping(o.mapping);
+	if (Object.keys(mapping).length) sheet.mapping = mapping;
+	return sheet;
 }
 function sanitizeProject(raw: unknown): Project {
 	const o = (raw ?? {}) as Record<string, unknown>;
-	let sources: TcSource[] = [];
-	if (Array.isArray(o.sources)) sources = o.sources.map(sanitizeSource).slice(0, 20);
+	let sheets: TestSheet[] = [];
+	if (Array.isArray(o.sheets)) sheets = o.sheets.map(sanitizeSheet);
+	else if (Array.isArray(o.sources))
+		sheets = o.sources.map((s, i) => {
+			const sh = sanitizeSheet(s);
+			const so = (s ?? {}) as Record<string, unknown>;
+			if (!(typeof so.id === "string" && so.id)) sh.id = `sh_mig_${i}`;
+			return sh;
+		});
 	else if (o.source === "sheet" && o.sheetUrl)
-		sources = [{ kind: "sheet", label: "시트", sheetUrl: String(o.sheetUrl), csvText: "" }];
+		sheets = [sanitizeSheet({ id: "sh_mig_0", kind: "sheet", name: "시트", sheetUrl: String(o.sheetUrl) })];
 	else if (o.source === "csv" && o.csvText)
-		sources = [{ kind: "csv", label: "CSV", sheetUrl: "", csvText: String(o.csvText) }];
+		sheets = [sanitizeSheet({ id: "sh_mig_0", kind: "csv", name: "CSV", csvText: String(o.csvText) })];
 	return {
 		id: typeof o.id === "string" && o.id ? o.id : `p_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
 		name: String(o.name ?? "Untitled").slice(0, 80),
-		sources,
+		sheets,
 		baseUrl: String(o.baseUrl ?? "").slice(0, 300),
 		env: String(o.env ?? "").slice(0, 60),
 		username: String(o.username ?? "").slice(0, 120),
@@ -254,6 +276,22 @@ function sanitizeProject(raw: unknown): Project {
 }
 let userProjects: Project[] = loadProjects();
 const allProjects = (): Project[] => [SAMPLE_PROJECT, ...userProjects];
+try {
+	let _migrated = false;
+	for (const proj of userProjects) {
+		if (proj.id === "sample") continue;
+		for (const sh of proj.sheets) {
+			if (sh.kind === "csv" && sh.csvText) {
+				writeSheetContent(proj.id, sh.id, sh.csvText);
+				sh.csvText = "";
+				_migrated = true;
+			}
+		}
+	}
+	if (_migrated) persistProjects();
+} catch (err) {
+	console.error("sheet content migration failed:", (err as Error).message);
+}
 
 function statusPayload(projectId: string): Record<string, unknown> {
 	const st = stateFor(projectId);
@@ -292,8 +330,9 @@ function connect(input: AuthInput): AuthState {
 		const apiKey = (input.apiKey ?? "").trim();
 		if (!apiKey) throw new Error("API key is required.");
 		const model = input.model?.trim() || DEFAULT_APIKEY_MODEL;
-		modelClient = new ApiKeyModelClient({ apiKey, model });
-		return { mode: "api-key", model };
+		const baseUrl = input.baseUrl?.trim() || undefined;
+		modelClient = new ApiKeyModelClient({ apiKey, model, baseUrl });
+		return { mode: "api-key", model, endpoint: baseUrl ?? "https://api.openai.com/v1" };
 	}
 	let accessToken = (input.token ?? "").trim();
 	if (!accessToken && mode === "codex") {
@@ -307,6 +346,10 @@ function connect(input: AuthInput): AuthState {
 	return { mode: mode === "codex" ? "codex (oauth)" : "oauth token", accountId: getCodexAccountId(accessToken), model };
 }
 
+/** Fill in a CSV sheet's content from its offloaded file when the caller sent it empty (metadata only). */
+function hydrateSheets(projectId: string, sheets: TestSheet[]): TestSheet[] {
+	return sheets.map((s) => (s.kind === "csv" && !s.csvText ? { ...s, csvText: readSheetContent(projectId, s.id) } : s));
+}
 async function loadCases(
 	input: RunInput,
 	mapping: InterpretationRule["mapping"],
@@ -314,7 +357,8 @@ async function loadCases(
 	if (!input.sample) {
 		const baseUrl = (input.baseUrl ?? "").replace(/\/$/, "");
 		if (!baseUrl) throw new Error("Target site URL is required.");
-		const { unique } = await ingestSources(input.sources ?? [], mapping);
+		const sheets = hydrateSheets(input.projectId ?? "sample", input.sheets ?? input.sources ?? []);
+		const { unique } = await ingestSources(sheets, mapping);
 		if (unique.length === 0) throw new Error("No test cases found (add a TC source; check headers / column mapping).");
 		return { cases: unique, baseUrl, stop: () => {} };
 	}
@@ -323,9 +367,9 @@ async function loadCases(
 	return { cases: ingestCsv(readFileSync(file, "utf8")).unique, baseUrl: fixture.url, stop: fixture.stop };
 }
 
-/** Ingest + combine every TC source of a project, then dedupe across all of them. */
+/** Ingest a sheet's source and dedupe within it (per-sheet). */
 async function ingestSources(
-	sources: TcSource[],
+	sources: TestSheet[],
 	mapping: InterpretationRule["mapping"],
 ): Promise<{ all: NormalizedTC[]; unique: NormalizedTC[]; duplicates: DedupeResult["duplicates"] }> {
 	const all: NormalizedTC[] = [];
@@ -352,11 +396,17 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 	const st = stateFor(input.projectId ?? "sample");
 	const ai = !!input.aiInterpret;
 	if (ai && !modelClient) throw new Error("Connect a model first to use AI step interpretation.");
-	const { cases, baseUrl, stop } = await loadCases(input, st.rule.mapping);
+	const project = allProjects().find((p) => p.id === (input.projectId ?? "sample"));
+	const sheet = input.sheets?.[0];
+	const sid = input.sheetId ?? resolveSheetId(project, input.sheetId) ?? "__default__";
+	const effMapping = { ...st.rule.mapping, ...(sheet?.mapping ?? {}) };
+	const runInput: RunInput = { ...input, baseUrl: sheet?.baseUrl || input.baseUrl };
+	const { cases, baseUrl, stop } = await loadCases(runInput, effMapping);
 	onProgress?.({ type: "start", total: cases.length, baseUrl, interpreter: ai ? "ai" : "rule" });
-	const baselineEnv = input.env?.trim() || (input.sample ? "sample" : baseUrl);
+	const baselineEnv = (sheet?.env || input.env)?.trim() || (input.sample ? "sample" : baseUrl);
 	const caseById = new Map(cases.map((c) => [c.caseId, c]));
-	for (const c of cases) st.reviewQueue.delete(c.caseId);
+	const sheetSt = sheetState(st, sid);
+	for (const c of cases) sheetSt.reviewQueue.delete(c.caseId);
 	const cache = new MemoryAssertionCache();
 	const page = await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser() });
 	const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
@@ -390,7 +440,7 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 						: r.assertions.length === 0
 							? "no assertions authored"
 							: "baseline pending approval";
-				st.reviewQueue.set(r.caseId, {
+				sheetSt.reviewQueue.set(r.caseId, {
 					caseId: r.caseId,
 					title: caseById.get(r.caseId)?.title || r.caseId,
 					verdict: r.verdict,
@@ -400,6 +450,7 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 					screenshot: r.snapshot?.screenshot,
 					ruleVersion: r.ruleVersion,
 					env: baselineEnv,
+					sheetId: sid,
 				});
 			}
 			counts[r.verdict] += 1;
@@ -427,9 +478,11 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 		interpreter: ai ? "ai" : "rule",
 		counts,
 		results,
+		sheetId: sid,
 	};
-	st.history.unshift(view);
-	if (st.history.length > 20) st.history.length = 20;
+	sheetSt.history.unshift(view);
+	if (sheetSt.history.length > 20) sheetSt.history.length = 20;
+	saveState(input.projectId ?? "sample", st);
 	return view;
 }
 
@@ -454,7 +507,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		return serveStatic(res, url.pathname);
 	}
 	if (req.method === "GET" && url.pathname === "/api/history") {
-		return send(res, 200, JSON.stringify(stateFor(url.searchParams.get("projectId") || "sample").history));
+		const pid = url.searchParams.get("projectId") || "sample";
+		const st = stateFor(pid);
+		const project = allProjects().find((p) => p.id === pid);
+		const sid = resolveSheetId(project, url.searchParams.get("sheetId") ?? undefined);
+		return send(res, 200, JSON.stringify(sheetState(st, sid).history));
 	}
 	if (req.method === "POST" && url.pathname === "/api/run") {
 		const input = JSON.parse((await readBody(req)) || "{}") as RunInput;
@@ -488,6 +545,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		const st = stateFor(pid);
 		st.refineChat.length = 0;
 		st.rule = establishRuleFromHeaders([]);
+		saveState(pid, st);
 		return send(res, 200, JSON.stringify(statusPayload(pid)));
 	}
 	if (req.method === "POST" && url.pathname === "/api/refine") {
@@ -504,6 +562,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			st.rule = result.rule;
 			st.refineChat.push({ role: "user", content: instruction }, { role: "assistant", content: result.message });
 			if (st.refineChat.length > 20) st.refineChat.splice(0, st.refineChat.length - 20);
+			saveState(projectId || "sample", st);
 			return send(
 				res,
 				200,
@@ -526,10 +585,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 	if (req.method === "POST" && url.pathname === "/api/sheet/analyze") {
 		if (!modelClient) return send(res, 400, JSON.stringify({ error: "Connect a model first." }));
 		try {
-			const { sheetUrl, csvText, projectId } = JSON.parse((await readBody(req)) || "{}") as {
+			const { sheetUrl, csvText, projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
 				sheetUrl?: string;
 				csvText?: string;
 				projectId?: string;
+				sheetId?: string;
 			};
 			const csvSrc = csvText?.trim() ? csvText : sheetUrl?.trim() ? await ingestGoogleSheetText(sheetUrl) : "";
 			if (!csvSrc.trim()) return send(res, 400, JSON.stringify({ error: "Sheet URL or CSV is required." }));
@@ -540,21 +600,37 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				`Map this spreadsheet's columns to test-case fields. Set "mapping" to {field: EXACT header name} for any of ` +
 				`id,title,step,expected,priority,role,env that a column matches; omit fields with no column. ` +
 				`Headers: ${JSON.stringify(table.headers)}. Example row: ${JSON.stringify(sample)}.`;
-			const st = stateFor(projectId || "sample");
+			const pid = projectId || "sample";
+			const project = userProjects.find((p) => p.id === pid);
+			const sheet = project?.sheets.find((s) => s.id === sheetId);
+			if (!project || !sheet)
+				return send(res, 400, JSON.stringify({ error: "analyze requires a saved project sheet" }));
+			const st = stateFor(pid);
 			const result = await refineRule(st.rule, instruction, modelClient, [...st.refineChat]);
-			st.rule = result.rule;
+			// Don't mutate the project-shared rule here — a sheet's column mapping is a per-sheet
+			// override layered on top of it, so only the delta vs the current rule mapping is kept.
+			const proposed = result.rule.mapping;
+			const delta: Record<string, string> = {};
+			for (const [k, v] of Object.entries(proposed)) {
+				if (v && v !== (st.rule.mapping as Record<string, string>)[k]) delta[k] = v;
+			}
+			if (Object.keys(delta).length) sheet.mapping = delta as InterpretationRule["mapping"];
+			else delete sheet.mapping;
+			persistProjects();
 			st.refineChat.push(
 				{ role: "user", content: `시트 해석 요청 · 헤더: ${table.headers.join(", ")}` },
 				{ role: "assistant", content: result.message },
 			);
 			if (st.refineChat.length > 20) st.refineChat.splice(0, st.refineChat.length - 20);
+			saveState(pid, st);
 			return send(
 				res,
 				200,
 				JSON.stringify({
 					headers: table.headers,
 					sample,
-					mapping: st.rule.mapping,
+					mapping: delta,
+					sheetId,
 					ruleVersion: st.rule.ruleVersion,
 					message: result.message,
 					warnings: ruleLint(st.rule),
@@ -569,18 +645,24 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 	if (req.method === "POST" && url.pathname === "/api/tc/preview") {
 		try {
 			const cfg = JSON.parse((await readBody(req)) || "{}") as RunInput;
-			const st = stateFor(cfg.projectId || "sample");
+			const pid = cfg.projectId || "sample";
+			const st = stateFor(pid);
+			const project = allProjects().find((p) => p.id === pid);
 			let headers: string[] = [];
 			let all: NormalizedTC[];
 			let unique: NormalizedTC[];
 			let duplicates: DedupeResult["duplicates"];
+			let effMapping: InterpretationRule["mapping"] = st.rule.mapping;
 			if (cfg.sample) {
 				const text = readFileSync(cfg.aiInterpret ? bundledCasesNl : bundledCases, "utf8");
 				headers = csvToRawTable(text).headers;
 				({ all, unique, duplicates } = ingestCsv(text, st.rule.mapping));
 			} else {
-				const sources = cfg.sources ?? [];
+				const sources = hydrateSheets(cfg.projectId ?? "sample", cfg.sheets ?? cfg.sources ?? []);
 				if (sources.length === 0) return send(res, 400, JSON.stringify({ error: "TC 소스를 추가하세요." }));
+				const sid = resolveSheetId(project, cfg.sheetId);
+				const sheet = sources.find((s) => s.id === sid) ?? sources[0];
+				effMapping = { ...st.rule.mapping, ...(sheet?.mapping ?? {}) };
 				const first = sources[0];
 				const firstText = first
 					? first.kind === "sheet"
@@ -588,14 +670,14 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 						: first.csvText
 					: "";
 				headers = csvToRawTable(firstText).headers;
-				({ all, unique, duplicates } = await ingestSources(sources, st.rule.mapping));
+				({ all, unique, duplicates } = await ingestSources(sources, effMapping));
 			}
 			return send(
 				res,
 				200,
 				JSON.stringify({
 					headers,
-					mapping: { ...mapColumns(headers), ...st.rule.mapping },
+					mapping: { ...mapColumns(headers), ...effMapping },
 					counts: { total: all.length, unique: unique.length, duplicates: duplicates.length },
 					unique: unique.map((c) => ({
 						caseId: c.caseId,
@@ -630,25 +712,54 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		}
 	}
 	if (req.method === "GET" && url.pathname === "/api/review/queue") {
-		const st = stateFor(url.searchParams.get("projectId") || "sample");
-		return send(res, 200, JSON.stringify([...st.reviewQueue.values()]));
+		const pid = url.searchParams.get("projectId") || "sample";
+		const st = stateFor(pid);
+		const reconcile = (items: ReviewItem[]): ReviewItem[] =>
+			items.filter((it) => st.baseline.get(it.caseId, it.ruleVersion, it.env)?.approved !== true);
+		if (url.searchParams.get("all")) {
+			const all = [...st.sheets.values()].flatMap((s) => [...s.reviewQueue.values()]);
+			return send(res, 200, JSON.stringify(reconcile(all)));
+		}
+		const project = allProjects().find((p) => p.id === pid);
+		const sid = resolveSheetId(project, url.searchParams.get("sheetId") ?? undefined);
+		return send(res, 200, JSON.stringify(reconcile([...sheetState(st, sid).reviewQueue.values()])));
 	}
 	if (req.method === "POST" && url.pathname === "/api/review/approve") {
 		try {
-			const { caseId, projectId } = JSON.parse((await readBody(req)) || "{}") as {
+			const { caseId, projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
 				caseId?: string;
 				projectId?: string;
+				sheetId?: string;
 			};
-			const st = stateFor(projectId || "sample");
-			const item = caseId ? st.reviewQueue.get(caseId) : undefined;
-			if (!item) return send(res, 404, JSON.stringify({ error: "unknown case in review queue" }));
+			const pid = projectId || "sample";
+			const st = stateFor(pid);
+			let item: ReviewItem | undefined;
+			let sid = sheetId;
+			if (sid) {
+				item = caseId ? sheetState(st, sid).reviewQueue.get(caseId) : undefined;
+			} else if (caseId) {
+				for (const [k, s] of st.sheets) {
+					const found = s.reviewQueue.get(caseId);
+					if (found) {
+						item = found;
+						sid = k;
+						break;
+					}
+				}
+			}
+			if (!item || !sid) return send(res, 404, JSON.stringify({ error: "unknown case in review queue" }));
 			// The run's gate() already proposed a full-text pending baseline; approving flips it.
 			st.baseline.approve(item.caseId, item.ruleVersion, item.env);
-			st.reviewQueue.delete(item.caseId);
+			sheetState(st, sid).reviewQueue.delete(item.caseId);
+			saveState(pid, st);
 			return send(
 				res,
 				200,
-				JSON.stringify({ approved: true, caseId: item.caseId, queue: [...st.reviewQueue.values()] }),
+				JSON.stringify({
+					approved: true,
+					caseId: item.caseId,
+					queue: [...sheetState(st, sid).reviewQueue.values()],
+				}),
 			);
 		} catch (err) {
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
@@ -656,18 +767,36 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 	}
 	if (req.method === "POST" && url.pathname === "/api/review/approve-all") {
 		try {
-			const { projectId } = JSON.parse((await readBody(req)) || "{}") as { projectId?: string };
-			const st = stateFor(projectId || "sample");
+			const { projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
+				projectId?: string;
+				sheetId?: string;
+			};
+			const pid = projectId || "sample";
+			const st = stateFor(pid);
+			const targets = sheetId ? [sheetState(st, sheetId)] : [...st.sheets.values()];
 			let approved = 0;
-			for (const item of [...st.reviewQueue.values()]) {
-				st.baseline.approve(item.caseId, item.ruleVersion, item.env);
-				st.reviewQueue.delete(item.caseId);
-				approved++;
+			for (const s of targets) {
+				for (const item of [...s.reviewQueue.values()]) {
+					st.baseline.approve(item.caseId, item.ruleVersion, item.env);
+					s.reviewQueue.delete(item.caseId);
+					approved++;
+				}
 			}
-			return send(res, 200, JSON.stringify({ approved, queue: [...st.reviewQueue.values()] }));
+			saveState(pid, st);
+			const queue = sheetId
+				? [...sheetState(st, sheetId).reviewQueue.values()]
+				: [...st.sheets.values()].flatMap((s) => [...s.reviewQueue.values()]);
+			return send(res, 200, JSON.stringify({ approved, queue }));
 		} catch (err) {
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
+	}
+
+	if (req.method === "GET" && url.pathname === "/api/sheet/content") {
+		const projectId = url.searchParams.get("projectId");
+		const sheetId = url.searchParams.get("sheetId");
+		if (!projectId || !sheetId) return send(res, 400, JSON.stringify({ error: "projectId and sheetId are required" }));
+		return send(res, 200, JSON.stringify({ csvText: readSheetContent(projectId, sheetId) }));
 	}
 	if (req.method === "GET" && url.pathname === "/api/projects") {
 		return send(res, 200, JSON.stringify(allProjects()));
@@ -676,10 +805,27 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		try {
 			const p = sanitizeProject(JSON.parse((await readBody(req)) || "{}"));
 			if (p.id === "sample") return send(res, 400, JSON.stringify({ error: "cannot modify the sample project" }));
+			const prev = userProjects.find((x) => x.id === p.id);
+			const keptIds = new Set(p.sheets.map((s) => s.id));
+			for (const sh of p.sheets) {
+				if (sh.kind === "csv" && sh.csvText) {
+					writeSheetContent(p.id, sh.id, sh.csvText);
+					sh.csvText = "";
+				}
+			}
+			if (prev) {
+				for (const oldSheet of prev.sheets) {
+					if (oldSheet.kind === "csv" && !keptIds.has(oldSheet.id)) deleteSheetContent(p.id, oldSheet.id);
+				}
+			}
 			const idx = userProjects.findIndex((x) => x.id === p.id);
 			if (idx >= 0) userProjects[idx] = p;
 			else userProjects.push(p);
 			persistProjects();
+			const st = stateFor(p.id);
+			const ids = new Set(p.sheets.map((s) => s.id));
+			for (const k of [...st.sheets.keys()]) if (!ids.has(k)) st.sheets.delete(k);
+			saveState(p.id, st);
 			return send(res, 200, JSON.stringify({ saved: p, projects: allProjects() }));
 		} catch (err) {
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
@@ -689,6 +835,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		const { id } = JSON.parse((await readBody(req)) || "{}") as { id?: string };
 		userProjects = userProjects.filter((x) => x.id !== id);
 		persistProjects();
+		if (id && id !== "sample") {
+			projectStates.delete(id);
+			deleteProjectState(id);
+			deleteProjectSheets(id);
+		}
 		return send(res, 200, JSON.stringify({ projects: allProjects() }));
 	}
 	return send(res, 404, JSON.stringify({ error: "not found" }));

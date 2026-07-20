@@ -13,7 +13,7 @@ Spreadsheet-authored test cases → an AI agent reads them, writes the assertion
 ![stack](https://img.shields.io/badge/stack-Node%2FTS-3178c6)
 ![runtime](https://img.shields.io/badge/runtime-Bun%20%E2%89%A51.3-black)
 ![browser](https://img.shields.io/badge/engine-Playwright-2ead33)
-![tests](https://img.shields.io/badge/tests-56%2F56-9ccc00)
+![tests](https://img.shields.io/badge/tests-87%2F87-9ccc00)
 ![false--pass](https://img.shields.io/badge/false--pass-0-critical)
 
 </div>
@@ -70,7 +70,7 @@ Spreadsheet (XLSX / Google Sheet)
 ```bash
 bun install            # installs Playwright Chromium via postinstall
 bun run setup          # or install the headless browser explicitly
-bun test               # 56/56
+bun test               # 87/87
 
 test-osterone --help
 test-osterone setup
@@ -118,21 +118,23 @@ A point-and-click front door. Start it once; after that everything happens in th
 bun run studio     # builds the React UI (Vite) then serves it — open http://localhost:8686
 ```
 
-Model connection is **global** (connect once, applies everywhere). Everything else is **per-project** and isolated (each project has its own rule/mapping, refine conversation, baselines, and review queue). Sidebar: global **모델 연결 (Model)** + a current-project selector, then per-project steps **1 프로젝트 정보 → 2 규칙·해석 → 3 실행 & 결과 → 4 리뷰 큐**:
+Model connection is **global**, in the top bar — a login-style control (● status + model name) that opens a modal with three modes: **Codex login** (auto-detects a local `codex login`), **paste a token** (+ optional model override), or **API Key / endpoint** — connect *any* OpenAI-compatible endpoint (Azure OpenAI, OpenRouter, Together, local vLLM/Ollama) via model + Base URL. The model is only ever used at **author time**; it never judges.
 
-- **Projects** — save a reusable project: **name, one or more TC sources (Google Sheet URL / pasted CSV / uploaded `.xlsx` — pick which sheets), target site URL, environment, test account (id/password), reference repo, default AI toggle**. Multiple sources are ingested and **de-duplicated across all of them**. Persisted to `~/.test-osterone/studio-projects.json`; the account + repo are passed to AI step interpretation as context.
-- **TC read & dedupe** — **TC 읽기 & 중복 확인** ingests the project's sheet/CSV with the current column mapping and shows the detected columns, the structured cases, and **which cases were de-duplicated**, before you run.
-- **Run** — pick a project, optionally tick **AI 스텝 해석**, and **실행 (Run)**. Results **stream in per case** (NDJSON) — verdicts and a running pass/fail/needs_review tally appear live as each case finishes, instead of blocking until the whole suite is done.
+Below the top bar, navigation is a **2-lane layout**: a Project lane and a Test Sheet lane, each with **direct add/edit/delete** (a project editor modal and a sheet editor modal — no separate "manage" screen). A **Project** holds one or more first-class **Test Sheets** (Google Sheet URL / pasted CSV / uploaded `.xlsx`), plus shared defaults (target URL, environment, test account, reference repo, AI toggle). Each **Test Sheet** can **override** the target URL, environment, and column mapping independently. There is **no cap on sheet count** — a search/filter appears once a project or sheet list exceeds ~8 items, the active item auto-scrolls into view, the sidebar is sticky with independent scrolling, lanes go responsive on narrow screens, and long names get tooltips.
+
+- **Per-sheet runtime** — every sheet has its **own run history and review queue**; the dashboard aggregates across all sheets in a project, and the review nav badge shows a project-level roll-up. Running a sheet ingests only that sheet, with per-sheet dedupe.
+- **AI sheet interpretation (column mapping)** — **시트 해석** sends a sheet's headers + a sample row to the connected model, which proposes a column mapping (`id/title/step/expected/priority/…` → your header names) and writes it as a **delta onto the selected sheet** — the project's shared rule is untouched. You can adjust it conversationally ("use 중분류 as the title, not 소분류"); the mapping is **applied at ingestion** for that sheet.
+- **Run** — pick a project and sheet, optionally tick **AI 스텝 해석**, and **실행 (Run)**. Results **stream in per case** (NDJSON) — verdicts and a running pass/fail/needs_review tally appear live as each case finishes.
 
 The deterministic engine runs each case against real headless Chromium and renders verdict badges, per-assertion detail, self-heal events, and the needs_review queue — no CSV escaping, no terminal after launch.
 
-**Model connection (optional).** Click **Codex 로그인** to reuse a local Codex/ChatGPT login (OAuth proxy — token and model are read from `~/.codex`), or paste an access token / API key. Once connected, **AI 규칙 다듬기** refines the interpretation rule in natural language (e.g. "recognize 누르기 as a click"). It is **conversational** — each turn builds on the last (e.g. "undo that") — and after every turn the UI shows an **intent diff** and flags **ambiguous or empty intents**, so the rule converges to an optimal, interpretable form. Changes bump the rule version and apply to later runs; **초기화** resets the conversation.
+**Conversational rule refine.** Once connected, **AI 규칙 다듬기** refines the project-level interpretation rule in natural language (e.g. "recognize 누르기 as a click"). It is **conversational** — each turn builds on the last (e.g. "undo that") — and after every turn the UI shows an **intent diff** and flags **ambiguous or empty intents**, so the rule converges to an optimal, interpretable form. Changes bump the rule version; **초기화** resets the conversation.
 
 **AI step interpretation.** Tick **AI 스텝 해석** on a run to let the connected model turn free natural-language steps (no quotes, no DSL) into a deterministic plan (actions + assertions). The plan is **authored once and cached**, then the engine replays it deterministically — identical `pass` / `fail` / `needs_review` semantics, false-pass still 0. The bundled sample ships a quote-free variant to demonstrate it.
 
-**AI sheet interpretation (column mapping).** For a Google Sheet project, **시트 해석** in the AI Rules tab sends the sheet's headers + a sample row to the model, which proposes a column mapping (`id/title/step/expected/priority/…` → your header names) and writes it into the rule. You can adjust it conversationally ("use 중분류 as the title, not 소분류"). Crucially the mapping is **applied at ingestion**, so a conversationally-established interpretation actually drives how the sheet is read — verified live against a Korean QA sheet.
+**Review queue.** `needs_review` cases surface with their evidence — a **screenshot**, the page text, and the reason (self-heal, missing baseline, …). Approve the baseline once and a matching re-run **passes**, across every sheet that shares the same case content (reconcile-on-read clears a stale needs_review elsewhere without re-running); if the page drifts it is re-flagged. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
 
-**Review queue.** `needs_review` cases surface with their evidence — a **screenshot**, the page text, and the reason (self-heal, missing baseline, …). Approve the baseline once and a matching re-run **passes**; if the page drifts it is re-flagged. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
+**Persistence.** Project metadata lives in `~/.test-osterone/studio-projects.json`; per-project runtime state (rule, refine chat, plan cache, approved baselines, per-sheet history + review queue) lives in `~/.test-osterone/studio-state/<projectId>.json`; and **sheet CSV content is offloaded to per-sheet files** (`sheet-data/<projectId>/<sheetId>.csv`) so neither file grows with sheet count — hence no cap. `baselineKey`/`assertionCacheKey` formats are unchanged, so false-pass=0 holds across all of this.
 
 ## Architecture
 
@@ -154,7 +156,7 @@ Two interchangeable clients behind one interface:
 
 ## Status
 
-**Built & verified (static, deterministic — 56/56 automated tests):** ingest → normalize → dedupe → rule (CLI) → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract · benchmark hard gate · web dashboard · orchestration (node/host) · auth (API key + OAuth proxy) + JUnit.
+**Built & verified (static, deterministic — 87/87 automated tests):** ingest → normalize → dedupe → rule (CLI) → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract · benchmark hard gate · web dashboard · orchestration (node/host) · auth (API key + OAuth proxy) + JUnit.
 
 **Pending environment-dependent integration (implemented, not yet live-verified):** live benchmark against real Chromium + docker fixtures / real OAuth-token ChatGPT calls — contracts and implementations are complete; only a smoke pass in a browser/docker/token environment remains.
 
@@ -173,7 +175,7 @@ src/
   testing/      fixture app + fixture model
   app/studio/   browser UI (Studio)
   cli.ts · index.ts
-test/           unit + smoke suites (56/56)
+test/           unit + smoke suites (87/87)
 examples/demo/  CLI live-run example
 ```
 

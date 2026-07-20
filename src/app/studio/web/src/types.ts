@@ -1,16 +1,20 @@
 export type Verdict = "pass" | "fail" | "needs_review" | "error";
 
-export interface TcSource {
+export interface TestSheet {
+	id: string;
+	name: string;
 	kind: "sheet" | "csv";
-	label: string;
 	sheetUrl: string;
 	csvText: string;
+	baseUrl?: string;
+	env?: string;
+	mapping?: Record<string, string>;
 }
 
 export interface Project {
 	id: string;
 	name: string;
-	sources: TcSource[];
+	sheets: TestSheet[];
 	baseUrl: string;
 	env: string;
 	username: string;
@@ -42,6 +46,7 @@ export interface RunView {
 	interpreter: "ai" | "rule";
 	counts: Record<Verdict, number>;
 	results: CaseView[];
+	sheetId: string;
 }
 
 export interface ChatMsg {
@@ -53,6 +58,7 @@ export interface AuthState {
 	mode: string;
 	accountId?: string;
 	model: string;
+	endpoint?: string;
 }
 
 export interface Status {
@@ -112,6 +118,7 @@ export interface ReviewItem {
 	screenshot?: string;
 	ruleVersion: number;
 	env: string;
+	sheetId: string;
 }
 
 export interface XlsxSheet {
@@ -129,7 +136,8 @@ export type RunEvent =
 /** A run request payload (project config + ephemeral toggles). */
 export interface RunInput {
 	sample?: boolean;
-	sources?: TcSource[];
+	sheets?: TestSheet[];
+	sheetId?: string;
 	baseUrl?: string;
 	env?: string;
 	username?: string;

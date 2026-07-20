@@ -3,7 +3,7 @@ import { api } from "../api";
 import type { CaseView, Project, RunView, Verdict } from "../types";
 import { SelfHealNote, stripAnsi, V_LABEL, VerdictMark } from "./Verdict";
 
-type Tab = "model" | "dash" | "projects" | "rules" | "run" | "review";
+type Tab = "dash" | "rules" | "run" | "review";
 type Filter = Verdict | "all";
 
 const ACTION_ORDER: Record<Verdict, number> = { fail: 0, error: 1, needs_review: 2, pass: 3 };
@@ -110,12 +110,14 @@ function Skeleton() {
 export function DashboardPanel({
 	selId,
 	project,
+	selSheetId,
 	reviewCount,
 	goTo,
 	refreshKey = 0,
 }: {
 	selId: string;
 	project?: Project;
+	selSheetId?: string;
 	reviewCount: number;
 	goTo: (t: Tab) => void;
 	refreshKey?: number;
@@ -131,12 +133,18 @@ export function DashboardPanel({
 		setLoadErr("");
 		setRunIdx(0);
 		setFilter("all");
-		api
-			.history(selId)
-			.then(setHistory)
+		const sheets = project?.sheets ?? [];
+		if (sheets.length === 0) {
+			setHistory([]);
+			return;
+		}
+		// Roll up: fan out one /api/history call per sheet (small N), then merge newest-first —
+		// each RunView already carries its own sheetId, so the merged list stays self-describing.
+		Promise.all(sheets.map((s) => api.history(selId, s.id).catch(() => [] as RunView[])))
+			.then((lists) => setHistory(lists.flat().sort((a, b) => b.at - a.at)))
 			.catch((e) => setLoadErr((e as Error).message));
 		// refreshKey bumps when a run finishes elsewhere — the panel stays mounted, so re-fetch explicitly.
-	}, [selId, refreshKey]);
+	}, [selId, project, refreshKey]);
 	useEffect(load, [load]);
 
 	const run = history?.[runIdx];

@@ -5,10 +5,12 @@ import { VerdictMark } from "./Verdict";
 
 export function ReviewPanel({
 	selId,
+	selSheetId,
 	onCount,
 	refreshKey = 0,
 }: {
 	selId: string;
+	selSheetId: string;
 	onCount: (n: number) => void;
 	refreshKey?: number;
 }) {
@@ -23,14 +25,14 @@ export function ReviewPanel({
 		setItems(null);
 		setLoadErr("");
 		api
-			.reviewQueue(selId)
+			.reviewQueue(selId, selSheetId)
 			.then((q) => {
 				setItems(q);
 				onCount(q.length);
 			})
 			.catch((e) => setLoadErr((e as Error).message));
 		// refreshKey bumps when a run finishes — the panel stays mounted, so re-fetch explicitly.
-	}, [selId, onCount, refreshKey]);
+	}, [selId, selSheetId, onCount, refreshKey]);
 
 	useEffect(load, [load]);
 
@@ -39,7 +41,7 @@ export function ReviewPanel({
 		setBusyAll(true);
 		setApproveErr("");
 		try {
-			const { queue } = await api.reviewApproveAll(selId);
+			const { queue } = await api.reviewApproveAll(selId, selSheetId);
 			setItems(queue);
 			onCount(queue.length);
 		} catch (e) {
@@ -53,7 +55,7 @@ export function ReviewPanel({
 		setBusyId(caseId);
 		setApproveErr("");
 		try {
-			const { queue } = await api.reviewApprove(caseId, selId);
+			const { queue } = await api.reviewApprove(caseId, selId, selSheetId);
 			setItems(queue);
 			onCount(queue.length);
 		} catch (e) {

@@ -74,6 +74,17 @@ export class MemoryBaselineStore {
 		this.store.set(key, { ...b, approved: true });
 	}
 
+	/** Snapshot every stored baseline for durable persistence. */
+	entries(): Baseline[] {
+		return [...this.store.values()];
+	}
+
+	/** Replace the store's contents from a persisted snapshot (e.g. on server restart). */
+	load(baselines: Baseline[]): void {
+		this.store.clear();
+		for (const b of baselines) this.store.set(baselineKey(b.caseId, b.ruleVersion, b.env), b);
+	}
+
 	/** Gate a current snapshot against the stored baseline. */
 	gate(
 		caseId: string,

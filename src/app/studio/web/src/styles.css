@@ -15,12 +15,19 @@ header { padding: 18px 28px; border-bottom: 1px solid var(--line); display: flex
 header h1 { font-size: 18px; margin: 0; letter-spacing: .2px; }
 header .tag { color: var(--dim); font-size: 13px; }
 .layout { display: flex; max-width: 1400px; margin: 0 auto; }
-.side { width: 210px; flex-shrink: 0; padding: 20px 12px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.topbar-auth { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; background: var(--inset); border: 1px solid var(--line); border-radius: 999px; color: var(--ink); font-size: 13px; cursor: pointer; font-family: inherit; }
+.topbar-auth:hover { border-color: var(--lime); }
+.topbar-auth.on { border-color: rgba(158,230,0,.4); }
+.topbar-auth .dot { font-size: 10px; line-height: 1; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: flex-start; justify-content: center; padding: 60px 16px; z-index: 50; }
+.modal { position: relative; width: 100%; max-width: 560px; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 6px 20px 20px; max-height: 85vh; overflow: auto; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+.modal-close { position: absolute; top: 12px; right: 12px; background: none; border: 0; color: var(--dim); font-size: 16px; cursor: pointer; padding: 4px 8px; border-radius: 6px; line-height: 1; }
+.modal-close:hover { color: var(--ink); background: var(--inset); }
+.side { width: 210px; flex-shrink: 0; padding: 20px 12px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; position: sticky; top: 0; align-self: flex-start; max-height: 100vh; overflow-y: auto; }
 .side button { text-align: left; padding: 10px 12px; background: none; border: 0; color: var(--dim); border-radius: 8px; cursor: pointer; font-size: 14px; }
 .side button.on { background: var(--inset); color: var(--ink); }
-.side button.global { border: 1px solid var(--line); }
 .side-sep { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin: 16px 8px 6px; }
-.side-select { width: 100%; padding: 8px 10px; background: var(--inset); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); font-size: 13px; margin-bottom: 6px; }
+.lane-filter { width: 100%; padding: 6px 10px; margin: 0 0 6px; background: var(--inset); border: 1px solid var(--line); border-radius: 8px; color: var(--ink); font-size: 12.5px; }
 .content { flex: 1; min-width: 0; padding: 24px 22px 60px; }
 h2.sec { font-size: 15px; margin: 0 0 14px; font-weight: 600; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 20px; }
@@ -113,17 +120,19 @@ td.num { font-family: var(--mono); font-size: 13px; }
 
 /* Fitts: 44px minimum touch targets on touch devices only — desktop keeps its compact density. */
 @media (pointer: coarse) {
-	.side button, .mini, .qbar .f, .modes button, .side-select, .qbar select { min-height: 44px; }
+	.side button, .mini, .qbar .f, .modes button, .qbar select { min-height: 44px; }
 	.linkbtn { min-height: 44px; padding: 8px 4px; }
 }
 
 /* ---- responsive shell ---- */
 @media (max-width: 960px) {
 	.layout { flex-direction: column; }
-	.side { width: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--line); }
-	.side button { padding: 8px 10px; }
-	.side-sep { margin: 0 2px 0 8px; }
-	.side-select { width: auto; margin-bottom: 0; }
+	.side { width: auto; position: static; max-height: none; overflow: visible; flex-direction: column; border-right: 0; border-bottom: 1px solid var(--line); padding: 10px 12px; }
+	.side-projects, .side-sheets { flex-direction: row; max-height: none; overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }
+	.lane-item { flex: 0 0 auto; }
+	.lane-item-label { max-width: 160px; }
+	.lane-actions { display: inline-flex; }
+	.lane-head { margin: 10px 4px 4px; }
 	.content { padding: 18px 14px 48px; }
 }
 @media (max-width: 560px) {
@@ -131,3 +140,18 @@ td.num { font-family: var(--mono); font-size: 13px; }
 	.dash-head { flex-wrap: wrap; }
 	header { padding: 14px 16px; }
 }
+.lane-head { display: flex; align-items: center; justify-content: space-between; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; margin: 16px 8px 6px; }
+.lane-add { background: none; border: 1px solid var(--line); color: var(--ink); border-radius: 6px; width: 22px; height: 22px; line-height: 1; cursor: pointer; font-size: 14px; }
+.lane-add:hover:not(:disabled) { border-color: var(--lime); }
+.lane-add:disabled { opacity: .4; cursor: default; }
+.side-projects, .side-sheets { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow: auto; }
+.lane-item { display: flex; align-items: center; border-radius: 8px; }
+.lane-item.on { background: var(--inset); }
+.lane-item-label { flex: 1; min-width: 0; text-align: left; background: none; border: 0; color: var(--dim); padding: 8px 10px; cursor: pointer; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lane-item.on .lane-item-label { color: var(--ink); }
+.lane-actions { display: none; gap: 2px; padding-right: 6px; }
+.lane-item:hover .lane-actions { display: inline-flex; }
+.lane-actions button { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 12px; padding: 2px 4px; border-radius: 4px; }
+.lane-actions button:hover { color: var(--ink); background: var(--line); }
+@media (pointer: coarse) { .lane-actions { display: inline-flex; } }
+.modal-wide { max-width: 720px; }

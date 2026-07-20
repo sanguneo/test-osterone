@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { CaseView, PreviewResult, Project, Verdict } from "../types";
 import { SelfHealNote, stripAnsi, VerdictCounts, VerdictMark } from "./Verdict";
@@ -65,7 +65,12 @@ function ResultCard({ view, total }: { view: ViewLike; total?: number }) {
 	);
 }
 
-export function RunPanel({ project, selId, onDone }: { project?: Project; selId: string; onDone: () => void }) {
+export function RunPanel({
+	project,
+	selId,
+	selSheetId,
+	onDone,
+}: { project?: Project; selId: string; selSheetId: string; onDone: () => void }) {
 	const [ai, setAi] = useState(false);
 	const [preview, setPreview] = useState<PreviewResult | null>(null);
 	const [previewErr, setPreviewErr] = useState("");
@@ -76,6 +81,7 @@ export function RunPanel({ project, selId, onDone }: { project?: Project; selId:
 	const [runErr, setRunErr] = useState("");
 	const [done, setDone] = useState(false);
 
+	const sheet = useMemo(() => project?.sheets.find((s) => s.id === selSheetId) ?? project?.sheets[0], [project, selSheetId]);
 	useEffect(() => {
 		setAi(!!project?.aiInterpret);
 	}, [project]);
@@ -87,11 +93,11 @@ export function RunPanel({ project, selId, onDone }: { project?: Project; selId:
 		setPreviewErr("");
 		setPreviewLoading(true);
 		api
-			.preview({ sample: project.id === "sample", sources: project.sources, baseUrl: project.baseUrl, projectId: selId })
+			.preview({ sample: project.id === "sample", sheets: sheet ? [sheet] : [], sheetId: sheet?.id, baseUrl: project.baseUrl, projectId: selId })
 			.then(setPreview)
 			.catch((e) => setPreviewErr((e as Error).message))
 			.finally(() => setPreviewLoading(false));
-	}, [project, selId]);
+	}, [project, selId, sheet]);
 	useEffect(loadPreview, [loadPreview]);
 
 	async function run() {
@@ -106,7 +112,8 @@ export function RunPanel({ project, selId, onDone }: { project?: Project; selId:
 			await api.runStream(
 				{
 					sample: project.id === "sample",
-					sources: project.sources,
+					sheets: sheet ? [sheet] : [],
+					sheetId: sheet?.id,
 					aiInterpret: ai,
 					baseUrl: project.baseUrl,
 					env: project.env,
@@ -155,7 +162,7 @@ export function RunPanel({ project, selId, onDone }: { project?: Project; selId:
 			<h2 className="sec">실행 & 결과</h2>
 			<div className="card">
 				<div className="muted" style={{ fontSize: 12.5 }}>
-					대상: {project.baseUrl || (project.id === "sample" ? "번들 fixture" : "대상 미설정")} · 소스 {project.sources.length}개
+					대상: {project.baseUrl || (project.id === "sample" ? "번들 fixture" : "대상 미설정")} · 시트: {sheet?.name ?? "(선택 안됨)"}
 				</div>
 				<label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 14, cursor: "pointer" }}>
 					<input type="checkbox" checked={ai} onChange={(e) => setAi(e.target.checked)} />{" "}

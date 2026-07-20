@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { PreviewResult, Project, TcSource, XlsxSheet } from "../types";
+import type { PreviewResult, Project, TestSheet, XlsxSheet } from "../types";
 
 interface Editor {
 	id: string;
 	name: string;
-	sources: TcSource[];
+	sheets: TestSheet[];
 	baseUrl: string;
 	env: string;
 	username: string;
@@ -16,7 +16,7 @@ interface Editor {
 const blank = (): Editor => ({
 	id: "",
 	name: "",
-	sources: [],
+	sheets: [],
 	baseUrl: "",
 	env: "",
 	username: "",
@@ -26,15 +26,14 @@ const blank = (): Editor => ({
 });
 
 export function ProjectsPanel({
-	projects,
-	selId,
-	setSelId,
-	setProjects,
+	initialProject,
+	onSaved,
+	onClose,
 }: {
+	initialProject: Project | null;
 	projects: Project[];
-	selId: string;
-	setSelId: (id: string) => void;
-	setProjects: (p: Project[]) => void;
+	onSaved: (savedId: string, projects: Project[]) => void;
+	onClose: () => void;
 }) {
 	const [ed, setEd] = useState<Editor>(blank());
 	const [addMode, setAddMode] = useState<"" | "sheet" | "csv">("");
@@ -46,10 +45,7 @@ export function ProjectsPanel({
 	const [statusMsg, setStatusMsg] = useState("");
 	const [statusErr, setStatusErr] = useState(false);
 	const [preview, setPreview] = useState<PreviewResult | null>(null);
-	const [confirmDel, setConfirmDel] = useState("");
-	const [delErr, setDelErr] = useState("");
 	const [dirty, setDirty] = useState(false);
-	const [lastDeleted, setLastDeleted] = useState<Project | null>(null);
 
 	function note(msg: string, isErr = false) {
 		setStatusMsg(msg);
@@ -72,55 +68,59 @@ export function ProjectsPanel({
 		return () => window.removeEventListener("beforeunload", warn);
 	}, [dirty]);
 
-	function confirmDiscard(): boolean {
-		return !dirty || window.confirm("저장하지 않은 변경이 있습니다. 버리고 계속할까요?");
-	}
-
-	function editProject(p: Project, skipGuard = false) {
-		if (!skipGuard && !confirmDiscard()) return;
+	// (Re)initialize the editor whenever the panel is opened for a different project.
+	useEffect(() => {
 		setDirty(false);
-		setEd({
-			id: p.id,
-			name: p.name,
-			sources: p.sources.map((s) => ({ ...s })),
-			baseUrl: p.baseUrl,
-			env: p.env,
-			username: p.username,
-			password: p.password,
-			referenceRepo: p.referenceRepo,
-			aiInterpret: p.aiInterpret,
-		});
+		setEd(
+			initialProject
+				? {
+						id: initialProject.id,
+						name: initialProject.name,
+						sheets: initialProject.sheets.map((s) => ({ ...s })),
+						baseUrl: initialProject.baseUrl,
+						env: initialProject.env,
+						username: initialProject.username,
+						password: initialProject.password,
+						referenceRepo: initialProject.referenceRepo,
+						aiInterpret: initialProject.aiInterpret,
+					}
+				: blank(),
+		);
 		setPreview(null);
 		setStatusMsg("");
 		setAddMode("");
 		setXlsxSheets(null);
-	}
-	function newProject() {
-		if (!confirmDiscard()) return;
-		setDirty(false);
-		setEd(blank());
-		setPreview(null);
-		setStatusMsg("");
-		setAddMode("");
-		setXlsxSheets(null);
-	}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [initialProject]);
 
 	function addSheet() {
 		if (!sheetUrl.trim()) return;
-		setEd((e) => ({ ...e, sources: [...e.sources, { kind: "sheet", label: "시트", sheetUrl: sheetUrl.trim(), csvText: "" }] }));
+		setEd((e) => ({
+			...e,
+			sheets: [
+				...e.sheets,
+				{ id: `sh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, kind: "sheet", name: "시트", sheetUrl: sheetUrl.trim(), csvText: "" },
+			],
+		}));
 		setDirty(true);
 		setSheetUrl("");
 		setAddMode("");
 	}
 	function addCsv() {
 		if (!csvText.trim()) return;
-		setEd((e) => ({ ...e, sources: [...e.sources, { kind: "csv", label: "붙여넣기", sheetUrl: "", csvText }] }));
+		setEd((e) => ({
+			...e,
+			sheets: [
+				...e.sheets,
+				{ id: `sh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, kind: "csv", name: "붙여넣기", sheetUrl: "", csvText },
+			],
+		}));
 		setDirty(true);
 		setCsvText("");
 		setAddMode("");
 	}
-	function removeSource(i: number) {
-		setEd((e) => ({ ...e, sources: e.sources.filter((_, k) => k !== i) }));
+	function removeSheet(i: number) {
+		setEd((e) => ({ ...e, sheets: e.sheets.filter((_, k) => k !== i) }));
 		setDirty(true);
 	}
 
@@ -144,10 +144,16 @@ export function ProjectsPanel({
 	}
 	function addPicked() {
 		if (!xlsxSheets) return;
-		const add: TcSource[] = xlsxSheets
+		const add: TestSheet[] = xlsxSheets
 			.filter((_, i) => pick[i])
-			.map((s) => ({ kind: "csv", label: s.name, sheetUrl: "", csvText: s.csv }));
-		setEd((e) => ({ ...e, sources: [...e.sources, ...add] }));
+			.map((s) => ({
+				id: `sh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+				kind: "csv",
+				name: s.name,
+				sheetUrl: "",
+				csvText: s.csv,
+			}));
+		setEd((e) => ({ ...e, sheets: [...e.sheets, ...add] }));
 		setDirty(true);
 		setXlsxSheets(null);
 	}
@@ -158,7 +164,7 @@ export function ProjectsPanel({
 			projectId: ed.id || "sample",
 			sample: false,
 			name: ed.name.trim() || "Untitled",
-			sources: ed.sources,
+			sheets: ed.sheets,
 			baseUrl: ed.baseUrl.trim(),
 			env: ed.env.trim(),
 			username: ed.username.trim(),
@@ -171,55 +177,17 @@ export function ProjectsPanel({
 		note("저장 중…");
 		try {
 			const { saved, projects: ps } = await api.saveProject(payload());
-			setProjects(ps);
-			setSelId(saved.id);
 			setDirty(false);
-			editProject(saved, true);
 			note("저장됨");
+			onSaved(saved.id, ps);
 		} catch (e) {
 			note(`저장 실패: ${(e as Error).message} — 다시 시도하세요.`, true);
-		}
-	}
-	async function del(id: string) {
-		setConfirmDel("");
-		setDelErr("");
-		const target = projects.find((x) => x.id === id) ?? null;
-		try {
-			const { projects: ps } = await api.deleteProject(id);
-			setProjects(ps);
-			setLastDeleted(target);
-			if (selId === id) setSelId("sample");
-		} catch (e) {
-			setDelErr(`삭제 실패: ${(e as Error).message} — 다시 시도하세요.`);
-		}
-	}
-	async function undoDelete() {
-		if (!lastDeleted) return;
-		const p = lastDeleted;
-		setLastDeleted(null);
-		try {
-			const { projects: ps } = await api.saveProject({
-				id: p.id,
-				projectId: p.id,
-				sample: false,
-				name: p.name,
-				sources: p.sources,
-				baseUrl: p.baseUrl,
-				env: p.env,
-				username: p.username,
-				password: p.password,
-				referenceRepo: p.referenceRepo,
-				aiInterpret: p.aiInterpret,
-			});
-			setProjects(ps);
-		} catch (e) {
-			setDelErr(`되돌리기 실패: ${(e as Error).message}`);
 		}
 	}
 	async function doPreview() {
 		note("TC 읽는 중…");
 		try {
-			const d = await api.preview({ sample: false, sources: ed.sources, baseUrl: ed.baseUrl, projectId: ed.id || "sample" });
+			const d = await api.preview({ sample: false, sheets: ed.sheets, baseUrl: ed.baseUrl, projectId: ed.id || "sample" });
 			setPreview(d);
 			note("");
 		} catch (e) {
@@ -228,73 +196,17 @@ export function ProjectsPanel({
 		}
 	}
 
-	function srcSummary(s: TcSource) {
+	function srcSummary(s: TestSheet) {
 		return s.kind === "sheet"
 			? `시트: ${s.sheetUrl.slice(0, 60)}`
-			: `CSV[${s.label}] ${s.csvText.split("\n").filter((l) => l.trim()).length}행`;
+			: s.csvText
+				? `CSV[${s.name}] ${s.csvText.split("\n").filter((l) => l.trim()).length}행`
+				: `CSV[${s.name}] (저장됨)`;
 	}
 
 	return (
 		<section>
 			<h2 className="sec">프로젝트</h2>
-			<div className="card">
-				<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-					<b>저장된 프로젝트</b>
-					<button className="run" style={{ marginTop: 0, padding: "8px 14px", fontSize: 13 }} type="button" onClick={newProject}>
-						+ 새 프로젝트
-					</button>
-				</div>
-				{projects.map((p) => (
-					<div className="plist-item" key={p.id}>
-						<div>
-							<b>{p.name}</b>
-							<div className="meta">
-								{p.id === "sample" ? "샘플 (번들 데모)" : `${p.sources.length}개 소스 · ${p.baseUrl || "대상 미설정"}`}
-								{p.aiInterpret ? " · AI 해석" : ""}
-							</div>
-						</div>
-						<div>
-							{p.id === "sample" ? (
-								<span className="muted" style={{ fontSize: 12 }}>
-									기본
-								</span>
-							) : confirmDel === p.id ? (
-								<>
-									<button className="mini" type="button" style={{ color: "var(--fail)" }} onClick={() => del(p.id)}>
-										정말 삭제
-									</button>{" "}
-									<button className="mini" type="button" onClick={() => setConfirmDel("")}>
-										취소
-									</button>
-								</>
-							) : (
-								<>
-									<button className="mini" type="button" onClick={() => editProject(p)}>
-										편집
-									</button>{" "}
-									<button className="mini" type="button" onClick={() => setConfirmDel(p.id)}>
-										삭제
-									</button>
-								</>
-							)}
-						</div>
-					</div>
-				))}
-				{delErr && (
-					<div className="err" style={{ fontSize: 12.5, marginTop: 8 }}>
-						{delErr}
-					</div>
-				)}
-				{lastDeleted && (
-					<div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
-						"{lastDeleted.name}" 프로젝트를 삭제했습니다.{" "}
-						<button className="linkbtn" type="button" onClick={undoDelete}>
-							되돌리기
-						</button>
-					</div>
-				)}
-			</div>
-
 			<div className="card">
 				<b>{ed.id ? "프로젝트 편집" : "새 프로젝트"}</b>
 				<label>이름</label>
@@ -304,15 +216,15 @@ export function ProjectsPanel({
 					TC 소스 <span className="muted">— 시트 / CSV / XLSX를 여러 개 추가</span>
 				</label>
 				<div className="detail" style={{ margin: "4px 0 8px" }}>
-					{ed.sources.length === 0 ? (
+					{ed.sheets.length === 0 ? (
 						"아직 소스가 없습니다."
 					) : (
-						ed.sources.map((s, i) => (
+						ed.sheets.map((s, i) => (
 							<div className="plist-item" style={{ padding: "6px 10px" }} key={i}>
 								<span className="detail" style={{ margin: 0 }}>
 									{srcSummary(s)}
 								</span>
-								<button className="mini" type="button" onClick={() => removeSource(i)}>
+								<button className="mini" type="button" onClick={() => removeSheet(i)}>
 									제거
 								</button>
 							</div>
@@ -407,9 +319,6 @@ export function ProjectsPanel({
 					</button>
 					<button className="mini" type="button" onClick={doPreview}>
 						TC 읽기 & 중복 확인
-					</button>
-					<button className="mini" type="button" onClick={newProject}>
-						+ 새 프로젝트
 					</button>
 					<span className={statusErr ? "err" : "muted"} style={{ fontSize: 12.5 }}>
 						{statusMsg}
