@@ -12,5 +12,6 @@
 		"noUncheckedIndexedAccess": true,
 		"types": ["bun"]
 	},
-	"include": ["src", "test", "examples"]
+	"include": ["src", "test", "examples"],
+	"exclude": ["src/app/studio/web"]
 }

@@ -115,7 +115,7 @@ bun run run:live -- --url https://your.app --cases ./my-cases.csv
 A point-and-click front door. Start it once; after that everything happens in the browser:
 
 ```bash
-bun run studio     # then open http://localhost:8686
+bun run studio     # builds the React UI (Vite) then serves it — open http://localhost:8686
 ```
 
 Model connection is **global** (connect once, applies everywhere). Everything else is **per-project** and isolated (each project has its own rule/mapping, refine conversation, baselines, and review queue). Sidebar: global **모델 연결 (Model)** + a current-project selector, then per-project steps **1 프로젝트 정보 → 2 규칙·해석 → 3 실행 & 결과 → 4 리뷰 큐**:

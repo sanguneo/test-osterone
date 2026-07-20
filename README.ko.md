@@ -115,7 +115,7 @@ bun run run:live -- --url https://your.app --cases ./my-cases.csv
 클릭만으로 쓰는 진입점입니다. 한 번만 켜두면 그다음은 전부 브라우저에서 이뤄집니다.
 
 ```bash
-bun run studio     # 켠 뒤 http://localhost:8686 접속
+bun run studio     # React UI(Vite) 빌드 후 서빙 — 켠 뒤 http://localhost:8686 접속
 ```
 
 모델 연결은 **전역**입니다(한 번 연결하면 앱 전체에 적용). 그 외 모든 것은 **프로젝트별로 격리**됩니다(프로젝트마다 규칙/매핑·대화·baseline·리뷰 큐가 독립). 사이드바: 전역 **모델 연결** + 현재 프로젝트 선택, 그 아래 프로젝트별 단계 **1 프로젝트 정보 → 2 규칙·해석 → 3 실행 & 결과 → 4 리뷰 큐**:

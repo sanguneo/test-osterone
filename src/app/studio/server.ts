@@ -42,6 +42,41 @@ const here = dirname(fileURLToPath(import.meta.url));
 const bundledCases = join(here, "../../testing/sample-cases.csv");
 const bundledCasesNl = join(here, "../../testing/sample-cases-nl.csv");
 
+const webDist = join(here, "web/dist");
+const MIME: Record<string, string> = {
+	".html": "text/html; charset=utf-8",
+	".js": "text/javascript; charset=utf-8",
+	".css": "text/css; charset=utf-8",
+	".json": "application/json",
+	".png": "image/png",
+	".svg": "image/svg+xml",
+	".ico": "image/x-icon",
+	".woff2": "font/woff2",
+	".map": "application/json",
+};
+
+/** Serve the built React SPA (web/dist) with an index.html fallback for client routes. */
+function serveStatic(res: ServerResponse, pathname: string): void {
+	const rel = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+	const file = join(webDist, rel);
+	if (!file.startsWith(webDist)) {
+		send(res, 403, JSON.stringify({ error: "forbidden" }));
+		return;
+	}
+	try {
+		const data = readFileSync(file);
+		res.writeHead(200, { "content-type": MIME[file.slice(file.lastIndexOf("."))] ?? "application/octet-stream" });
+		res.end(data);
+	} catch {
+		try {
+			res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+			res.end(readFileSync(join(webDist, "index.html")));
+		} catch {
+			send(res, 404, JSON.stringify({ error: "web UI not built — run 'bun run studio:build'" }));
+		}
+	}
+}
+
 // SheetJS is CJS; load via createRequire so it works under Node without ESM-interop config.
 const XLSX = createRequire(import.meta.url)("xlsx") as {
 	read: (
@@ -415,8 +450,8 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
 	const url = new URL(req.url ?? "/", "http://localhost");
-	if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
-		return send(res, 200, PAGE, "text/html");
+	if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
+		return serveStatic(res, url.pathname);
 	}
 	if (req.method === "GET" && url.pathname === "/api/history") {
 		return send(res, 200, JSON.stringify(stateFor(url.searchParams.get("projectId") || "sample").history));
@@ -643,451 +678,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 	}
 	return send(res, 404, JSON.stringify({ error: "not found" }));
 }
-
-const PAGE = `<!doctype html>
-<html lang="ko"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>test-osterone Studio</title>
-<style>
-  :root { --bg:#14171c; --panel:#1d2127; --line:#2b313a; --ink:#e7ebf0; --dim:#95a0ad; --lime:#9ee600;
-          --pass:#9ee600; --fail:#ff5a52; --review:#ffb020; --error:#7a8794; }
-  * { box-sizing:border-box; } body { margin:0; background:var(--bg); color:var(--ink);
-      font:15px/1.5 -apple-system,Segoe UI,Roboto,'Malgun Gothic',sans-serif; }
-  header { padding:18px 28px; border-bottom:1px solid var(--line); display:flex; align-items:center; gap:14px; }
-  header h1 { font-size:18px; margin:0; letter-spacing:.2px; } header .tag { color:var(--dim); font-size:13px; }
-  .layout { display:flex; max-width:1080px; margin:0 auto; }
-  .side { width:200px; flex-shrink:0; padding:20px 12px; border-right:1px solid var(--line); display:flex; flex-direction:column; gap:4px; }
-  .side button { text-align:left; padding:10px 12px; background:none; border:0; color:var(--dim); border-radius:8px; cursor:pointer; font-size:14px; }
-  .side button.on { background:#12151a; color:var(--ink); }
-  .content { flex:1; min-width:0; padding:24px 22px 60px; }
-  section.tab { display:none; } section.tab.active { display:block; }
-  h2.sec { font-size:15px; margin:0 0 14px; font-weight:600; }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:18px 20px; margin-bottom:20px; }
-  label { display:block; font-size:13px; color:var(--dim); margin:12px 0 6px; }
-  input[type=text], select { width:100%; padding:10px 12px; background:#12151a; border:1px solid var(--line);
-      border-radius:8px; color:var(--ink); font-size:14px; }
-  textarea { width:100%; padding:10px 12px; background:#12151a; border:1px solid var(--line);
-      border-radius:8px; color:var(--ink); font-size:14px; font-family:inherit; resize:vertical; }
-  .modes { display:flex; gap:10px; } .modes button { flex:1; padding:10px; border:1px solid var(--line); background:#12151a;
-      color:var(--dim); border-radius:8px; cursor:pointer; font-size:14px; } .modes button.on { border-color:var(--lime); color:var(--ink); }
-  .run { margin-top:16px; padding:12px 20px; background:var(--lime); color:#10130a; border:0; border-radius:8px;
-      font-weight:700; font-size:15px; cursor:pointer; } .run:disabled { opacity:.5; cursor:default; }
-  .mini { padding:6px 10px; font-size:12px; border:1px solid var(--line); background:#12151a; color:var(--ink); border-radius:6px; cursor:pointer; }
-  .plist-item { display:flex; justify-content:space-between; align-items:center; gap:10px; border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-top:8px; }
-  .plist-item .meta { color:var(--dim); font-size:12px; margin-top:2px; }
-  .summary { display:flex; gap:10px; flex-wrap:wrap; margin:2px 0 14px; }
-  .chip { padding:6px 12px; border-radius:999px; font-size:13px; border:1px solid var(--line); } .chip b { font-variant-numeric:tabular-nums; }
-  table { width:100%; border-collapse:collapse; } th,td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { color:var(--dim); font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.4px; }
-  .badge { display:inline-block; padding:2px 9px; border-radius:6px; font-size:12px; font-weight:700; }
-  .v-pass{ background:rgba(158,230,0,.16); color:var(--pass);} .v-fail{ background:rgba(255,90,82,.16); color:var(--fail);}
-  .v-needs_review{ background:rgba(255,176,32,.16); color:var(--review);} .v-error{ background:rgba(122,135,148,.2); color:var(--error);}
-  .detail { color:var(--dim); font-size:12.5px; margin-top:3px; } .detail .x{ color:var(--fail);} .detail .o{ color:var(--pass);}
-  .heal { color:var(--review); font-size:12px; } .muted{ color:var(--dim); } .err{ color:var(--fail); }
-  code { background:#12151a; padding:1px 6px; border-radius:5px; }
-  .rev-item { border:1px solid var(--line); border-radius:10px; padding:12px; margin-top:10px; display:flex; gap:14px; }
-  .rev-item img { width:200px; height:auto; border:1px solid var(--line); border-radius:6px; align-self:flex-start; }
-  .rev-body { flex:1; min-width:0; } .rev-body .why { color:var(--review); font-size:12.5px; margin:4px 0; }
-  .rev-body .txt { color:var(--dim); font-size:12px; white-space:pre-wrap; max-height:96px; overflow:auto; background:#12151a; padding:6px 8px; border-radius:6px; }
-  .approve { margin-top:10px; padding:8px 16px; background:var(--lime); color:#10130a; border:0; border-radius:8px; font-weight:700; cursor:pointer; }
-  .chatlog { max-height:240px; overflow:auto; margin:10px 0; display:flex; flex-direction:column; gap:8px; }
-  .msg { padding:8px 11px; border-radius:8px; font-size:13.5px; max-width:88%; }
-  .msg.u { align-self:flex-end; background:#22303a; } .msg.a { align-self:flex-start; background:#12151a; border:1px solid var(--line); }
-  .warns { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; } .warns:empty { margin:0; }
-  .warn { font-size:12px; color:var(--review); border:1px solid rgba(255,176,32,.4); border-radius:6px; padding:2px 8px; }
-  .linkbtn { background:none; border:0; color:var(--dim); cursor:pointer; font-size:12px; text-decoration:underline; }
-  .add { color:var(--pass); } .rem { color:var(--fail); }
-  .side-sep { color:var(--dim); font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin:16px 8px 6px; }
-  .side-select { width:100%; padding:8px 10px; background:#12151a; border:1px solid var(--line); border-radius:8px; color:var(--ink); font-size:13px; margin-bottom:6px; }
-  .side button.global { border:1px solid var(--line); }
-</style></head>
-<body>
-<header><h1>test-osterone <span style="color:var(--lime)">Studio</span></h1>
-  <span class="tag">AI가 쓰고, 결정적 엔진이 판정합니다 — 터미널 없이</span></header>
-<div class="layout">
-  <nav class="side">
-    <button data-tab="model" class="global" type="button">모델 연결 <span id="nav-auth" style="float:right">●</span></button>
-    <div class="side-sep">현재 프로젝트</div>
-    <select id="cur-project" class="side-select"></select>
-    <button data-tab="projects" class="on" type="button">1 · 프로젝트 정보</button>
-    <button data-tab="rules" type="button">2 · 규칙·해석</button>
-    <button data-tab="run" type="button">3 · 실행 & 결과</button>
-    <button data-tab="review" type="button">4 · 리뷰 큐 <span id="nav-review" style="float:right;color:var(--review)"></span></button>
-  </nav>
-  <div class="content">
-    <section id="tab-run" class="tab">
-      <h2 class="sec">실행 &amp; 결과</h2>
-      <div class="card">
-        <div id="run-meta" class="muted" style="font-size:12.5px">왼쪽 사이드바에서 현재 프로젝트를 선택하세요.</div>
-        <label style="display:flex;align-items:center;gap:8px;margin-top:14px;cursor:pointer">
-          <input type="checkbox" id="run-ai" /> <span>AI 스텝 해석 <span class="muted">— 따옴표 없는 자연어 (모델 연결 필요)</span></span>
-        </label>
-        <button id="run" class="run" type="button">실행</button>
-        <span id="status" class="muted" style="margin-left:12px"></span>
-      </div>
-      <div id="run-preview"></div>
-      <div id="out"></div>
-    </section>
-
-    <section id="tab-projects" class="tab active">
-      <h2 class="sec">프로젝트</h2>
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <b>저장된 프로젝트</b>
-          <button id="proj-add" class="run" type="button" style="margin-top:0;padding:8px 14px;font-size:13px">+ 새 프로젝트</button>
-        </div>
-        <div id="proj-list"></div>
-      </div>
-      <div class="card">
-        <b id="proj-editor-title">새 프로젝트</b>
-        <input type="hidden" id="proj-id" />
-        <label>이름</label><input id="proj-name" type="text" placeholder="예: 우리 서비스 회귀" />
-        <label style="margin-top:14px">TC 소스 <span class="muted">— 시트 / CSV / XLSX를 여러 개 추가</span></label>
-        <div id="src-list" class="detail" style="margin:4px 0 8px">아직 소스가 없습니다.</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button id="src-add-sheet" class="mini" type="button">+ 구글 시트</button>
-          <button id="src-add-csv" class="mini" type="button">+ CSV 붙여넣기</button>
-          <label class="mini" style="cursor:pointer">+ XLSX 파일<input id="src-xlsx" type="file" accept=".xlsx,.xls" style="display:none" /></label>
-          <span id="src-xlsx-status" class="muted"></span>
-        </div>
-        <div id="src-sheet-input" style="display:none;margin-top:8px">
-          <input id="src-sheet-url" type="text" placeholder="https://docs.google.com/spreadsheets/d/…" />
-          <button id="src-sheet-ok" class="mini" type="button" style="margin-top:6px">시트 추가</button>
-        </div>
-        <div id="src-csv-input" style="display:none;margin-top:8px">
-          <textarea id="src-csv-text" rows="3" placeholder="Test ID,Title,Steps,Expected&#10;…"></textarea>
-          <button id="src-csv-ok" class="mini" type="button" style="margin-top:6px">CSV 추가</button>
-        </div>
-        <div id="src-xlsx-sheets" style="display:none;margin-top:8px"></div>
-        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px">
-          <div style="flex:2 1 240px"><label>테스트 대상 사이트 URL</label><input id="proj-base" type="text" placeholder="https://your.app" /></div>
-          <div style="flex:1 1 120px"><label>환경</label><input id="proj-env" type="text" placeholder="staging" /></div>
-        </div>
-        <div style="display:flex;gap:14px;flex-wrap:wrap">
-          <div style="flex:1 1 160px"><label>테스트 계정 (선택)</label><input id="proj-user" type="text" placeholder="아이디" /></div>
-          <div style="flex:1 1 160px"><label>비밀번호 (선택)</label><input id="proj-pass" type="text" placeholder="비밀번호" /></div>
-        </div>
-        <label>참고 프로젝트 repo (선택) <span class="muted">— AI가 앱 맥락 파악에 사용</span></label>
-        <input id="proj-repo" type="text" placeholder="https://github.com/org/app" />
-        <label style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer">
-          <input type="checkbox" id="proj-ai" /> <span>기본으로 AI 스텝 해석 사용</span>
-        </label>
-        <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <button id="proj-save" class="run" type="button" style="margin-top:0">저장</button>
-          <button id="proj-preview-btn" class="mini" type="button">TC 읽기 & 중복 확인</button>
-          <button id="proj-new" class="mini" type="button">새로 만들기</button>
-          <span id="proj-status" class="muted"></span>
-        </div>
-        <div id="proj-preview"></div>
-      </div>
-    </section>
-
-    <section id="tab-model" class="tab">
-      <h2 class="sec">모델 연결 <span class="muted" style="font-weight:400;font-size:12px">· AI 규칙 다듬기 / AI 스텝 해석용</span></h2>
-      <div class="card">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
-          <b>연결 방식</b><span id="auth-badge" class="chip muted">미연결</span>
-        </div>
-        <div class="modes" style="margin-top:12px">
-          <button id="a-codex" class="on" type="button">Codex 로그인</button>
-          <button id="a-token" type="button">토큰 직접 입력</button>
-          <button id="a-key" type="button">API Key</button>
-        </div>
-        <div id="a-token-f" style="display:none"><label>ChatGPT/Codex 액세스 토큰</label><input id="token" type="text" placeholder="eyJ…" /></div>
-        <div id="a-key-f" style="display:none"><label>OpenAI API Key</label><input id="apiKey" type="text" placeholder="sk-…" /></div>
-        <button id="connect" class="run" type="button" style="margin-top:14px">연결</button>
-        <span id="auth-status" class="muted" style="margin-left:12px"></span>
-      </div>
-    </section>
-
-    <section id="tab-rules" class="tab">
-      <h2 class="sec">AI 규칙 다듬기 (대화)</h2>
-      <div class="card">
-        <div id="rules-locked" class="muted">먼저 <b>모델 연결</b> 탭에서 모델을 연결하세요.</div>
-        <div id="refine-box" style="display:none">
-          <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <b>시트 해석 (열 매핑)</b>
-              <button id="analyze" class="mini" type="button">선택 프로젝트 시트 AI 해석</button>
-            </div>
-            <div id="mapping" class="detail" style="margin-top:6px">(매핑 없음)</div>
-            <span id="analyze-status" class="muted"></span>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <label style="margin:0">지시 <span class="muted">예: "누르기도 click으로", "그건 되돌려"</span></label>
-            <button id="refine-reset" type="button" class="linkbtn">초기화</button>
-          </div>
-          <div id="chat" class="chatlog"></div>
-          <div id="warnings" class="warns"></div>
-          <div id="intents" class="detail" style="margin-top:8px"></div>
-          <div style="display:flex;gap:10px;margin-top:10px;align-items:flex-end">
-            <textarea id="instruction" rows="2" placeholder="자연어로 규칙 지시…" style="flex:1"></textarea>
-            <button id="refine" class="run" type="button" style="margin-top:0">보내기</button>
-          </div>
-          <span id="refine-status" class="muted"></span>
-        </div>
-      </div>
-    </section>
-
-    <section id="tab-review" class="tab">
-      <h2 class="sec">리뷰 큐</h2>
-      <div id="review"></div>
-      <div id="review-empty" class="muted">needs_review 케이스가 없습니다. 실행 후 여기서 증거(스크린샷)를 확인하고 baseline을 승인하세요.</div>
-    </section>
-  </div>
-</div>
-<script>
-  var $ = function(id){ return document.getElementById(id); };
-  function esc(s){ var d=document.createElement("div"); d.textContent=s==null?"":String(s); return d.innerHTML; }
-  function badge(v){ return '<span class="badge v-'+v+'">'+v+'</span>'; }
-
-  var navs = document.querySelectorAll(".side button");
-  for (var n=0;n<navs.length;n++) navs[n].onclick = function(){
-    var t = this.getAttribute("data-tab");
-    for (var k=0;k<navs.length;k++) navs[k].classList.toggle("on", navs[k].getAttribute("data-tab")===t);
-    var secs = document.querySelectorAll("section.tab");
-    for (var s=0;s<secs.length;s++) secs[s].classList.toggle("active", secs[s].id==="tab-"+t);
-    if (t==="run") loadRunPreview();
-    else if (t==="rules") refreshStatus();
-    else if (t==="review") loadQueue();
-  };
-
-  // ---- projects ----
-  var projects = [], selId = "sample", editSources = [];
-  function fmtSource(p){ if(p.id==="sample") return "샘플 (번들 데모)"; var n=(p.sources||[]).length; return n?(n+"개 소스 · "+(p.baseUrl||"대상 미설정")):"소스 없음 · "+(p.baseUrl||"대상 미설정"); }
-  function fillProjects(list){
-    projects = list || [];
-    $("cur-project").innerHTML = projects.map(function(p){ return '<option value="'+esc(p.id)+'"'+(p.id===selId?" selected":"")+'>'+esc(p.name)+'</option>'; }).join("");
-    $("proj-list").innerHTML = projects.map(function(p){
-      var actions = p.id==="sample" ? '<span class="muted" style="font-size:12px">기본</span>'
-        : '<button class="mini" data-edit="'+esc(p.id)+'">편집</button> <button class="mini" data-del="'+esc(p.id)+'">삭제</button>';
-      return '<div class="plist-item"><div><b>'+esc(p.name)+'</b><div class="meta">'+esc(fmtSource(p))+(p.aiInterpret?" · AI 해석":"")+'</div></div><div>'+actions+'</div></div>';
-    }).join("");
-    var eb=$("proj-list").querySelectorAll("[data-edit]"); for (var i=0;i<eb.length;i++) eb[i].onclick=function(){ editProject(this.getAttribute("data-edit")); };
-    var db=$("proj-list").querySelectorAll("[data-del]"); for (var j=0;j<db.length;j++) db[j].onclick=function(){ delProject(this.getAttribute("data-del")); };
-    onSelectProject();
-  }
-  function onSelectProject(){
-    selId = $("cur-project").value || "sample";
-    var p = null; for (var i=0;i<projects.length;i++) if (projects[i].id===selId) p=projects[i];
-    if (!p) p = projects[0]; if (!p) return;
-    $("run-meta").textContent = "소스: " + fmtSource(p);
-    $("run-ai").checked = !!p.aiInterpret;
-  }
-  function selectedProject(){ for (var i=0;i<projects.length;i++) if (projects[i].id===selId) return projects[i]; return projects[0]; }
-  async function loadRunPreview(){
-    var p=selectedProject(); if(!p){ $("run-preview").innerHTML=""; return; }
-    $("run-preview").innerHTML='<div class="muted" style="margin:10px 0">실행 대상 케이스 확인 중…</div>';
-    try {
-      var res=await fetch("/api/tc/preview",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({sample:p.id==="sample",sources:p.sources||[],baseUrl:p.baseUrl,aiInterpret:$("run-ai").checked,projectId:selId})});
-      var d=await res.json(); if(!res.ok) throw new Error(d.error||"읽기 실패");
-      var out='<div class="card"><div class="summary"><b>실행 대상 케이스</b> <span class="chip">고유 <b>'+d.counts.unique+'</b></span><span class="chip" style="color:var(--review)">중복 <b>'+d.counts.duplicates+'</b></span></div>';
-      out+='<table><thead><tr><th>제목</th><th>스텝</th><th>기대결과</th></tr></thead><tbody>';
-      d.unique.slice(0,20).forEach(function(c){ out+='<tr><td>'+esc(c.title||c.caseId)+'</td><td class="detail">'+esc((c.steps||[]).join(" · "))+'</td><td class="detail">'+esc(c.expected)+'</td></tr>'; });
-      out+='</tbody></table>';
-      if (d.duplicates&&d.duplicates.length) out+='<div class="detail" style="margin-top:8px;color:var(--review)">중복 제거: '+d.duplicates.map(function(x){return esc(x.title)+" ↔ "+esc(x.duplicateOf);}).join(", ")+'</div>';
-      out+='</div>'; $("run-preview").innerHTML=out;
-    } catch(e){ $("run-preview").innerHTML='<div class="detail err" style="margin:8px 0">케이스 미리보기 실패: '+esc(e.message)+'</div>'; }
-  }
-  $("cur-project").onchange = function(){ onSelectProject(); loadRunPreview(); if(typeof refreshStatus==="function") refreshStatus(); loadQueue(); };
-  $("run-ai").onchange = loadRunPreview;
-  function renderSrcList(){
-    if(!editSources.length){ $("src-list").innerHTML="아직 소스가 없습니다."; return; }
-    $("src-list").innerHTML = editSources.map(function(s,i){
-      var summ = s.kind==="sheet" ? ("시트: "+esc((s.sheetUrl||"").slice(0,60))) : ("CSV["+esc(s.label||"")+"] "+((s.csvText||"").split("\\n").filter(function(l){return l.trim();}).length)+"행");
-      return '<div class="plist-item" style="padding:6px 10px"><span class="detail" style="margin:0">'+summ+'</span><button class="mini" data-rm="'+i+'" type="button">제거</button></div>';
-    }).join("");
-    var rm=$("src-list").querySelectorAll("[data-rm]"); for(var k=0;k<rm.length;k++) rm[k].onclick=function(){ editSources.splice(+this.getAttribute("data-rm"),1); renderSrcList(); };
-  }
-  $("src-add-sheet").onclick=function(){ $("src-sheet-input").style.display="block"; $("src-csv-input").style.display="none"; $("src-sheet-url").focus(); };
-  $("src-add-csv").onclick=function(){ $("src-csv-input").style.display="block"; $("src-sheet-input").style.display="none"; $("src-csv-text").focus(); };
-  $("src-sheet-ok").onclick=function(){ var u=$("src-sheet-url").value.trim(); if(!u) return; editSources.push({kind:"sheet",label:"시트",sheetUrl:u,csvText:""}); $("src-sheet-url").value=""; $("src-sheet-input").style.display="none"; renderSrcList(); };
-  $("src-csv-ok").onclick=function(){ var t=$("src-csv-text").value; if(!t.trim()) return; editSources.push({kind:"csv",label:"붙여넣기",sheetUrl:"",csvText:t}); $("src-csv-text").value=""; $("src-csv-input").style.display="none"; renderSrcList(); };
-  $("src-xlsx").onchange=async function(){
-    var f=this.files&&this.files[0]; if(!f) return;
-    $("src-xlsx-status").className="muted"; $("src-xlsx-status").textContent="파싱 중…";
-    try {
-      var b64=await new Promise(function(resolve,reject){ var r=new FileReader(); r.onload=function(){ resolve(String(r.result).split(",")[1]); }; r.onerror=reject; r.readAsDataURL(f); });
-      var res=await fetch("/api/xlsx/convert",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({base64:b64})});
-      var d=await res.json(); if(!res.ok) throw new Error(d.error||"변환 실패");
-      $("src-xlsx-status").textContent="";
-      window.__xlsxSheets=d.sheets;
-      var box=$("src-xlsx-sheets"); box.style.display="block";
-      box.innerHTML='<div class="detail" style="margin-bottom:4px">'+esc(f.name)+' — 담을 시트 선택:</div>'+d.sheets.map(function(s,i){ return '<label style="display:block;font-size:13px"><input type="checkbox" data-sheet="'+i+'" /> '+esc(s.name)+' ('+s.rows+'행)</label>'; }).join("")+'<button id="src-xlsx-add" class="mini" type="button" style="margin-top:6px">선택 시트 추가</button>';
-      $("src-xlsx-add").onclick=function(){ var cbs=box.querySelectorAll("[data-sheet]"); for(var i=0;i<cbs.length;i++){ if(cbs[i].checked){ var s=window.__xlsxSheets[+cbs[i].getAttribute("data-sheet")]; editSources.push({kind:"csv",label:s.name,sheetUrl:"",csvText:s.csv}); } } box.style.display="none"; box.innerHTML=""; renderSrcList(); };
-    } catch(e){ $("src-xlsx-status").className="err"; $("src-xlsx-status").textContent=e.message; }
-    this.value="";
-  };
-  function clearEditorFields(){ ["proj-name","proj-base","proj-env","proj-user","proj-pass","proj-repo"].forEach(function(id){ $(id).value=""; }); $("proj-id").value=""; $("proj-ai").checked=false; }
-  function newProject(){ clearEditorFields(); editSources=[]; renderSrcList(); $("src-sheet-input").style.display="none"; $("src-csv-input").style.display="none"; $("src-xlsx-sheets").style.display="none"; $("proj-editor-title").textContent="새 프로젝트"; $("proj-status").className="muted"; $("proj-status").textContent=""; $("proj-preview").innerHTML=""; }
-  $("proj-new").onclick=newProject;
-  $("proj-add").onclick=function(){ newProject(); $("proj-name").focus(); };
-  function editProject(id){ var p=null; for (var i=0;i<projects.length;i++) if (projects[i].id===id) p=projects[i]; if(!p) return;
-    $("proj-id").value=p.id; $("proj-name").value=p.name; $("proj-base").value=p.baseUrl||""; $("proj-env").value=p.env||""; $("proj-user").value=p.username||""; $("proj-pass").value=p.password||""; $("proj-repo").value=p.referenceRepo||""; $("proj-ai").checked=!!p.aiInterpret;
-    editSources=(p.sources||[]).map(function(s){ return {kind:s.kind,label:s.label,sheetUrl:s.sheetUrl,csvText:s.csvText}; }); renderSrcList();
-    $("proj-editor-title").textContent="프로젝트 편집"; $("proj-preview").innerHTML="";
-  }
-  function editorBody(){ return { id: $("proj-id").value||undefined, projectId: $("proj-id").value||"sample", sample:false, name: $("proj-name").value.trim()||"Untitled", sources: editSources, baseUrl: $("proj-base").value.trim(), env: $("proj-env").value.trim(), username: $("proj-user").value.trim(), password: $("proj-pass").value, referenceRepo: $("proj-repo").value.trim(), aiInterpret: $("proj-ai").checked }; }
-  $("proj-save").onclick=async function(){
-    $("proj-save").disabled=true;
-    try { var res=await fetch("/api/projects",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(editorBody())}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"저장 실패"); selId=d.saved.id; fillProjects(d.projects); $("cur-project").value=selId; onSelectProject(); refreshStatus(); loadQueue(); $("proj-status").className="muted"; $("proj-status").textContent="저장됨"; }
-    catch(e){ $("proj-status").className="err"; $("proj-status").textContent=e.message; }
-    finally { $("proj-save").disabled=false; }
-  };
-  $("proj-preview-btn").onclick=async function(){
-    $("proj-preview-btn").disabled=true; $("proj-status").className="muted"; $("proj-status").textContent="TC 읽는 중…";
-    try { var res=await fetch("/api/tc/preview",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(editorBody())}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"읽기 실패"); $("proj-status").textContent=""; renderPreview(d); }
-    catch(e){ $("proj-status").className="err"; $("proj-status").textContent=e.message; $("proj-preview").innerHTML=""; }
-    finally { $("proj-preview-btn").disabled=false; }
-  };
-  function renderPreview(d){
-    var m=d.mapping||{}, out='<div class="card">';
-    out+='<div class="summary"><span class="chip">케이스 <b>'+d.counts.unique+'</b></span><span class="chip" style="color:var(--review)">중복 <b>'+d.counts.duplicates+'</b></span></div>';
-    out+='<div class="detail" style="margin-bottom:8px">열 매핑: '+(Object.keys(m).length?Object.keys(m).map(function(k){return "<code>"+esc(k)+"</code>→"+esc(m[k]);}).join("&nbsp;&nbsp;"):"(자동감지 실패 — AI 규칙 탭에서 시트 해석)")+'</div>';
-    out+='<table><thead><tr><th>제목</th><th>스텝</th><th>기대결과</th></tr></thead><tbody>';
-    d.unique.forEach(function(c){ out+='<tr><td>'+esc(c.title||c.caseId)+'</td><td class="detail">'+esc((c.steps||[]).join(" · "))+'</td><td class="detail">'+esc(c.expected)+'</td></tr>'; });
-    out+='</tbody></table>';
-    if (d.duplicates && d.duplicates.length){ out+='<div class="detail" style="margin-top:10px;color:var(--review)">중복 제거: '+d.duplicates.map(function(x){return esc(x.title)+" ↔ "+esc(x.duplicateOf);}).join(", ")+'</div>'; }
-    out+='</div>';
-    $("proj-preview").innerHTML=out;
-  }
-  async function delProject(id){ try { var res=await fetch("/api/projects/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:id})}); var d=await res.json(); if(selId===id) selId="sample"; fillProjects(d.projects); } catch(e){} }
-
-  // ---- run + results ----
-  function render(view){
-    var c=view.counts, out='<div class="card"><div class="summary">';
-    out+='<span class="chip">대상 <b>'+esc(view.baseUrl)+'</b></span>';
-    out+='<span class="chip">해석 <b>'+esc(view.interpreter==="ai"?"AI":"규칙")+'</b></span>';
-    out+='<span class="chip" style="color:var(--pass)">pass <b>'+(c.pass||0)+'</b></span>';
-    out+='<span class="chip" style="color:var(--fail)">fail <b>'+(c.fail||0)+'</b></span>';
-    out+='<span class="chip" style="color:var(--review)">needs_review <b>'+(c.needs_review||0)+'</b></span>';
-    out+='<span class="chip" style="color:var(--error)">error <b>'+(c.error||0)+'</b></span></div>';
-    out+='<table><thead><tr><th>케이스</th><th>판정</th><th>신뢰도</th><th>assert</th><th>상세</th></tr></thead><tbody>';
-    view.results.forEach(function(r){
-      var det=r.assertions.map(function(a){ return '<div class="detail">'+(a.passed?'<span class="o">✓</span>':'<span class="x">✗</span>')+' '+esc(a.detail)+'</div>'; }).join("");
-      if (r.heal && r.heal.length) det+='<div class="heal">⚠ self-heal: '+esc(r.heal.join("; "))+'</div>';
-      out+='<tr><td>'+esc(r.title)+'</td><td>'+badge(r.verdict)+'</td><td>'+r.confidence.toFixed(2)+'</td><td>'+r.passed+'/'+r.total+'</td><td>'+(det||'<span class="muted">—</span>')+'</td></tr>';
-    });
-    out+='</tbody></table></div>';
-    $("out").innerHTML=out;
-  }
-  function renderLive(acc,total){
-    var c=acc.counts;
-    var out='<div class="card"><div class="summary"><b>진행 '+acc.results.length+'/'+total+'</b>';
-    out+='<span class="chip" style="color:var(--pass)">pass <b>'+(c.pass||0)+'</b></span>';
-    out+='<span class="chip" style="color:var(--fail)">fail <b>'+(c.fail||0)+'</b></span>';
-    out+='<span class="chip" style="color:var(--review)">needs_review <b>'+(c.needs_review||0)+'</b></span>';
-    out+='<span class="chip" style="color:var(--error)">error <b>'+(c.error||0)+'</b></span></div>';
-    out+='<table><thead><tr><th>케이스</th><th>판정</th><th>신뢰도</th><th>assert</th></tr></thead><tbody>';
-    acc.results.forEach(function(r){ out+='<tr><td>'+esc(r.title)+'</td><td>'+badge(r.verdict)+'</td><td>'+r.confidence.toFixed(2)+'</td><td>'+r.passed+'/'+r.total+'</td></tr>'; });
-    out+='</tbody></table></div>';
-    $("out").innerHTML=out;
-  }
-  $("run").onclick=async function(){
-    var p=null; for (var i=0;i<projects.length;i++) if (projects[i].id===selId) p=projects[i];
-    if(!p) p={id:"sample",sources:[]};
-    var body={ sample:p.id==="sample", sources:p.sources||[], aiInterpret:$("run-ai").checked, baseUrl:p.baseUrl||"", env:p.env||"", username:p.username||"", password:p.password||"", referenceRepo:p.referenceRepo||"", projectId:selId };
-    $("run").disabled=true; $("status").className="muted"; $("status").textContent="실행 중…"; $("out").innerHTML="";
-    var acc={ counts:{pass:0,fail:0,needs_review:0,error:0}, results:[] }; var total=0;
-    try {
-      var res=await fetch("/api/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)});
-      if(!res.body) throw new Error("스트림 없음");
-      var reader=res.body.getReader(), dec=new TextDecoder(), buf="";
-      while(true){
-        var chunk=await reader.read(); if(chunk.done) break;
-        buf+=dec.decode(chunk.value,{stream:true});
-        var lines=buf.split("\n"); buf=lines.pop();
-        for(var li=0;li<lines.length;li++){ var ln=lines[li].trim(); if(!ln) continue; var ev=JSON.parse(ln);
-          if(ev.type==="start"){ total=ev.total; $("status").textContent="실행 중… 0/"+total; }
-          else if(ev.type==="case"){ acc.results.push(ev.result); acc.counts[ev.result.verdict]=(acc.counts[ev.result.verdict]||0)+1; $("status").textContent="실행 중… "+acc.results.length+"/"+total; renderLive(acc,total); }
-          else if(ev.type==="done"){ $("status").textContent="완료"; render(ev.view); loadQueue(); }
-          else if(ev.type==="error"){ throw new Error(ev.error||"실행 실패"); }
-        }
-      }
-    } catch(e){ $("status").textContent=""; $("out").innerHTML='<div class="card err">오류: '+esc(e.message)+'</div>'; }
-    finally { $("run").disabled=false; }
-  };
-
-  // ---- model connection ----
-  var authMode="codex";
-  function setAuthMode(m){ authMode=m; ["codex","token","key"].forEach(function(x){ $("a-"+x).classList.toggle("on", x===m); }); $("a-token-f").style.display=m==="token"?"block":"none"; $("a-key-f").style.display=m==="key"?"block":"none"; }
-  $("a-codex").onclick=function(){ setAuthMode("codex"); };
-  $("a-token").onclick=function(){ setAuthMode("token"); };
-  $("a-key").onclick=function(){ setAuthMode("key"); };
-  function renderIntents(v,intents){ $("intents").innerHTML="규칙 v"+v+" · "+Object.keys(intents||{}).map(function(k){ return "<code>"+esc(k)+"</code> "+esc((intents[k]||[]).join(", ")); }).join("&nbsp;&nbsp;"); }
-  function renderWarnings(w){ $("warnings").innerHTML=(w||[]).map(function(x){ return '<span class="warn">⚠ '+esc(x)+'</span>'; }).join(""); }
-  function renderChat(chat){ $("chat").innerHTML=(chat||[]).map(function(m){ return '<div class="msg '+(m.role==="user"?"u":"a")+'">'+esc(m.content)+'</div>'; }).join(""); $("chat").scrollTop=$("chat").scrollHeight; }
-  function diffText(diff){ return Object.keys(diff||{}).map(function(k){ var d=diff[k],s=[]; if(d.added&&d.added.length)s.push('<span class="add">+'+esc(d.added.join(", "))+'</span>'); if(d.removed&&d.removed.length)s.push('<span class="rem">-'+esc(d.removed.join(", "))+'</span>'); return "<code>"+esc(k)+"</code> "+s.join(" "); }).join("&nbsp;&nbsp;"); }
-  function renderMapping(m){ var keys=Object.keys(m||{}); $("mapping").innerHTML = keys.length ? keys.map(function(k){ return "<code>"+esc(k)+"</code> → "+esc(m[k]); }).join("&nbsp;&nbsp;") : "(매핑 없음 — 헤더 자동감지 사용)"; }
-  function renderStatus(s){
-    var on = s.connected && s.auth;
-    $("auth-badge").className = on?"chip":"chip muted"; $("auth-badge").style.color = on?"var(--lime)":"";
-    $("auth-badge").textContent = on ? ("연결됨 · "+s.auth.mode+(s.auth.accountId?(" · "+s.auth.accountId):"")+" · "+s.auth.model) : "미연결";
-    $("nav-auth").style.color = on?"var(--lime)":"var(--dim)";
-    $("rules-locked").style.display = on?"none":"block";
-    $("refine-box").style.display = on?"block":"none";
-    if (s.intents) renderIntents(s.ruleVersion, s.intents);
-    renderWarnings(s.warnings); renderChat(s.chat); renderMapping(s.mapping);
-  }
-  $("connect").onclick=async function(){
-    var body={ mode: authMode==="key"?"apikey":(authMode==="token"?"token":"codex"), token:$("token")?$("token").value.trim():"", apiKey:$("apiKey")?$("apiKey").value.trim():"", projectId:selId };
-    $("connect").disabled=true; $("auth-status").className="muted"; $("auth-status").textContent="연결 중…";
-    try { var res=await fetch("/api/auth",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"연결 실패"); $("auth-status").textContent=""; renderStatus(d); }
-    catch(e){ $("auth-status").className="err"; $("auth-status").textContent=e.message; }
-    finally { $("connect").disabled=false; }
-  };
-  $("refine-reset").onclick=async function(){ try { var res=await fetch("/api/refine/reset",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({projectId:selId})}); renderStatus(await res.json()); $("refine-status").textContent=""; } catch(e){ $("refine-status").className="err"; $("refine-status").textContent=e.message; } };
-  $("refine").onclick=async function(){
-    var ins=$("instruction").value.trim(); if(!ins){ $("refine-status").className="err"; $("refine-status").textContent="지시를 입력하세요."; return; }
-    $("refine").disabled=true; $("refine-status").className="muted"; $("refine-status").textContent="AI가 규칙을 다듬는 중…";
-    try { var res=await fetch("/api/refine",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instruction:ins,projectId:selId})}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"실패");
-      $("instruction").value=""; renderChat(d.chat); renderWarnings(d.warnings); renderIntents(d.ruleVersion,d.intents); renderMapping(d.mapping);
-      $("refine-status").className="muted"; $("refine-status").innerHTML=(d.changed?"규칙 v"+d.ruleVersion+" 갱신 · ":"변경 없음 · ")+diffText(d.diff);
-    } catch(e){ $("refine-status").className="err"; $("refine-status").textContent=e.message; }
-    finally { $("refine").disabled=false; }
-  };
-
-  $("analyze").onclick=async function(){
-    var p=selectedProject();
-    var src=p&&p.sources&&p.sources[0];
-    if(!src){ $("analyze-status").className="err"; $("analyze-status").textContent="TC 소스가 있는 프로젝트를 먼저 선택하세요."; return; }
-    $("analyze").disabled=true; $("analyze-status").className="muted"; $("analyze-status").textContent="시트 헤더를 AI가 해석하는 중…";
-    try { var payload=src.kind==="sheet"?{sheetUrl:src.sheetUrl,projectId:selId}:{csvText:src.csvText,projectId:selId};
-      var res=await fetch("/api/sheet/analyze",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"실패");
-      renderMapping(d.mapping); renderChat(d.chat); renderWarnings(d.warnings);
-      $("analyze-status").className="muted"; $("analyze-status").textContent="헤더: "+(d.headers||[]).join(", ");
-    } catch(e){ $("analyze-status").className="err"; $("analyze-status").textContent=e.message; }
-    finally { $("analyze").disabled=false; }
-  };
-
-  // ---- review queue ----
-  function renderQueue(items){
-    var nn=(items&&items.length)||0;
-    $("nav-review").textContent = nn?("· "+nn):"";
-    $("review-empty").style.display = nn?"none":"block";
-    if (!nn){ $("review").innerHTML=""; return; }
-    var out="";
-    items.forEach(function(it){
-      out+='<div class="rev-item">';
-      if (it.screenshot) out+='<img src="'+it.screenshot+'" alt="screenshot" />';
-      out+='<div class="rev-body"><div>'+badge(it.verdict)+' <b>'+esc(it.title)+'</b></div>';
-      out+='<div class="why">사유: '+esc(it.reason)+(it.url?' · '+esc(it.url):'')+'</div>';
-      out+='<div class="txt">'+esc(it.text||'(빈 페이지)')+'</div>';
-      out+='<button class="approve" data-case="'+esc(it.caseId)+'">baseline 승인</button></div></div>';
-    });
-    $("review").innerHTML=out;
-    var btns=$("review").querySelectorAll(".approve"); for (var i=0;i<btns.length;i++) btns[i].onclick=function(){ approve(this.getAttribute("data-case"), this); };
-  }
-  async function loadQueue(){ try { var res=await fetch("/api/review/queue?projectId="+encodeURIComponent(selId)); renderQueue(await res.json()); } catch(e){} }
-  async function approve(caseId, btn){ if(btn){ btn.disabled=true; btn.textContent="승인 중…"; }
-    try { var res=await fetch("/api/review/approve",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({caseId:caseId,projectId:selId})}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"승인 실패"); renderQueue(d.queue); }
-    catch(e){ if(btn){ btn.disabled=false; btn.textContent="baseline 승인"; } alert(e.message); }
-  }
-
-  // init
-  function refreshStatus(){ fetch("/api/status?projectId="+encodeURIComponent(selId)).then(function(r){return r.json();}).then(renderStatus).catch(function(){}); }
-  fetch("/api/projects").then(function(r){return r.json();}).then(function(list){ fillProjects(list); refreshStatus(); loadQueue(); }).catch(function(){ refreshStatus(); loadQueue(); });
-</script>
-</body></html>`;
 
 async function main(): Promise<number> {
 	if (process.argv.includes("--selftest")) {
