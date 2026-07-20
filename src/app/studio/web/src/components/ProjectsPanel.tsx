@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { PreviewResult, Project, TcSource, XlsxSheet } from "../types";
 
@@ -44,9 +44,41 @@ export function ProjectsPanel({
 	const [xlsxName, setXlsxName] = useState("");
 	const [pick, setPick] = useState<Record<number, boolean>>({});
 	const [statusMsg, setStatusMsg] = useState("");
+	const [statusErr, setStatusErr] = useState(false);
 	const [preview, setPreview] = useState<PreviewResult | null>(null);
+	const [confirmDel, setConfirmDel] = useState("");
+	const [delErr, setDelErr] = useState("");
+	const [dirty, setDirty] = useState(false);
+	const [lastDeleted, setLastDeleted] = useState<Project | null>(null);
 
-	function editProject(p: Project) {
+	function note(msg: string, isErr = false) {
+		setStatusMsg(msg);
+		setStatusErr(isErr);
+	}
+
+	/** All form mutations go through here so unsaved changes are tracked. */
+	function upd(patch: Partial<Editor>) {
+		setEd((e) => ({ ...e, ...patch }));
+		setDirty(true);
+	}
+
+	// Warn before the page unloads with unsaved edits.
+	useEffect(() => {
+		if (!dirty) return;
+		const warn = (e: BeforeUnloadEvent) => {
+			e.preventDefault();
+		};
+		window.addEventListener("beforeunload", warn);
+		return () => window.removeEventListener("beforeunload", warn);
+	}, [dirty]);
+
+	function confirmDiscard(): boolean {
+		return !dirty || window.confirm("저장하지 않은 변경이 있습니다. 버리고 계속할까요?");
+	}
+
+	function editProject(p: Project, skipGuard = false) {
+		if (!skipGuard && !confirmDiscard()) return;
+		setDirty(false);
 		setEd({
 			id: p.id,
 			name: p.name,
@@ -64,6 +96,8 @@ export function ProjectsPanel({
 		setXlsxSheets(null);
 	}
 	function newProject() {
+		if (!confirmDiscard()) return;
+		setDirty(false);
 		setEd(blank());
 		setPreview(null);
 		setStatusMsg("");
@@ -74,21 +108,24 @@ export function ProjectsPanel({
 	function addSheet() {
 		if (!sheetUrl.trim()) return;
 		setEd((e) => ({ ...e, sources: [...e.sources, { kind: "sheet", label: "시트", sheetUrl: sheetUrl.trim(), csvText: "" }] }));
+		setDirty(true);
 		setSheetUrl("");
 		setAddMode("");
 	}
 	function addCsv() {
 		if (!csvText.trim()) return;
 		setEd((e) => ({ ...e, sources: [...e.sources, { kind: "csv", label: "붙여넣기", sheetUrl: "", csvText }] }));
+		setDirty(true);
 		setCsvText("");
 		setAddMode("");
 	}
 	function removeSource(i: number) {
 		setEd((e) => ({ ...e, sources: e.sources.filter((_, k) => k !== i) }));
+		setDirty(true);
 	}
 
 	async function onXlsx(file: File) {
-		setStatusMsg("XLSX 파싱 중…");
+		note("XLSX 파싱 중…");
 		try {
 			const b64 = await new Promise<string>((res, rej) => {
 				const r = new FileReader();
@@ -100,9 +137,9 @@ export function ProjectsPanel({
 			setXlsxSheets(sheets);
 			setXlsxName(file.name);
 			setPick({});
-			setStatusMsg("");
+			note("");
 		} catch (e) {
-			setStatusMsg((e as Error).message);
+			note(`XLSX 변환 실패: ${(e as Error).message} — 파일이 올바른 엑셀 형식인지 확인하세요.`, true);
 		}
 	}
 	function addPicked() {
@@ -111,6 +148,7 @@ export function ProjectsPanel({
 			.filter((_, i) => pick[i])
 			.map((s) => ({ kind: "csv", label: s.name, sheetUrl: "", csvText: s.csv }));
 		setEd((e) => ({ ...e, sources: [...e.sources, ...add] }));
+		setDirty(true);
 		setXlsxSheets(null);
 	}
 
@@ -130,35 +168,63 @@ export function ProjectsPanel({
 		};
 	}
 	async function save() {
-		setStatusMsg("저장 중…");
+		note("저장 중…");
 		try {
 			const { saved, projects: ps } = await api.saveProject(payload());
 			setProjects(ps);
 			setSelId(saved.id);
-			editProject(saved);
-			setStatusMsg("저장됨");
+			setDirty(false);
+			editProject(saved, true);
+			note("저장됨");
 		} catch (e) {
-			setStatusMsg((e as Error).message);
+			note(`저장 실패: ${(e as Error).message} — 다시 시도하세요.`, true);
 		}
 	}
 	async function del(id: string) {
+		setConfirmDel("");
+		setDelErr("");
+		const target = projects.find((x) => x.id === id) ?? null;
 		try {
 			const { projects: ps } = await api.deleteProject(id);
 			setProjects(ps);
+			setLastDeleted(target);
 			if (selId === id) setSelId("sample");
 		} catch (e) {
-			alert((e as Error).message);
+			setDelErr(`삭제 실패: ${(e as Error).message} — 다시 시도하세요.`);
+		}
+	}
+	async function undoDelete() {
+		if (!lastDeleted) return;
+		const p = lastDeleted;
+		setLastDeleted(null);
+		try {
+			const { projects: ps } = await api.saveProject({
+				id: p.id,
+				projectId: p.id,
+				sample: false,
+				name: p.name,
+				sources: p.sources,
+				baseUrl: p.baseUrl,
+				env: p.env,
+				username: p.username,
+				password: p.password,
+				referenceRepo: p.referenceRepo,
+				aiInterpret: p.aiInterpret,
+			});
+			setProjects(ps);
+		} catch (e) {
+			setDelErr(`되돌리기 실패: ${(e as Error).message}`);
 		}
 	}
 	async function doPreview() {
-		setStatusMsg("TC 읽는 중…");
+		note("TC 읽는 중…");
 		try {
 			const d = await api.preview({ sample: false, sources: ed.sources, baseUrl: ed.baseUrl, projectId: ed.id || "sample" });
 			setPreview(d);
-			setStatusMsg("");
+			note("");
 		} catch (e) {
 			setPreview(null);
-			setStatusMsg((e as Error).message);
+			note(`TC 읽기 실패: ${(e as Error).message} — 소스 URL과 형식을 확인하세요.`, true);
 		}
 	}
 
@@ -192,12 +258,21 @@ export function ProjectsPanel({
 								<span className="muted" style={{ fontSize: 12 }}>
 									기본
 								</span>
+							) : confirmDel === p.id ? (
+								<>
+									<button className="mini" type="button" style={{ color: "var(--fail)" }} onClick={() => del(p.id)}>
+										정말 삭제
+									</button>{" "}
+									<button className="mini" type="button" onClick={() => setConfirmDel("")}>
+										취소
+									</button>
+								</>
 							) : (
 								<>
 									<button className="mini" type="button" onClick={() => editProject(p)}>
 										편집
 									</button>{" "}
-									<button className="mini" type="button" onClick={() => del(p.id)}>
+									<button className="mini" type="button" onClick={() => setConfirmDel(p.id)}>
 										삭제
 									</button>
 								</>
@@ -205,12 +280,25 @@ export function ProjectsPanel({
 						</div>
 					</div>
 				))}
+				{delErr && (
+					<div className="err" style={{ fontSize: 12.5, marginTop: 8 }}>
+						{delErr}
+					</div>
+				)}
+				{lastDeleted && (
+					<div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+						"{lastDeleted.name}" 프로젝트를 삭제했습니다.{" "}
+						<button className="linkbtn" type="button" onClick={undoDelete}>
+							되돌리기
+						</button>
+					</div>
+				)}
 			</div>
 
 			<div className="card">
 				<b>{ed.id ? "프로젝트 편집" : "새 프로젝트"}</b>
 				<label>이름</label>
-				<input type="text" value={ed.name} onChange={(e) => setEd({ ...ed, name: e.target.value })} placeholder="예: 우리 서비스 회귀" />
+				<input type="text" value={ed.name} onChange={(e) => upd({ name: e.target.value })} placeholder="예: 우리 서비스 회귀" />
 
 				<label style={{ marginTop: 14 }}>
 					TC 소스 <span className="muted">— 시트 / CSV / XLSX를 여러 개 추가</span>
@@ -287,30 +375,30 @@ export function ProjectsPanel({
 				<div className="row" style={{ marginTop: 8 }}>
 					<div style={{ flex: "2 1 240px" }}>
 						<label>테스트 대상 사이트 URL</label>
-						<input type="text" value={ed.baseUrl} onChange={(e) => setEd({ ...ed, baseUrl: e.target.value })} placeholder="https://your.app" />
+						<input type="text" value={ed.baseUrl} onChange={(e) => upd({ baseUrl: e.target.value })} placeholder="https://your.app" />
 					</div>
 					<div style={{ flex: "1 1 120px" }}>
 						<label>환경</label>
-						<input type="text" value={ed.env} onChange={(e) => setEd({ ...ed, env: e.target.value })} placeholder="staging" />
+						<input type="text" value={ed.env} onChange={(e) => upd({ env: e.target.value })} placeholder="staging" />
 					</div>
 				</div>
 				<div className="row">
 					<div style={{ flex: "1 1 160px" }}>
 						<label>테스트 계정 (선택)</label>
-						<input type="text" value={ed.username} onChange={(e) => setEd({ ...ed, username: e.target.value })} placeholder="아이디" />
+						<input type="text" value={ed.username} onChange={(e) => upd({ username: e.target.value })} placeholder="아이디" />
 					</div>
 					<div style={{ flex: "1 1 160px" }}>
 						<label>비밀번호 (선택)</label>
-						<input type="text" value={ed.password} onChange={(e) => setEd({ ...ed, password: e.target.value })} placeholder="비밀번호" />
+						<input type="password" value={ed.password} onChange={(e) => upd({ password: e.target.value })} placeholder="비밀번호" autoComplete="off" />
 					</div>
 				</div>
 				<label>
 					참고 프로젝트 repo (선택) <span className="muted">— AI가 앱 맥락 파악에 사용</span>
 				</label>
-				<input type="text" value={ed.referenceRepo} onChange={(e) => setEd({ ...ed, referenceRepo: e.target.value })} placeholder="https://github.com/org/app" />
+				<input type="text" value={ed.referenceRepo} onChange={(e) => upd({ referenceRepo: e.target.value })} placeholder="https://github.com/org/app" />
 
 				<label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, cursor: "pointer" }}>
-					<input type="checkbox" checked={ed.aiInterpret} onChange={(e) => setEd({ ...ed, aiInterpret: e.target.checked })} />{" "}
+					<input type="checkbox" checked={ed.aiInterpret} onChange={(e) => upd({ aiInterpret: e.target.checked })} />{" "}
 					<span>기본으로 AI 스텝 해석 사용</span>
 				</label>
 				<div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -321,9 +409,11 @@ export function ProjectsPanel({
 						TC 읽기 & 중복 확인
 					</button>
 					<button className="mini" type="button" onClick={newProject}>
-						새로 만들기
+						+ 새 프로젝트
 					</button>
-					<span className="muted">{statusMsg}</span>
+					<span className={statusErr ? "err" : "muted"} style={{ fontSize: 12.5 }}>
+						{statusMsg}
+					</span>
 				</div>
 				{preview && (
 					<div style={{ marginTop: 14 }}>
@@ -343,24 +433,31 @@ export function ProjectsPanel({
 										.join("   ")
 								: "(자동감지 실패 — 규칙·해석 탭에서 시트 해석)"}
 						</div>
-						<table>
-							<thead>
-								<tr>
-									<th>제목</th>
-									<th>스텝</th>
-									<th>기대결과</th>
-								</tr>
-							</thead>
-							<tbody>
-								{preview.unique.slice(0, 30).map((c) => (
-									<tr key={c.caseId}>
-										<td>{c.title || c.caseId}</td>
-										<td className="detail">{c.steps.join(" · ")}</td>
-										<td className="detail">{c.expected}</td>
+						<div className="tscroll">
+							<table>
+								<thead>
+									<tr>
+										<th>제목</th>
+										<th>스텝</th>
+										<th>기대결과</th>
 									</tr>
-								))}
-							</tbody>
-						</table>
+								</thead>
+								<tbody>
+									{preview.unique.slice(0, 30).map((c) => (
+										<tr key={c.caseId}>
+											<td>{c.title || c.caseId}</td>
+											<td className="detail">{c.steps.join(" · ")}</td>
+											<td className="detail">{c.expected}</td>
+										</tr>
+									))}
+								</tbody>
+							</table>
+						</div>
+						{preview.unique.length > 30 && (
+							<div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+								외 {preview.unique.length - 30}개 케이스는 표시를 생략했습니다.
+							</div>
+						)}
 						{preview.duplicates.length > 0 && (
 							<div className="detail" style={{ marginTop: 10, color: "var(--review)" }}>
 								중복 제거: {preview.duplicates.map((x) => `${x.title} ↔ ${x.duplicateOf}`).join(", ")}

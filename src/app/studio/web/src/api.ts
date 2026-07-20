@@ -6,6 +6,7 @@ import type {
 	ReviewItem,
 	RunEvent,
 	RunInput,
+	RunView,
 	Status,
 	XlsxSheet,
 } from "./types";
@@ -25,6 +26,7 @@ const q = (pid: string) => `projectId=${encodeURIComponent(pid)}`;
 
 export const api = {
 	status: (pid: string) => j<Status>(`/api/status?${q(pid)}`),
+	history: (pid: string) => j<RunView[]>(`/api/history?${q(pid)}`),
 	connect: (body: { mode: string; token?: string; apiKey?: string; model?: string; projectId: string }) =>
 		j<Status>("/api/auth", post(body)),
 	projects: () => j<Project[]>("/api/projects"),
@@ -39,6 +41,8 @@ export const api = {
 	reviewQueue: (pid: string) => j<ReviewItem[]>(`/api/review/queue?${q(pid)}`),
 	reviewApprove: (caseId: string, projectId: string) =>
 		j<{ queue: ReviewItem[] }>("/api/review/approve", post({ caseId, projectId })),
+	reviewApproveAll: (projectId: string) =>
+		j<{ approved: number; queue: ReviewItem[] }>("/api/review/approve-all", post({ projectId })),
 	xlsxConvert: (base64: string) => j<{ sheets: XlsxSheet[] }>("/api/xlsx/convert", post({ base64 })),
 
 	/** Stream a run: emits start / case / done / error events as they arrive. */

@@ -654,6 +654,21 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
 	}
+	if (req.method === "POST" && url.pathname === "/api/review/approve-all") {
+		try {
+			const { projectId } = JSON.parse((await readBody(req)) || "{}") as { projectId?: string };
+			const st = stateFor(projectId || "sample");
+			let approved = 0;
+			for (const item of [...st.reviewQueue.values()]) {
+				st.baseline.approve(item.caseId, item.ruleVersion, item.env);
+				st.reviewQueue.delete(item.caseId);
+				approved++;
+			}
+			return send(res, 200, JSON.stringify({ approved, queue: [...st.reviewQueue.values()] }));
+		} catch (err) {
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
 	if (req.method === "GET" && url.pathname === "/api/projects") {
 		return send(res, 200, JSON.stringify(allProjects()));
 	}

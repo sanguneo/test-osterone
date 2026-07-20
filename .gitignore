@@ -4,4 +4,15 @@ dist/
 *.log
 .DS_Store
 
+# runtime data
 .ui-craft/
+
+# local agent / ui-craft tooling (not product)
+.claude/
+.codex/
+.gemini/
+.github/
+.mcp.json
+.ui-craft-backups/
+AGENTS.md
+GEMINI.md

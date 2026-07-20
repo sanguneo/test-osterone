@@ -58,13 +58,13 @@ export function ModelPanel({
 				{mode === "token" && (
 					<>
 						<label>ChatGPT/Codex 액세스 토큰</label>
-						<input type="text" value={token} onChange={(e) => setToken(e.target.value)} placeholder="eyJ…" />
+						<input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="eyJ…" autoComplete="off" />
 					</>
 				)}
 				{mode === "apikey" && (
 					<>
 						<label>OpenAI API Key</label>
-						<input type="text" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-…" />
+						<input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-…" autoComplete="off" />
 					</>
 				)}
 				<div style={{ marginTop: 14 }}>

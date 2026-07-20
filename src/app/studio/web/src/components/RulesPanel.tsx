@@ -8,17 +8,21 @@ export function RulesPanel({
 	project,
 	connected,
 	onStatus,
+	goToModel,
 }: {
 	status: Status | null;
 	selId: string;
 	project?: Project;
 	connected: boolean;
 	onStatus: (s: Status) => void;
+	goToModel: () => void;
 }) {
 	const [instruction, setInstruction] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [refineMsg, setRefineMsg] = useState("");
+	const [refineErr, setRefineErr] = useState(false);
 	const [analyzeMsg, setAnalyzeMsg] = useState("");
+	const [analyzeErr, setAnalyzeErr] = useState(false);
 
 	const chat = status?.chat ?? [];
 	const mapping = status?.mapping ?? {};
@@ -31,7 +35,12 @@ export function RulesPanel({
 			<section>
 				<h2 className="sec">AI 규칙 다듬기 (대화)</h2>
 				<div className="card muted">
-					먼저 <b>모델 연결</b> 탭에서 모델을 연결하세요.
+					이 탭은 모델 연결이 필요합니다. 연결하면 시트 해석과 규칙 다듬기를 대화로 진행할 수 있습니다.
+					<div style={{ marginTop: 12 }}>
+						<button className="mini" type="button" onClick={goToModel}>
+							모델 연결로 이동 →
+						</button>
+					</div>
 				</div>
 			</section>
 		);
@@ -44,6 +53,7 @@ export function RulesPanel({
 			return;
 		}
 		setBusy(true);
+		setAnalyzeErr(false);
 		setAnalyzeMsg("시트 헤더를 AI가 해석하는 중…");
 		try {
 			const d = await api.analyze(
@@ -52,7 +62,8 @@ export function RulesPanel({
 			setAnalyzeMsg(`헤더: ${d.headers.join(", ")}`);
 			onStatus(await api.status(selId));
 		} catch (e) {
-			setAnalyzeMsg((e as Error).message);
+			setAnalyzeErr(true);
+			setAnalyzeMsg(`시트 해석 실패: ${(e as Error).message} — 소스와 모델 연결을 확인한 뒤 다시 시도하세요.`);
 		} finally {
 			setBusy(false);
 		}
@@ -61,6 +72,7 @@ export function RulesPanel({
 	async function send() {
 		if (!instruction.trim()) return;
 		setBusy(true);
+		setRefineErr(false);
 		setRefineMsg("AI가 규칙을 다듬는 중…");
 		try {
 			const d = await api.refine(instruction, selId);
@@ -71,7 +83,8 @@ export function RulesPanel({
 			setRefineMsg((d.changed ? `규칙 v${d.ruleVersion} 갱신 · ` : "변경 없음 · ") + diff);
 			onStatus(await api.status(selId));
 		} catch (e) {
-			setRefineMsg((e as Error).message);
+			setRefineErr(true);
+			setRefineMsg(`규칙 다듬기 실패: ${(e as Error).message} — 다시 보내거나 모델 연결 상태를 확인하세요.`);
 		} finally {
 			setBusy(false);
 		}
@@ -82,7 +95,8 @@ export function RulesPanel({
 			onStatus(await api.refineReset(selId));
 			setRefineMsg("");
 		} catch (e) {
-			setRefineMsg((e as Error).message);
+			setRefineErr(true);
+			setRefineMsg(`초기화 실패: ${(e as Error).message}`);
 		}
 	}
 
@@ -104,7 +118,7 @@ export function RulesPanel({
 						: "(매핑 없음 — 헤더 자동감지 사용)"}
 				</div>
 				{analyzeMsg && (
-					<div className="muted" style={{ marginTop: 4 }}>
+					<div className={analyzeErr ? "err" : "muted"} style={{ marginTop: 4, fontSize: 12.5 }}>
 						{analyzeMsg}
 					</div>
 				)}
@@ -118,6 +132,11 @@ export function RulesPanel({
 					</button>
 				</div>
 				<div className="chatlog">
+					{chat.length === 0 && (
+						<div className="msg a muted">
+							아직 대화가 없습니다. 아래 입력창에 자연어로 지시하면 규칙이 버전으로 쌓입니다 — 예: "누르기도 click으로 해석해".
+						</div>
+					)}
 					{chat.map((m, i) => (
 						<div key={i} className={`msg ${m.role === "user" ? "u" : "a"}`}>
 							{m.content}
@@ -149,7 +168,7 @@ export function RulesPanel({
 						보내기
 					</button>
 				</div>
-				{refineMsg && <div className="muted">{refineMsg}</div>}
+				{refineMsg && <div className={refineErr ? "err" : "muted"} style={{ fontSize: 12.5 }}>{refineMsg}</div>}
 			</div>
 		</section>
 	);
