@@ -16,3 +16,6 @@ dist/
 .ui-craft-backups/
 AGENTS.md
 GEMINI.md
+
+# session handover (meta, not product)
+HANDOVER.md
