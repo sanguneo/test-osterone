@@ -71,8 +71,18 @@ function sanitizeAssertions(raw: unknown): Assertion[] {
 	return out;
 }
 
+export interface AuthorContext {
+	referenceRepo?: string;
+	username?: string;
+	password?: string;
+}
+
 /** Author a plan from natural-language steps via the model (author-time). */
-export async function authorPlanAI(tc: NormalizedTC, model: ModelClient): Promise<AuthoredPlan> {
+export async function authorPlanAI(
+	tc: NormalizedTC,
+	model: ModelClient,
+	context: AuthorContext = {},
+): Promise<AuthoredPlan> {
 	const system =
 		"You convert a web test case's natural-language steps into a deterministic browser execution plan. " +
 		'Output ONLY JSON: {"actions":[...],"assertions":[...]}. actions items are ' +
@@ -80,7 +90,12 @@ export async function authorPlanAI(tc: NormalizedTC, model: ModelClient): Promis
 		'{"kind":"fill","target":"<field label>","value":"<text>"}. assertions items are ' +
 		'{"kind":"textIncludes","value":"..."} | {"kind":"urlIncludes","value":"..."} | {"kind":"textNotIncludes","value":"..."}. ' +
 		"Derive assertions from the Expected result and any verify/assert steps. Targets must be user-visible text, never CSS. Keep it minimal.";
-	const user = `TITLE: ${tc.title}\nSTEPS:\n${tc.steps.map((s) => `- ${s}`).join("\n")}\nEXPECTED: ${tc.expected}`;
+	const ctx: string[] = [];
+	if (context.referenceRepo) ctx.push(`App reference repo (for domain context): ${context.referenceRepo}`);
+	if (context.username) ctx.push(`Test account username: ${context.username}`);
+	if (context.password) ctx.push(`Test account password: ${context.password}`);
+	const ctxBlock = ctx.length ? `\nContext (use for login/fill steps when relevant):\n${ctx.join("\n")}` : "";
+	const user = `TITLE: ${tc.title}\nSTEPS:\n${tc.steps.map((s) => `- ${s}`).join("\n")}\nEXPECTED: ${tc.expected}${ctxBlock}`;
 	const obj =
 		extractJsonObject(
 			await model.complete([
@@ -103,11 +118,12 @@ export async function getOrAuthorPlan(
 	rule: InterpretationRule,
 	cache: PlanCache,
 	model: ModelClient,
+	context: AuthorContext = {},
 ): Promise<AuthoredPlanResult> {
 	const key = assertionCacheKey(tc.caseId, rule.ruleId, rule.ruleVersion, tc.contentHash);
 	const cached = cache.get(key);
 	if (cached) return { plan: cached, cacheHit: true, key };
-	const plan = await authorPlanAI(tc, model);
+	const plan = await authorPlanAI(tc, model, context);
 	cache.set(key, plan);
 	return { plan, cacheHit: false, key };
 }

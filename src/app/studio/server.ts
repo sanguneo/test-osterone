@@ -19,7 +19,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserPage, launchBrowser } from "../../execute/browser-page.ts";
 import { runScenario, type Verdict } from "../../execute/runner.ts";
-import { csvToRawTable, ingestCsv, ingestGoogleSheet, toCsvExportUrl } from "../../intake/ingest.ts";
+import { csvToRawTable, ingestCsv, mapColumns, toCsvExportUrl } from "../../intake/ingest.ts";
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
 import { getOrAuthorPlan, MemoryPlanCache } from "../../interpret/author.ts";
@@ -55,9 +55,14 @@ interface RunView {
 }
 
 export interface RunInput {
-	source: "sample" | "sheet";
+	source: "sample" | "sheet" | "csv";
 	sheetUrl?: string;
+	csvText?: string;
 	baseUrl?: string;
+	env?: string;
+	username?: string;
+	password?: string;
+	referenceRepo?: string;
 	aiInterpret?: boolean;
 }
 
@@ -112,9 +117,14 @@ async function sharedBrowser(): Promise<Awaited<ReturnType<typeof launchBrowser>
 interface Project {
 	id: string;
 	name: string;
-	source: "sample" | "sheet";
+	source: "sample" | "sheet" | "csv";
 	sheetUrl: string;
+	csvText: string;
 	baseUrl: string;
+	env: string;
+	username: string;
+	password: string;
+	referenceRepo: string;
 	aiInterpret: boolean;
 }
 
@@ -123,7 +133,12 @@ const SAMPLE_PROJECT: Project = {
 	name: "샘플 (번들 데모)",
 	source: "sample",
 	sheetUrl: "",
+	csvText: "",
 	baseUrl: "",
+	env: "sample",
+	username: "",
+	password: "",
+	referenceRepo: "",
 	aiInterpret: false,
 };
 const projectsFile = join(homedir(), ".test-osterone", "studio-projects.json");
@@ -145,9 +160,14 @@ function sanitizeProject(raw: unknown): Project {
 	return {
 		id: typeof o.id === "string" && o.id ? o.id : `p_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
 		name: String(o.name ?? "Untitled").slice(0, 80),
-		source: o.source === "sheet" ? "sheet" : "sample",
+		source: o.source === "sheet" ? "sheet" : o.source === "csv" ? "csv" : "sample",
 		sheetUrl: String(o.sheetUrl ?? "").slice(0, 500),
+		csvText: String(o.csvText ?? "").slice(0, 20000),
 		baseUrl: String(o.baseUrl ?? "").slice(0, 300),
+		env: String(o.env ?? "").slice(0, 60),
+		username: String(o.username ?? "").slice(0, 120),
+		password: String(o.password ?? "").slice(0, 200),
+		referenceRepo: String(o.referenceRepo ?? "").slice(0, 300),
 		aiInterpret: !!o.aiInterpret,
 	};
 }
@@ -205,12 +225,13 @@ function connect(input: AuthInput): AuthState {
 }
 
 async function loadCases(input: RunInput): Promise<{ cases: NormalizedTC[]; baseUrl: string; stop: () => void }> {
-	if (input.source === "sheet") {
-		if (!input.sheetUrl) throw new Error("Google Sheet URL is required.");
+	if (input.source === "sheet" || input.source === "csv") {
 		const baseUrl = (input.baseUrl ?? "").replace(/\/$/, "");
 		if (!baseUrl) throw new Error("Target site URL is required.");
-		const { unique } = await ingestGoogleSheet(input.sheetUrl, undefined, rule.mapping);
-		if (unique.length === 0) throw new Error("No test cases found in the sheet (check sharing = anyone with link).");
+		const text = input.source === "csv" ? (input.csvText ?? "") : await ingestGoogleSheetText(input.sheetUrl ?? "");
+		if (!text.trim()) throw new Error(input.source === "csv" ? "CSV content is required." : "Sheet is empty.");
+		const { unique } = ingestCsv(text, rule.mapping);
+		if (unique.length === 0) throw new Error("No test cases found (check headers / column mapping).");
 		return { cases: unique, baseUrl, stop: () => {} };
 	}
 	const fixture = await startFixture();
@@ -218,12 +239,20 @@ async function loadCases(input: RunInput): Promise<{ cases: NormalizedTC[]; base
 	return { cases: ingestCsv(readFileSync(file, "utf8")).unique, baseUrl: fixture.url, stop: fixture.stop };
 }
 
+/** Fetch a public/link-readable Google Sheet as CSV text. */
+async function ingestGoogleSheetText(sheetUrl: string): Promise<string> {
+	if (!sheetUrl) throw new Error("Google Sheet URL is required.");
+	const res = await fetch(toCsvExportUrl(sheetUrl));
+	if (!res.ok) throw new Error(`sheet fetch failed: ${res.status} (check sharing = anyone with link)`);
+	return res.text();
+}
+
 /** Ingest → rule → run each case against a real headless browser. Pure engine reuse. */
 export async function runBatch(input: RunInput): Promise<RunView> {
 	const ai = !!input.aiInterpret;
 	if (ai && !modelClient) throw new Error("Connect a model first to use AI step interpretation.");
 	const { cases, baseUrl, stop } = await loadCases(input);
-	const baselineEnv = input.source === "sample" ? "sample" : baseUrl;
+	const baselineEnv = input.env?.trim() || (input.source === "sample" ? "sample" : baseUrl);
 	const caseById = new Map(cases.map((c) => [c.caseId, c]));
 	for (const c of cases) reviewQueue.delete(c.caseId);
 	const cache = new MemoryAssertionCache();
@@ -232,7 +261,16 @@ export async function runBatch(input: RunInput): Promise<RunView> {
 	const results: CaseView[] = [];
 	try {
 		for (const tc of cases) {
-			const plan = ai && modelClient ? (await getOrAuthorPlan(tc, rule, planCache, modelClient)).plan : undefined;
+			const plan =
+				ai && modelClient
+					? (
+							await getOrAuthorPlan(tc, rule, planCache, modelClient, {
+								referenceRepo: input.referenceRepo,
+								username: input.username,
+								password: input.password,
+							})
+						).plan
+					: undefined;
 			const r = await runScenario(tc, {
 				page,
 				rule,
@@ -408,6 +446,42 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
 	}
+	if (req.method === "POST" && url.pathname === "/api/tc/preview") {
+		try {
+			const cfg = JSON.parse((await readBody(req)) || "{}") as RunInput;
+			const text =
+				cfg.source === "csv"
+					? (cfg.csvText ?? "")
+					: cfg.source === "sheet"
+						? await ingestGoogleSheetText(cfg.sheetUrl ?? "")
+						: readFileSync(cfg.aiInterpret ? bundledCasesNl : bundledCases, "utf8");
+			if (!text.trim()) return send(res, 400, JSON.stringify({ error: "No TC content to read." }));
+			const headers = csvToRawTable(text).headers;
+			const { all, unique, duplicates } = ingestCsv(text, rule.mapping);
+			return send(
+				res,
+				200,
+				JSON.stringify({
+					headers,
+					mapping: { ...mapColumns(headers), ...rule.mapping },
+					counts: { total: all.length, unique: unique.length, duplicates: duplicates.length },
+					unique: unique.map((c) => ({
+						caseId: c.caseId,
+						title: c.title,
+						steps: c.steps,
+						expected: c.expected,
+						priority: c.priority,
+					})),
+					duplicates: duplicates.map((d) => ({
+						title: all[d.index]?.title ?? "",
+						duplicateOf: all[d.duplicateOfIndex]?.title ?? "",
+					})),
+				}),
+			);
+		} catch (err) {
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
 	if (req.method === "GET" && url.pathname === "/api/review/queue") {
 		return send(res, 200, JSON.stringify([...reviewQueue.values()]));
 	}
@@ -539,21 +613,38 @@ const PAGE = `<!doctype html>
         <div class="modes" style="margin-top:12px">
           <button id="ps-sample" class="on" type="button">샘플</button>
           <button id="ps-sheet" type="button">구글 시트</button>
+          <button id="ps-csv" type="button">CSV 붙여넣기</button>
         </div>
         <div id="proj-sheet-fields" style="display:none">
           <label>구글 시트 URL <span class="muted">(공유: 링크 있는 모든 사용자 · 보기)</span></label>
           <input id="proj-sheet" type="text" placeholder="https://docs.google.com/spreadsheets/d/…" />
-          <label>테스트 대상 사이트 URL</label>
-          <input id="proj-base" type="text" placeholder="https://your.app" />
+        </div>
+        <div id="proj-csv-fields" style="display:none">
+          <label>TC CSV 붙여넣기 <span class="muted">(첫 행이 헤더)</span></label>
+          <textarea id="proj-csv" rows="4" placeholder="Test ID,Title,Steps,Expected&#10;T1,로그인,&quot;열기…&quot;,성공"></textarea>
+        </div>
+        <div id="proj-target-fields" style="display:none">
+          <div style="display:flex;gap:14px;flex-wrap:wrap">
+            <div style="flex:2 1 240px"><label>테스트 대상 사이트 URL</label><input id="proj-base" type="text" placeholder="https://your.app" /></div>
+            <div style="flex:1 1 120px"><label>환경</label><input id="proj-env" type="text" placeholder="staging" /></div>
+          </div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap">
+            <div style="flex:1 1 160px"><label>테스트 계정 (선택)</label><input id="proj-user" type="text" placeholder="아이디" /></div>
+            <div style="flex:1 1 160px"><label>비밀번호 (선택)</label><input id="proj-pass" type="text" placeholder="비밀번호" /></div>
+          </div>
+          <label>참고 프로젝트 repo (선택) <span class="muted">— AI가 앱 맥락 파악에 사용</span></label>
+          <input id="proj-repo" type="text" placeholder="https://github.com/org/app" />
         </div>
         <label style="display:flex;align-items:center;gap:8px;margin-top:12px;cursor:pointer">
           <input type="checkbox" id="proj-ai" /> <span>기본으로 AI 스텝 해석 사용</span>
         </label>
-        <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+        <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <button id="proj-save" class="run" type="button" style="margin-top:0">저장</button>
+          <button id="proj-preview-btn" class="mini" type="button">TC 읽기 & 중복 확인</button>
           <button id="proj-new" class="mini" type="button">새로 만들기</button>
           <span id="proj-status" class="muted"></span>
         </div>
+        <div id="proj-preview"></div>
       </div>
     </section>
 
@@ -626,7 +717,7 @@ const PAGE = `<!doctype html>
 
   // ---- projects ----
   var projects = [], selId = "sample", editSource = "sample";
-  function fmtSource(p){ return p.source==="sheet" ? ("시트 · "+(p.baseUrl||"대상 미설정")) : "샘플 (번들 데모)"; }
+  function fmtSource(p){ return p.source==="sheet" ? ("시트 · "+(p.baseUrl||"대상 미설정")) : p.source==="csv" ? ("CSV · "+(p.baseUrl||"대상 미설정")) : "샘플 (번들 데모)"; }
   function fillProjects(list){
     projects = list || [];
     $("run-project").innerHTML = projects.map(function(p){ return '<option value="'+esc(p.id)+'"'+(p.id===selId?" selected":"")+'>'+esc(p.name)+'</option>'; }).join("");
@@ -647,19 +738,44 @@ const PAGE = `<!doctype html>
     $("run-ai").checked = !!p.aiInterpret;
   }
   $("run-project").onchange = onSelectProject;
-  function setEditSource(s){ editSource=s; $("ps-sample").classList.toggle("on",s==="sample"); $("ps-sheet").classList.toggle("on",s==="sheet"); $("proj-sheet-fields").style.display=s==="sheet"?"block":"none"; }
+  function setEditSource(s){ editSource=s;
+    $("ps-sample").classList.toggle("on",s==="sample"); $("ps-sheet").classList.toggle("on",s==="sheet"); $("ps-csv").classList.toggle("on",s==="csv");
+    $("proj-sheet-fields").style.display=s==="sheet"?"block":"none";
+    $("proj-csv-fields").style.display=s==="csv"?"block":"none";
+    $("proj-target-fields").style.display=(s==="sheet"||s==="csv")?"block":"none";
+  }
   $("ps-sample").onclick=function(){ setEditSource("sample"); };
   $("ps-sheet").onclick=function(){ setEditSource("sheet"); };
-  function newProject(){ $("proj-id").value=""; $("proj-name").value=""; $("proj-sheet").value=""; $("proj-base").value=""; $("proj-ai").checked=false; setEditSource("sample"); $("proj-editor-title").textContent="새 프로젝트"; $("proj-status").className="muted"; $("proj-status").textContent=""; }
+  $("ps-csv").onclick=function(){ setEditSource("csv"); };
+  function newProject(){ ["proj-name","proj-sheet","proj-csv","proj-base","proj-env","proj-user","proj-pass","proj-repo"].forEach(function(id){ $(id).value=""; }); $("proj-id").value=""; $("proj-ai").checked=false; setEditSource("sample"); $("proj-editor-title").textContent="새 프로젝트"; $("proj-status").className="muted"; $("proj-status").textContent=""; $("proj-preview").innerHTML=""; }
   $("proj-new").onclick=newProject;
-  function editProject(id){ var p=null; for (var i=0;i<projects.length;i++) if (projects[i].id===id) p=projects[i]; if(!p) return; $("proj-id").value=p.id; $("proj-name").value=p.name; $("proj-sheet").value=p.sheetUrl; $("proj-base").value=p.baseUrl; $("proj-ai").checked=!!p.aiInterpret; setEditSource(p.source); $("proj-editor-title").textContent="프로젝트 편집"; }
+  function editProject(id){ var p=null; for (var i=0;i<projects.length;i++) if (projects[i].id===id) p=projects[i]; if(!p) return;
+    $("proj-id").value=p.id; $("proj-name").value=p.name; $("proj-sheet").value=p.sheetUrl||""; $("proj-csv").value=p.csvText||""; $("proj-base").value=p.baseUrl||""; $("proj-env").value=p.env||""; $("proj-user").value=p.username||""; $("proj-pass").value=p.password||""; $("proj-repo").value=p.referenceRepo||""; $("proj-ai").checked=!!p.aiInterpret; setEditSource(p.source); $("proj-editor-title").textContent="프로젝트 편집"; $("proj-preview").innerHTML="";
+  }
+  function editorBody(){ return { id: $("proj-id").value||undefined, name: $("proj-name").value.trim()||"Untitled", source: editSource, sheetUrl: $("proj-sheet").value.trim(), csvText: $("proj-csv").value, baseUrl: $("proj-base").value.trim(), env: $("proj-env").value.trim(), username: $("proj-user").value.trim(), password: $("proj-pass").value, referenceRepo: $("proj-repo").value.trim(), aiInterpret: $("proj-ai").checked }; }
   $("proj-save").onclick=async function(){
-    var body={ id: $("proj-id").value||undefined, name: $("proj-name").value.trim()||"Untitled", source: editSource, sheetUrl: $("proj-sheet").value.trim(), baseUrl: $("proj-base").value.trim(), aiInterpret: $("proj-ai").checked };
     $("proj-save").disabled=true;
-    try { var res=await fetch("/api/projects",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"저장 실패"); selId=d.saved.id; fillProjects(d.projects); $("run-project").value=selId; onSelectProject(); $("proj-status").className="muted"; $("proj-status").textContent="저장됨"; }
+    try { var res=await fetch("/api/projects",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(editorBody())}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"저장 실패"); selId=d.saved.id; fillProjects(d.projects); $("run-project").value=selId; onSelectProject(); $("proj-status").className="muted"; $("proj-status").textContent="저장됨"; }
     catch(e){ $("proj-status").className="err"; $("proj-status").textContent=e.message; }
     finally { $("proj-save").disabled=false; }
   };
+  $("proj-preview-btn").onclick=async function(){
+    $("proj-preview-btn").disabled=true; $("proj-status").className="muted"; $("proj-status").textContent="TC 읽는 중…";
+    try { var res=await fetch("/api/tc/preview",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(editorBody())}); var d=await res.json(); if(!res.ok) throw new Error(d.error||"읽기 실패"); $("proj-status").textContent=""; renderPreview(d); }
+    catch(e){ $("proj-status").className="err"; $("proj-status").textContent=e.message; $("proj-preview").innerHTML=""; }
+    finally { $("proj-preview-btn").disabled=false; }
+  };
+  function renderPreview(d){
+    var m=d.mapping||{}, out='<div class="card">';
+    out+='<div class="summary"><span class="chip">케이스 <b>'+d.counts.unique+'</b></span><span class="chip" style="color:var(--review)">중복 <b>'+d.counts.duplicates+'</b></span></div>';
+    out+='<div class="detail" style="margin-bottom:8px">열 매핑: '+(Object.keys(m).length?Object.keys(m).map(function(k){return "<code>"+esc(k)+"</code>→"+esc(m[k]);}).join("&nbsp;&nbsp;"):"(자동감지 실패 — AI 규칙 탭에서 시트 해석)")+'</div>';
+    out+='<table><thead><tr><th>제목</th><th>스텝</th><th>기대결과</th></tr></thead><tbody>';
+    d.unique.forEach(function(c){ out+='<tr><td>'+esc(c.title||c.caseId)+'</td><td class="detail">'+esc((c.steps||[]).join(" · "))+'</td><td class="detail">'+esc(c.expected)+'</td></tr>'; });
+    out+='</tbody></table>';
+    if (d.duplicates && d.duplicates.length){ out+='<div class="detail" style="margin-top:10px;color:var(--review)">중복 제거: '+d.duplicates.map(function(x){return esc(x.title)+" ↔ "+esc(x.duplicateOf);}).join(", ")+'</div>'; }
+    out+='</div>';
+    $("proj-preview").innerHTML=out;
+  }
   async function delProject(id){ try { var res=await fetch("/api/projects/delete",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id:id})}); var d=await res.json(); if(selId===id) selId="sample"; fillProjects(d.projects); } catch(e){} }
 
   // ---- run + results ----
@@ -683,7 +799,7 @@ const PAGE = `<!doctype html>
   $("run").onclick=async function(){
     var p=null; for (var i=0;i<projects.length;i++) if (projects[i].id===selId) p=projects[i];
     if(!p) p={source:"sample",sheetUrl:"",baseUrl:""};
-    var body={ source:p.source, aiInterpret:$("run-ai").checked, sheetUrl:p.sheetUrl||"", baseUrl:p.baseUrl||"" };
+    var body={ source:p.source, aiInterpret:$("run-ai").checked, sheetUrl:p.sheetUrl||"", csvText:p.csvText||"", baseUrl:p.baseUrl||"", env:p.env||"", username:p.username||"", password:p.password||"", referenceRepo:p.referenceRepo||"" };
     $("run").disabled=true; $("status").className="muted"; $("status").textContent="실제 브라우저로 실행 중…";
     try { var res=await fetch("/api/run",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body)}); var data=await res.json(); if(!res.ok) throw new Error(data.error||"실행 실패"); $("status").textContent="완료"; render(data); loadQueue(); }
     catch(e){ $("status").textContent=""; $("out").innerHTML='<div class="card err">오류: '+esc(e.message)+'</div>'; }

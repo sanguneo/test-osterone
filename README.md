@@ -120,7 +120,8 @@ bun run studio     # then open http://localhost:8686
 
 The UI is organized into sidebar tabs — **실행 & 결과 (Run) · 프로젝트 (Projects) · 모델 연결 (Model) · AI 규칙 (Rules) · 리뷰 큐 (Review)**:
 
-- **Projects** — save a reusable project (name + source + Google Sheet URL + target site URL + default AI toggle), persisted to `~/.test-osterone/studio-projects.json`. The bundled **샘플 (sample)** project is always available.
+- **Projects** — save a reusable project: **name, source (sample / Google Sheet / pasted CSV), target site URL, environment, test account (id/password), reference repo, default AI toggle**. Persisted to `~/.test-osterone/studio-projects.json`; the bundled **샘플 (sample)** project is always available. The account + repo are passed to AI step interpretation as context (e.g. to author login steps).
+- **TC read & dedupe** — **TC 읽기 & 중복 확인** ingests the project's sheet/CSV with the current column mapping and shows the detected columns, the structured cases, and **which cases were de-duplicated**, before you run.
 - **Run** — pick a project, optionally tick **AI 스텝 해석**, and **실행 (Run)**.
 
 The deterministic engine runs each case against real headless Chromium and renders verdict badges, per-assertion detail, self-heal events, and the needs_review queue — no CSV escaping, no terminal after launch.
