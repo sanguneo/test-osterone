@@ -97,7 +97,11 @@ export class OAuthProxyModelClient implements ModelClient {
 			.join("\n\n");
 		const input = messages
 			.filter((m) => m.role !== "system")
-			.map((m) => ({ type: "message", role: m.role, content: [{ type: "input_text", text: m.content }] }));
+			.map((m) => ({
+				type: "message",
+				role: m.role,
+				content: [{ type: m.role === "assistant" ? "output_text" : "input_text", text: m.content }],
+			}));
 
 		const headers: Record<string, string> = {
 			"content-type": "application/json",

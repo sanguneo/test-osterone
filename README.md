@@ -123,7 +123,7 @@ bun run studio     # then open http://localhost:8686
 
 The deterministic engine runs each case against real headless Chromium and renders verdict badges, per-assertion detail, self-heal events, and the needs_review queue — no CSV escaping, no terminal after launch.
 
-**Model connection (optional).** Click **Codex 로그인** to reuse a local Codex/ChatGPT login (OAuth proxy — token and model are read from `~/.codex`), or paste an access token / API key. Once connected, **AI 규칙 다듬기** lets you refine the interpretation rule in natural language (e.g. "recognize 누르기 as a click") via the model — the change bumps the rule version and applies to later runs.
+**Model connection (optional).** Click **Codex 로그인** to reuse a local Codex/ChatGPT login (OAuth proxy — token and model are read from `~/.codex`), or paste an access token / API key. Once connected, **AI 규칙 다듬기** refines the interpretation rule in natural language (e.g. "recognize 누르기 as a click"). It is **conversational** — each turn builds on the last (e.g. "undo that") — and after every turn the UI shows an **intent diff** and flags **ambiguous or empty intents**, so the rule converges to an optimal, interpretable form. Changes bump the rule version and apply to later runs; **초기화** resets the conversation.
 
 ## Architecture
 

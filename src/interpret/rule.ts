@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 
 import { mapColumns } from "../intake/ingest.ts";
 import type { TcField } from "../intake/schema.ts";
-import type { ModelClient } from "../model/model-client.ts";
+import type { ModelClient, ModelMessage } from "../model/model-client.ts";
 
 export const INTENT_KINDS = ["navigate", "click", "input", "verify", "wait"] as const;
 export type IntentKind = (typeof INTENT_KINDS)[number];
@@ -86,12 +86,15 @@ export async function refineRule(
 	rule: InterpretationRule,
 	instruction: string,
 	model: ModelClient,
+	history: ModelMessage[] = [],
 ): Promise<RuleRefineResult> {
 	const system =
-		"You refine a spreadsheet-interpretation rule. Fields: mapping (tc field -> EXACT header; fields " +
-		"id,title,step,expected,priority,role,env), intents (navigate|click|input|verify|wait -> trigger phrases), " +
-		'destructiveKeywords (words marking a destructive step). Respond ONLY JSON {"mapping":{...},"intents":{...},' +
-		'"destructiveKeywords":[...],"message":"1-2 sentence explanation"}. Preserve unchanged parts.';
+		"You collaboratively refine a spreadsheet-interpretation rule across a conversation. Fields: mapping " +
+		"(tc field -> EXACT header; fields id,title,step,expected,priority,role,env), intents " +
+		"(navigate|click|input|verify|wait -> trigger phrases), destructiveKeywords (words marking a destructive step). " +
+		"Keep the rule minimal and interpretable: a trigger phrase must belong to only ONE intent, avoid redundant " +
+		'phrases, prefer few clear ones. Respond ONLY JSON {"mapping":{...},"intents":{...},"destructiveKeywords":[...],' +
+		'"message":"1-2 sentence explanation of what changed and why"}. Preserve unchanged parts.';
 	const user = `CURRENT RULE: ${JSON.stringify({
 		mapping: rule.mapping,
 		intents: rule.intents,
@@ -99,10 +102,7 @@ export async function refineRule(
 	})}\nINSTRUCTION: ${instruction}`;
 	const obj =
 		extractJsonObject(
-			await model.complete([
-				{ role: "system", content: system },
-				{ role: "user", content: user },
-			]),
+			await model.complete([{ role: "system", content: system }, ...history, { role: "user", content: user }]),
 		) ?? {};
 	const next: InterpretationRule = {
 		ruleId: rule.ruleId,
@@ -113,6 +113,24 @@ export async function refineRule(
 	};
 	const changed = ruleShapeKey(next) !== ruleShapeKey(rule);
 	return { rule: changed ? bumpRuleVersion(next) : next, message: String(obj.message ?? ""), changed };
+}
+
+/** Human-readable warnings that keep a rule interpretable: ambiguous or empty intents. */
+export function ruleLint(rule: InterpretationRule): string[] {
+	const warnings: string[] = [];
+	const owners = new Map<string, IntentKind[]>();
+	for (const kind of INTENT_KINDS) {
+		if (rule.intents[kind].length === 0) warnings.push(`intent "${kind}" has no trigger phrases`);
+		for (const phrase of rule.intents[kind]) {
+			const key = phrase.toLowerCase().trim();
+			if (!key) continue;
+			owners.set(key, [...(owners.get(key) ?? []), kind]);
+		}
+	}
+	for (const [phrase, kinds] of owners) {
+		if (kinds.length > 1) warnings.push(`"${phrase}" is ambiguous — matches ${kinds.join(", ")} (first match wins)`);
+	}
+	return warnings;
 }
 
 function ruleShapeKey(rule: InterpretationRule): string {

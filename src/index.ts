@@ -50,6 +50,7 @@ export {
 	parseRule,
 	type RuleRefineResult,
 	refineRule,
+	ruleLint,
 	saveRule,
 	serializeRule,
 } from "./interpret/rule.ts";

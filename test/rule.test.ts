@@ -4,9 +4,10 @@ import {
 	establishRuleFromHeaders,
 	parseRule,
 	refineRule,
+	ruleLint,
 	serializeRule,
 } from "../src/interpret/rule.ts";
-import { FakeModelClient } from "../src/model/model-client.ts";
+import { FakeModelClient, type ModelMessage } from "../src/model/model-client.ts";
 
 const HEADERS = ["Test ID", "Title", "Steps", "Expected Result", "Role", "Environment"];
 
@@ -58,4 +59,34 @@ test("refineRule with no effective change keeps the version stable", async () =>
 	const { rule, changed } = await refineRule(r, "no-op", model);
 	expect(changed).toBe(false);
 	expect(rule.ruleVersion).toBe(1);
+});
+
+test("refineRule threads prior conversation turns to the model", async () => {
+	const r = establishRuleFromHeaders(HEADERS);
+	let seen: ModelMessage[] = [];
+	const model = new FakeModelClient((msgs) => {
+		seen = msgs;
+		return JSON.stringify({ intents: { ...r.intents, click: [...r.intents.click, "누르기"] }, message: "ok" });
+	});
+	const history: ModelMessage[] = [
+		{ role: "user", content: "earlier ask" },
+		{ role: "assistant", content: "earlier reply" },
+	];
+	const { rule, changed } = await refineRule(r, "also 누르기", model, history);
+	expect(changed).toBe(true);
+	expect(rule.intents.click).toContain("누르기");
+	expect(seen.map((m) => m.content)).toContain("earlier reply");
+});
+
+test("ruleLint flags ambiguous phrases across intents and empty intents", () => {
+	const r = establishRuleFromHeaders(HEADERS);
+	r.intents.verify = [...r.intents.verify, "click"]; // now "click" is in both click + verify
+	r.intents.wait = [];
+	const warnings = ruleLint(r);
+	expect(warnings.some((w) => w.includes('"click" is ambiguous'))).toBe(true);
+	expect(warnings.some((w) => w.includes('intent "wait" has no trigger'))).toBe(true);
+});
+
+test("ruleLint is clean for the default rule", () => {
+	expect(ruleLint(establishRuleFromHeaders(HEADERS))).toEqual([]);
 });

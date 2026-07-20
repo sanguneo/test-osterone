@@ -21,9 +21,9 @@ import { runScenario, type Verdict } from "../../execute/runner.ts";
 import { ingestCsv, ingestGoogleSheet } from "../../intake/ingest.ts";
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
-import { establishRuleFromHeaders, type InterpretationRule, refineRule } from "../../interpret/rule.ts";
+import { establishRuleFromHeaders, type InterpretationRule, refineRule, ruleLint } from "../../interpret/rule.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
-import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts";
+import { ApiKeyModelClient, type ModelClient, type ModelMessage } from "../../model/model-client.ts";
 import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
 import { startFixture } from "../../testing/fixture-app.ts";
 
@@ -76,9 +76,34 @@ let modelClient: ModelClient | null = null;
 let auth: AuthState | null = null;
 // Server-held interpretation rule; AI "rule refine" mutates it and later runs use it.
 let rule: InterpretationRule = establishRuleFromHeaders([]);
+// Conversation so far, so each refine turn sees prior context (interpretable, iterative).
+const refineChat: ModelMessage[] = [];
 
 function statusPayload(): Record<string, unknown> {
-	return { connected: !!modelClient, auth, ruleVersion: rule.ruleVersion, intents: rule.intents };
+	return {
+		connected: !!modelClient,
+		auth,
+		ruleVersion: rule.ruleVersion,
+		intents: rule.intents,
+		warnings: ruleLint(rule),
+		chat: refineChat,
+	};
+}
+
+/** Added/removed trigger phrases per intent between two rules (for an interpretable diff). */
+function intentDiff(
+	prev: InterpretationRule,
+	next: InterpretationRule,
+): Record<string, { added: string[]; removed: string[] }> {
+	const diff: Record<string, { added: string[]; removed: string[] }> = {};
+	for (const kind of Object.keys(next.intents) as (keyof InterpretationRule["intents"])[]) {
+		const before = new Set(prev.intents[kind] ?? []);
+		const after = new Set(next.intents[kind] ?? []);
+		const added = [...after].filter((x) => !before.has(x));
+		const removed = [...before].filter((x) => !after.has(x));
+		if (added.length || removed.length) diff[kind] = { added, removed };
+	}
+	return diff;
 }
 
 /** Provision a model client from Codex login / pasted token / API key. */
@@ -197,13 +222,21 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
 	}
+	if (req.method === "POST" && url.pathname === "/api/refine/reset") {
+		refineChat.length = 0;
+		rule = establishRuleFromHeaders([]);
+		return send(res, 200, JSON.stringify(statusPayload()));
+	}
 	if (req.method === "POST" && url.pathname === "/api/refine") {
 		if (!modelClient) return send(res, 400, JSON.stringify({ error: "Connect a model first." }));
 		try {
 			const { instruction } = JSON.parse((await readBody(req)) || "{}") as { instruction?: string };
 			if (!instruction?.trim()) return send(res, 400, JSON.stringify({ error: "Instruction is required." }));
-			const result = await refineRule(rule, instruction, modelClient);
+			const prev = rule;
+			const result = await refineRule(rule, instruction, modelClient, [...refineChat]);
 			rule = result.rule;
+			refineChat.push({ role: "user", content: instruction }, { role: "assistant", content: result.message });
+			if (refineChat.length > 20) refineChat.splice(0, refineChat.length - 20);
 			return send(
 				res,
 				200,
@@ -212,6 +245,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 					changed: result.changed,
 					ruleVersion: rule.ruleVersion,
 					intents: rule.intents,
+					diff: intentDiff(prev, rule),
+					warnings: ruleLint(rule),
+					chat: refineChat,
 				}),
 			);
 		} catch (err) {
@@ -256,6 +292,13 @@ const PAGE = `<!doctype html>
   .detail { color:var(--dim); font-size:12.5px; margin-top:3px; } .detail .x{ color:var(--fail);} .detail .o{ color:var(--pass);}
   .heal { color:var(--review); font-size:12px; } .muted{ color:var(--dim); } .err{ color:var(--fail); }
   code { background:#12151a; padding:1px 6px; border-radius:5px; }
+  .chatlog { max-height:220px; overflow:auto; margin:10px 0; display:flex; flex-direction:column; gap:8px; }
+  .msg { padding:8px 11px; border-radius:8px; font-size:13.5px; max-width:88%; }
+  .msg.u { align-self:flex-end; background:#22303a; } .msg.a { align-self:flex-start; background:#12151a; border:1px solid var(--line); }
+  .warns { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; } .warns:empty { margin:0; }
+  .warn { font-size:12px; color:var(--review); border:1px solid rgba(255,176,32,.4); border-radius:6px; padding:2px 8px; }
+  .linkbtn { background:none; border:0; color:var(--dim); cursor:pointer; font-size:12px; text-decoration:underline; }
+  .add { color:var(--pass); } .rem { color:var(--fail); }
 </style></head>
 <body>
 <header><h1>test-osterone <span style="color:var(--lime)">Studio</span></h1>
@@ -276,11 +319,18 @@ const PAGE = `<!doctype html>
     <button id="connect" class="run" type="button" style="margin-top:14px">연결</button>
     <span id="auth-status" class="muted" style="margin-left:12px"></span>
     <div id="refine-box" style="display:none;margin-top:18px;border-top:1px solid var(--line);padding-top:16px">
-      <label>AI로 규칙 다듬기 <span class="muted">예: "click은 '누르기'로도 인식해"</span></label>
-      <textarea id="instruction" rows="2" placeholder="자연어로 규칙 지시…"></textarea>
-      <button id="refine" class="run" type="button" style="margin-top:10px">다듬기</button>
-      <span id="refine-status" class="muted" style="margin-left:12px"></span>
-      <div id="intents" class="detail" style="margin-top:10px"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <label style="margin:0">AI로 규칙 다듬기 <span class="muted">대화식 — 예: "누르기도 click으로", "그건 되돌려"</span></label>
+        <button id="refine-reset" type="button" class="linkbtn">초기화</button>
+      </div>
+      <div id="chat" class="chatlog"></div>
+      <div id="warnings" class="warns"></div>
+      <div id="intents" class="detail" style="margin-top:8px"></div>
+      <div style="display:flex;gap:10px;margin-top:10px;align-items:flex-end">
+        <textarea id="instruction" rows="2" placeholder="자연어로 규칙 지시…" style="flex:1"></textarea>
+        <button id="refine" class="run" type="button" style="margin-top:0">보내기</button>
+      </div>
+      <span id="refine-status" class="muted"></span>
     </div>
   </div>
   <div class="card">
@@ -357,6 +407,21 @@ const PAGE = `<!doctype html>
   function renderIntents(ruleVersion, intents){
     $("intents").innerHTML = "규칙 v"+ruleVersion+" · " + Object.keys(intents||{}).map(function(k){ return "<code>"+esc(k)+"</code> "+esc((intents[k]||[]).join(", ")); }).join("&nbsp;&nbsp;");
   }
+  function renderWarnings(warnings){
+    $("warnings").innerHTML = (warnings||[]).map(function(w){ return '<span class="warn">⚠ '+esc(w)+'</span>'; }).join("");
+  }
+  function renderChat(chat){
+    $("chat").innerHTML = (chat||[]).map(function(m){ return '<div class="msg '+(m.role==="user"?"u":"a")+'">'+esc(m.content)+'</div>'; }).join("");
+    $("chat").scrollTop = $("chat").scrollHeight;
+  }
+  function diffText(diff){
+    return Object.keys(diff||{}).map(function(k){
+      var d=diff[k], s=[];
+      if(d.added && d.added.length) s.push('<span class="add">+'+esc(d.added.join(", "))+'</span>');
+      if(d.removed && d.removed.length) s.push('<span class="rem">-'+esc(d.removed.join(", "))+'</span>');
+      return "<code>"+esc(k)+"</code> "+s.join(" ");
+    }).join("&nbsp;&nbsp;");
+  }
   function renderStatus(s){
     if (s.connected && s.auth){
       $("auth-badge").className="chip"; $("auth-badge").style.color="var(--lime)";
@@ -367,6 +432,7 @@ const PAGE = `<!doctype html>
       $("refine-box").style.display="none";
     }
     if (s.intents) renderIntents(s.ruleVersion, s.intents);
+    renderWarnings(s.warnings); renderChat(s.chat);
   }
 
   $("connect").onclick=async function(){
@@ -381,6 +447,10 @@ const PAGE = `<!doctype html>
     finally { $("connect").disabled=false; }
   };
 
+  $("refine-reset").onclick=async function(){
+    try { var res=await fetch("/api/refine/reset",{method:"POST"}); renderStatus(await res.json()); $("refine-status").textContent=""; } catch(e){ $("refine-status").className="err"; $("refine-status").textContent=e.message; }
+  };
+
   $("refine").onclick=async function(){
     var ins=$("instruction").value.trim();
     if(!ins){ $("refine-status").className="err"; $("refine-status").textContent="지시를 입력하세요."; return; }
@@ -388,8 +458,11 @@ const PAGE = `<!doctype html>
     try {
       var res=await fetch("/api/refine",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({instruction:ins})});
       var data=await res.json(); if(!res.ok) throw new Error(data.error||"실패");
-      $("refine-status").className="muted"; $("refine-status").textContent=(data.changed?"규칙 갱신됨 · ":"변경 없음 · ")+(data.message||"");
-      renderIntents(data.ruleVersion, data.intents);
+      $("instruction").value="";
+      renderChat(data.chat); renderWarnings(data.warnings); renderIntents(data.ruleVersion, data.intents);
+      var dt=diffText(data.diff);
+      $("refine-status").className="muted";
+      $("refine-status").innerHTML=(data.changed?"규칙 v"+data.ruleVersion+" 갱신 · ":"변경 없음 · ")+dt;
     } catch(e){ $("refine-status").className="err"; $("refine-status").textContent=e.message; }
     finally { $("refine").disabled=false; }
   };
