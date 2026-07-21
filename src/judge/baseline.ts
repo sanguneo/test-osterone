@@ -38,7 +38,14 @@ export function baselineKey(caseId: string, ruleVersion: number, env: string): s
 	return `${caseId}|v${ruleVersion}|${env}`;
 }
 
-export class MemoryBaselineStore {
+export interface BaselineStore {
+	get(caseId: string, ruleVersion: number, env: string): Baseline | undefined;
+	propose(caseId: string, ruleVersion: number, env: string, snapshotText: string, masks?: RegExp[]): Baseline;
+	approve(caseId: string, ruleVersion: number, env: string): void;
+	gate(caseId: string, ruleVersion: number, env: string, currentText: string, masks?: RegExp[]): BaselineGate;
+}
+
+export class MemoryBaselineStore implements BaselineStore {
 	private readonly store = new Map<string, Baseline>();
 
 	constructor(private readonly now: () => number = Date.now) {}

@@ -12,7 +12,7 @@ import { type AssertionCache, type AssertionResult, evaluateAssertion } from "..
 import type { AuthoredPlan } from "../interpret/author.ts";
 import { getOrAuthorAssertions, parseStep } from "../interpret/interpret.ts";
 import type { InterpretationRule } from "../interpret/rule.ts";
-import type { MemoryBaselineStore } from "../judge/baseline.ts";
+import type { BaselineStore } from "../judge/baseline.ts";
 import type { Page, PageSnapshot } from "./page.ts";
 
 export type Verdict = "pass" | "fail" | "needs_review" | "error";
@@ -52,7 +52,7 @@ export interface RunOptions {
 	/** Pre-authored plan (AI author-time). When present, replaces deterministic step parsing + assertions. */
 	plan?: AuthoredPlan;
 	/** Optional golden-baseline store: an approved match lifts a needs_review to pass; drift keeps it. */
-	baseline?: MemoryBaselineStore;
+	baseline?: BaselineStore;
 	/** Stable env key for baselines (defaults to env.baseUrl, which may be ephemeral). */
 	baselineEnv?: string;
 }

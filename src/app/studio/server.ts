@@ -31,7 +31,7 @@ import {
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
 import { getOrAuthorPlan } from "../../interpret/author.ts";
-import { establishRuleFromHeaders, type InterpretationRule, refineRule, ruleLint } from "../../interpret/rule.ts";
+import { type InterpretationRule, refineRule, ruleLint } from "../../interpret/rule.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
 import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts";
 import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
@@ -40,6 +40,7 @@ import { deleteProjectSheets, deleteSheetContent, readSheetContent, writeSheetCo
 import {
 	type CaseView,
 	deleteProjectState,
+	layeredBaseline,
 	loadProjectState,
 	newProjectState,
 	type ProjectState,
@@ -293,17 +294,20 @@ try {
 	console.error("sheet content migration failed:", (err as Error).message);
 }
 
-function statusPayload(projectId: string): Record<string, unknown> {
+function statusPayload(projectId: string, sheetId?: string): Record<string, unknown> {
 	const st = stateFor(projectId);
+	const project = allProjects().find((p) => p.id === projectId);
+	const sid = resolveSheetId(project, sheetId);
+	const ss = sheetState(st, sid);
 	return {
 		connected: !!modelClient,
 		auth,
 		projectId,
-		ruleVersion: st.rule.ruleVersion,
-		intents: st.rule.intents,
-		mapping: st.rule.mapping,
-		warnings: ruleLint(st.rule),
-		chat: st.refineChat,
+		ruleVersion: ss.rule.ruleVersion,
+		intents: ss.rule.intents,
+		mapping: ss.rule.mapping,
+		warnings: ruleLint(ss.rule),
+		chat: ss.refineChat,
 	};
 }
 
@@ -399,13 +403,13 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 	const project = allProjects().find((p) => p.id === (input.projectId ?? "sample"));
 	const sheet = input.sheets?.[0];
 	const sid = input.sheetId ?? resolveSheetId(project, input.sheetId) ?? "__default__";
-	const effMapping = { ...st.rule.mapping, ...(sheet?.mapping ?? {}) };
+	const sheetSt = sheetState(st, sid);
+	const effMapping = { ...sheetSt.rule.mapping, ...(sheet?.mapping ?? {}) };
 	const runInput: RunInput = { ...input, baseUrl: sheet?.baseUrl || input.baseUrl };
 	const { cases, baseUrl, stop } = await loadCases(runInput, effMapping);
 	onProgress?.({ type: "start", total: cases.length, baseUrl, interpreter: ai ? "ai" : "rule" });
 	const baselineEnv = (sheet?.env || input.env)?.trim() || (input.sample ? "sample" : baseUrl);
 	const caseById = new Map(cases.map((c) => [c.caseId, c]));
-	const sheetSt = sheetState(st, sid);
 	for (const c of cases) sheetSt.reviewQueue.delete(c.caseId);
 	const cache = new MemoryAssertionCache();
 	const page = await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser() });
@@ -416,7 +420,7 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 			const plan =
 				ai && modelClient
 					? (
-							await getOrAuthorPlan(tc, st.rule, st.planCache, modelClient, {
+							await getOrAuthorPlan(tc, sheetSt.rule, sheetSt.planCache, modelClient, {
 								referenceRepo: input.referenceRepo,
 								username: input.username,
 								password: input.password,
@@ -425,11 +429,11 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 					: undefined;
 			const r = await runScenario(tc, {
 				page,
-				rule: st.rule,
+				rule: sheetSt.rule,
 				cache,
 				env: { browser: "chromium", viewport: "1280x800", baseUrl },
 				plan,
-				baseline: st.baseline,
+				baseline: layeredBaseline(st, sid),
 				baselineEnv,
 			});
 			if (r.verdict === "needs_review" || r.verdict === "error") {
@@ -528,7 +532,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		return;
 	}
 	if (req.method === "GET" && url.pathname === "/api/status") {
-		return send(res, 200, JSON.stringify(statusPayload(url.searchParams.get("projectId") || "sample")));
+		return send(
+			res,
+			200,
+			JSON.stringify(
+				statusPayload(url.searchParams.get("projectId") || "sample", url.searchParams.get("sheetId") ?? undefined),
+			),
+		);
 	}
 	if (req.method === "POST" && url.pathname === "/api/auth") {
 		try {
@@ -540,41 +550,52 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		}
 	}
 	if (req.method === "POST" && url.pathname === "/api/refine/reset") {
-		const { projectId } = JSON.parse((await readBody(req)) || "{}") as { projectId?: string };
+		const { projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
+			projectId?: string;
+			sheetId?: string;
+		};
 		const pid = projectId || "sample";
 		const st = stateFor(pid);
-		st.refineChat.length = 0;
-		st.rule = establishRuleFromHeaders([]);
+		const project = allProjects().find((p) => p.id === pid);
+		const sid = resolveSheetId(project, sheetId);
+		const ss = sheetState(st, sid);
+		ss.refineChat.length = 0;
+		ss.rule = structuredClone(st.defaultRule);
 		saveState(pid, st);
-		return send(res, 200, JSON.stringify(statusPayload(pid)));
+		return send(res, 200, JSON.stringify(statusPayload(pid, sid)));
 	}
 	if (req.method === "POST" && url.pathname === "/api/refine") {
 		if (!modelClient) return send(res, 400, JSON.stringify({ error: "Connect a model first." }));
 		try {
-			const { instruction, projectId } = JSON.parse((await readBody(req)) || "{}") as {
+			const { instruction, projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
 				instruction?: string;
 				projectId?: string;
+				sheetId?: string;
 			};
 			if (!instruction?.trim()) return send(res, 400, JSON.stringify({ error: "Instruction is required." }));
-			const st = stateFor(projectId || "sample");
-			const prev = st.rule;
-			const result = await refineRule(st.rule, instruction, modelClient, [...st.refineChat]);
-			st.rule = result.rule;
-			st.refineChat.push({ role: "user", content: instruction }, { role: "assistant", content: result.message });
-			if (st.refineChat.length > 20) st.refineChat.splice(0, st.refineChat.length - 20);
-			saveState(projectId || "sample", st);
+			const pid = projectId || "sample";
+			const st = stateFor(pid);
+			const project = allProjects().find((p) => p.id === pid);
+			const sid = resolveSheetId(project, sheetId);
+			const ss = sheetState(st, sid);
+			const prev = ss.rule;
+			const result = await refineRule(ss.rule, instruction, modelClient, [...ss.refineChat]);
+			ss.rule = result.rule;
+			ss.refineChat.push({ role: "user", content: instruction }, { role: "assistant", content: result.message });
+			if (ss.refineChat.length > 20) ss.refineChat.splice(0, ss.refineChat.length - 20);
+			saveState(pid, st);
 			return send(
 				res,
 				200,
 				JSON.stringify({
 					message: result.message,
 					changed: result.changed,
-					ruleVersion: st.rule.ruleVersion,
-					intents: st.rule.intents,
-					mapping: st.rule.mapping,
-					diff: intentDiff(prev, st.rule),
-					warnings: ruleLint(st.rule),
-					chat: st.refineChat,
+					ruleVersion: ss.rule.ruleVersion,
+					intents: ss.rule.intents,
+					mapping: ss.rule.mapping,
+					diff: intentDiff(prev, ss.rule),
+					warnings: ruleLint(ss.rule),
+					chat: ss.refineChat,
 				}),
 			);
 		} catch (err) {
@@ -606,22 +627,24 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			if (!project || !sheet)
 				return send(res, 400, JSON.stringify({ error: "analyze requires a saved project sheet" }));
 			const st = stateFor(pid);
-			const result = await refineRule(st.rule, instruction, modelClient, [...st.refineChat]);
+			const sid = resolveSheetId(project, sheetId);
+			const ss = sheetState(st, sid);
+			const result = await refineRule(ss.rule, instruction, modelClient, [...ss.refineChat]);
 			// Don't mutate the project-shared rule here — a sheet's column mapping is a per-sheet
 			// override layered on top of it, so only the delta vs the current rule mapping is kept.
 			const proposed = result.rule.mapping;
 			const delta: Record<string, string> = {};
 			for (const [k, v] of Object.entries(proposed)) {
-				if (v && v !== (st.rule.mapping as Record<string, string>)[k]) delta[k] = v;
+				if (v && v !== (ss.rule.mapping as Record<string, string>)[k]) delta[k] = v;
 			}
 			if (Object.keys(delta).length) sheet.mapping = delta as InterpretationRule["mapping"];
 			else delete sheet.mapping;
 			persistProjects();
-			st.refineChat.push(
+			ss.refineChat.push(
 				{ role: "user", content: `시트 해석 요청 · 헤더: ${table.headers.join(", ")}` },
 				{ role: "assistant", content: result.message },
 			);
-			if (st.refineChat.length > 20) st.refineChat.splice(0, st.refineChat.length - 20);
+			if (ss.refineChat.length > 20) ss.refineChat.splice(0, ss.refineChat.length - 20);
 			saveState(pid, st);
 			return send(
 				res,
@@ -631,10 +654,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 					sample,
 					mapping: delta,
 					sheetId,
-					ruleVersion: st.rule.ruleVersion,
+					ruleVersion: ss.rule.ruleVersion,
 					message: result.message,
-					warnings: ruleLint(st.rule),
-					chat: st.refineChat,
+					warnings: ruleLint(ss.rule),
+					chat: ss.refineChat,
 				}),
 			);
 		} catch (err) {
@@ -652,17 +675,17 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			let all: NormalizedTC[];
 			let unique: NormalizedTC[];
 			let duplicates: DedupeResult["duplicates"];
-			let effMapping: InterpretationRule["mapping"] = st.rule.mapping;
+			let effMapping: InterpretationRule["mapping"] = sheetState(st, resolveSheetId(project)).rule.mapping;
 			if (cfg.sample) {
 				const text = readFileSync(cfg.aiInterpret ? bundledCasesNl : bundledCases, "utf8");
 				headers = csvToRawTable(text).headers;
-				({ all, unique, duplicates } = ingestCsv(text, st.rule.mapping));
+				({ all, unique, duplicates } = ingestCsv(text, effMapping));
 			} else {
 				const sources = hydrateSheets(cfg.projectId ?? "sample", cfg.sheets ?? cfg.sources ?? []);
 				if (sources.length === 0) return send(res, 400, JSON.stringify({ error: "TC 소스를 추가하세요." }));
 				const sid = resolveSheetId(project, cfg.sheetId);
 				const sheet = sources.find((s) => s.id === sid) ?? sources[0];
-				effMapping = { ...st.rule.mapping, ...(sheet?.mapping ?? {}) };
+				effMapping = { ...sheetState(st, sid).rule.mapping, ...(sheet?.mapping ?? {}) };
 				const first = sources[0];
 				const firstText = first
 					? first.kind === "sheet"
@@ -715,7 +738,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		const pid = url.searchParams.get("projectId") || "sample";
 		const st = stateFor(pid);
 		const reconcile = (items: ReviewItem[]): ReviewItem[] =>
-			items.filter((it) => st.baseline.get(it.caseId, it.ruleVersion, it.env)?.approved !== true);
+			items.filter((it) => layeredBaseline(st, it.sheetId).get(it.caseId, it.ruleVersion, it.env)?.approved !== true);
 		if (url.searchParams.get("all")) {
 			const all = [...st.sheets.values()].flatMap((s) => [...s.reviewQueue.values()]);
 			return send(res, 200, JSON.stringify(reconcile(all)));
@@ -749,7 +772,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			}
 			if (!item || !sid) return send(res, 404, JSON.stringify({ error: "unknown case in review queue" }));
 			// The run's gate() already proposed a full-text pending baseline; approving flips it.
-			st.baseline.approve(item.caseId, item.ruleVersion, item.env);
+			sheetState(st, sid).baseline.approve(item.caseId, item.ruleVersion, item.env);
 			sheetState(st, sid).reviewQueue.delete(item.caseId);
 			saveState(pid, st);
 			return send(
@@ -777,7 +800,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			let approved = 0;
 			for (const s of targets) {
 				for (const item of [...s.reviewQueue.values()]) {
-					st.baseline.approve(item.caseId, item.ruleVersion, item.env);
+					s.baseline.approve(item.caseId, item.ruleVersion, item.env);
 					s.reviewQueue.delete(item.caseId);
 					approved++;
 				}

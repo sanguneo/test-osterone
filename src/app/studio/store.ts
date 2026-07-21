@@ -1,18 +1,20 @@
 /**
- * Durable per-project Studio state. The Studio server keeps one ProjectState per
- * project (interpretation rule, refine chat, plan cache, approved baselines, the
- * needs_review queue, and run history). Everything here lets that state survive a
- * server restart by serializing it to JSON on disk — the projects themselves already
- * persist to studio-projects.json, but their runtime state used to live only in memory.
+ * Durable per-project Studio state. The parent axis is the Test Sheet: each sheet owns its
+ * interpretation rule, refine chat, plan cache, approved baselines, needs_review queue, and
+ * run history. The Project keeps only a `defaultRule` (the seed a new sheet clones) plus a
+ * read-only `legacyBaseline` fallback that carries pre-v3 project-level approvals forward.
  *
- * Node-safe on purpose: the engine's SqliteEvidenceStore uses bun:sqlite, which is
- * unavailable under Node (Studio runs on Node because Playwright hangs under Bun on
- * Windows), so persistence here is plain JSON — no native driver, no dual-runtime split.
+ * Everything here survives a server restart by serializing to JSON on disk — the projects
+ * themselves persist to studio-projects.json; their runtime state used to live only in memory.
  *
- * Why the *whole* runtime state and not just the review queue: baselines are keyed by
- * (caseId + ruleVersion + env). If the rule reset on restart, ruleVersion/mapping would
- * change, caseIds would differ, and persisted baselines would never match — so restoring
- * approvals correctly *requires* restoring the rule and plan cache alongside them.
+ * Node-safe on purpose: the engine's SqliteEvidenceStore uses bun:sqlite, which is unavailable
+ * under Node (Studio runs on Node because Playwright hangs under Bun on Windows), so persistence
+ * here is plain JSON — no native driver, no dual-runtime split.
+ *
+ * Trust model (INVIOLABLE): a case only auto-passes when an APPROVED baseline exists for
+ * (caseId + ruleVersion + env) AND the masked page text matches exactly (see baseline.gate).
+ * Because content equality guards every match, reading legacy (project-level) baselines as a
+ * fallback for any sheet cannot create a false pass — it only lets prior approvals keep matching.
  */
 
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -21,7 +23,14 @@ import { join } from "node:path";
 import type { Verdict } from "../../execute/runner.ts";
 import { MemoryPlanCache, type PlanCacheEntry } from "../../interpret/author.ts";
 import { establishRuleFromHeaders, type InterpretationRule, parseRule } from "../../interpret/rule.ts";
-import { type Baseline, MemoryBaselineStore } from "../../judge/baseline.ts";
+import {
+	type Baseline,
+	type BaselineGate,
+	type BaselineStore,
+	DEFAULT_MASKS,
+	MemoryBaselineStore,
+	maskDynamic,
+} from "../../judge/baseline.ts";
 import type { ModelMessage } from "../../model/model-client.ts";
 
 export interface CaseView {
@@ -58,60 +67,142 @@ export interface ReviewItem {
 	sheetId: string;
 }
 
-/** Per-sheet runtime state: this sheet's review queue and run history. */
 export interface SheetState {
-	history: RunView[];
-	reviewQueue: Map<string, ReviewItem>;
-}
-
-/** Per-project runtime state: interpretation rule, refine conversation, caches, baselines, per-sheet state. */
-export interface ProjectState {
 	rule: InterpretationRule;
 	refineChat: ModelMessage[];
 	planCache: MemoryPlanCache;
 	baseline: MemoryBaselineStore;
+	history: RunView[];
+	reviewQueue: Map<string, ReviewItem>;
+}
+
+export interface ProjectState {
+	defaultRule: InterpretationRule;
+	legacyBaseline: MemoryBaselineStore;
 	sheets: Map<string, SheetState>;
+}
+
+function cloneRule(rule: InterpretationRule): InterpretationRule {
+	return structuredClone(rule);
+}
+
+function safeParseRule(raw: unknown): InterpretationRule | undefined {
+	if (!raw || typeof raw !== "object") return undefined;
+	try {
+		return parseRule(JSON.stringify(raw));
+	} catch {
+		return undefined;
+	}
+}
+
+export function newSheetState(seedRule: InterpretationRule): SheetState {
+	return {
+		rule: cloneRule(seedRule),
+		refineChat: [],
+		planCache: new MemoryPlanCache(),
+		baseline: new MemoryBaselineStore(),
+		history: [],
+		reviewQueue: new Map(),
+	};
 }
 
 export function newProjectState(): ProjectState {
 	return {
-		rule: establishRuleFromHeaders([]),
-		refineChat: [],
-		planCache: new MemoryPlanCache(),
-		baseline: new MemoryBaselineStore(),
+		defaultRule: establishRuleFromHeaders([]),
+		legacyBaseline: new MemoryBaselineStore(),
 		sheets: new Map(),
 	};
 }
 
-/** Get (creating if absent) the runtime state for one sheet within a project. */
 export function sheetState(st: ProjectState, sheetId: string): SheetState {
 	let s = st.sheets.get(sheetId);
 	if (!s) {
-		s = { history: [], reviewQueue: new Map() };
+		s = newSheetState(st.defaultRule);
 		st.sheets.set(sheetId, s);
 	}
 	return s;
 }
 
-/** Resolve which sheet id a request should target: the given id if it's one of the project's sheets, else the first sheet, else a fallback. */
+export class LayeredBaselineStore implements BaselineStore {
+	constructor(
+		private readonly sheet: MemoryBaselineStore,
+		private readonly legacy: MemoryBaselineStore,
+	) {}
+
+	get(caseId: string, ruleVersion: number, env: string): Baseline | undefined {
+		return this.sheet.get(caseId, ruleVersion, env) ?? this.legacy.get(caseId, ruleVersion, env);
+	}
+
+	propose(
+		caseId: string,
+		ruleVersion: number,
+		env: string,
+		snapshotText: string,
+		masks: RegExp[] = DEFAULT_MASKS,
+	): Baseline {
+		return this.sheet.propose(caseId, ruleVersion, env, snapshotText, masks);
+	}
+
+	approve(caseId: string, ruleVersion: number, env: string): void {
+		this.sheet.approve(caseId, ruleVersion, env);
+	}
+
+	gate(
+		caseId: string,
+		ruleVersion: number,
+		env: string,
+		currentText: string,
+		masks: RegExp[] = DEFAULT_MASKS,
+	): BaselineGate {
+		if (this.sheet.get(caseId, ruleVersion, env)) return this.sheet.gate(caseId, ruleVersion, env, currentText, masks);
+		const legacy = this.legacy.get(caseId, ruleVersion, env);
+		if (legacy) {
+			if (!legacy.approved) return { status: "unapproved", reason: "baseline exists but is not approved" };
+			const currentMasked = maskDynamic(currentText, masks);
+			if (currentMasked === legacy.maskedText) return { status: "match" };
+			return { status: "drift", baselineMasked: legacy.maskedText, currentMasked };
+		}
+		return this.sheet.gate(caseId, ruleVersion, env, currentText, masks);
+	}
+}
+
+export function layeredBaseline(st: ProjectState, sheetId: string): LayeredBaselineStore {
+	return new LayeredBaselineStore(sheetState(st, sheetId).baseline, st.legacyBaseline);
+}
+
 export function resolveSheetId(project: { sheets: { id: string }[] } | undefined, sheetId?: string): string {
 	if (!project) return "__default__";
 	if (sheetId && project.sheets.some((s) => s.id === sheetId)) return sheetId;
 	return project.sheets[0]?.id ?? "__default__";
 }
 
-const STATE_VERSION = 2 as const;
+const STATE_VERSION = 3 as const;
+
+interface PersistedSheet {
+	sheetId: string;
+	rule: InterpretationRule;
+	refineChat: ModelMessage[];
+	planCache: PlanCacheEntry[];
+	baselines: Baseline[];
+	history: RunView[];
+	reviewQueue: ReviewItem[];
+}
 
 interface PersistedState {
 	version: typeof STATE_VERSION;
+	defaultRule: InterpretationRule;
+	legacyBaselines: Baseline[];
+	sheets: PersistedSheet[];
+}
+
+interface PersistedStateV2 {
+	version?: number;
 	rule: InterpretationRule;
 	refineChat: ModelMessage[];
 	planCache: PlanCacheEntry[];
 	baselines: Baseline[];
 	sheets: { sheetId: string; history: RunView[]; reviewQueue: ReviewItem[] }[];
 }
-
-/** v1 (pre-multi-sheet) persisted shape, kept only to migrate old disk state on load. */
 interface PersistedStateV1 {
 	version?: number;
 	rule: InterpretationRule;
@@ -122,32 +213,54 @@ interface PersistedStateV1 {
 	history: RunView[];
 }
 
-/**
- * Migrate a raw persisted snapshot to the current (v2, per-sheet) shape.
- * v2 input is returned as-is (idempotent). v1/missing input has its single
- * flat history/reviewQueue folded into one sheet keyed by `defaultSheetId`.
- */
 export function migrateState(raw: unknown, defaultSheetId: string): PersistedState {
-	const o = (raw ?? {}) as Partial<PersistedState> & Partial<PersistedStateV1>;
-	if (o.version === 2 && Array.isArray((o as Partial<PersistedState>).sheets)) return o as PersistedState;
-	const v1 = o as Partial<PersistedStateV1>;
-	const history = (Array.isArray(v1.history) ? v1.history : []).map((r) =>
-		r.sheetId ? r : { ...r, sheetId: defaultSheetId },
-	);
-	const reviewQueue = (Array.isArray(v1.reviewQueue) ? v1.reviewQueue : []).map((it) =>
-		it.sheetId ? it : { ...it, sheetId: defaultSheetId },
-	);
+	const o = (raw ?? {}) as Partial<PersistedState> & Partial<PersistedStateV2> & Partial<PersistedStateV1>;
+	const version = (o as { version?: number }).version;
+	if (version === 3 && Array.isArray((o as Partial<PersistedState>).sheets)) return o as PersistedState;
+
+	const rule = (o.rule as InterpretationRule) ?? establishRuleFromHeaders([]);
+	const refineChat = Array.isArray(o.refineChat) ? o.refineChat : [];
+	const planCache = Array.isArray(o.planCache) ? o.planCache : [];
+	const baselines = Array.isArray(o.baselines) ? o.baselines : [];
+
+	let entries: { sheetId: string; history: RunView[]; reviewQueue: ReviewItem[] }[];
+	if (version === 2 && Array.isArray((o as PersistedStateV2).sheets)) {
+		entries = (o as PersistedStateV2).sheets.map((s) => ({
+			sheetId: s.sheetId,
+			history: Array.isArray(s.history) ? s.history : [],
+			reviewQueue: Array.isArray(s.reviewQueue) ? s.reviewQueue : [],
+		}));
+	} else {
+		const v1 = o as Partial<PersistedStateV1>;
+		const history = (Array.isArray(v1.history) ? v1.history : []).map((r) =>
+			r.sheetId ? r : { ...r, sheetId: defaultSheetId },
+		);
+		const reviewQueue = (Array.isArray(v1.reviewQueue) ? v1.reviewQueue : []).map((it) =>
+			it.sheetId ? it : { ...it, sheetId: defaultSheetId },
+		);
+		entries = [{ sheetId: defaultSheetId, history, reviewQueue }];
+	}
+	if (entries.length === 0) entries = [{ sheetId: defaultSheetId, history: [], reviewQueue: [] }];
+	const foldId = entries.some((s) => s.sheetId === defaultSheetId)
+		? defaultSheetId
+		: (entries[0]?.sheetId ?? defaultSheetId);
+
 	return {
-		version: 2,
-		rule: v1.rule as InterpretationRule,
-		refineChat: v1.refineChat ?? [],
-		planCache: v1.planCache ?? [],
-		baselines: v1.baselines ?? [],
-		sheets: [{ sheetId: defaultSheetId, history, reviewQueue }],
+		version: STATE_VERSION,
+		defaultRule: rule,
+		legacyBaselines: baselines,
+		sheets: entries.map((s) => ({
+			sheetId: s.sheetId,
+			rule,
+			refineChat: s.sheetId === foldId ? refineChat : [],
+			planCache: s.sheetId === foldId ? planCache : [],
+			baselines: [],
+			history: s.history.map((r) => (r.sheetId ? r : { ...r, sheetId: s.sheetId })),
+			reviewQueue: s.reviewQueue.map((it) => (it.sheetId ? it : { ...it, sheetId: s.sheetId })),
+		})),
 	};
 }
 
-/** Where per-project state files live. Overridable via env for hermetic tests. */
 export function stateBaseDir(): string {
 	return process.env.TEST_OSTERONE_STATE_DIR?.trim() || join(homedir(), ".test-osterone", "studio-state");
 }
@@ -157,53 +270,46 @@ function stateFilePath(baseDir: string, projectId: string): string {
 	return join(baseDir, `${safe}.json`);
 }
 
-/** Flatten a live ProjectState into a JSON-serializable snapshot. */
 export function serializeProjectState(st: ProjectState): PersistedState {
 	return {
 		version: STATE_VERSION,
-		rule: st.rule,
-		refineChat: st.refineChat,
-		planCache: st.planCache.entries(),
-		baselines: st.baseline.entries(),
+		defaultRule: st.defaultRule,
+		legacyBaselines: st.legacyBaseline.entries(),
 		sheets: [...st.sheets.entries()].map(([sheetId, s]) => ({
 			sheetId,
+			rule: s.rule,
+			refineChat: s.refineChat,
+			planCache: s.planCache.entries(),
+			baselines: s.baseline.entries(),
 			history: s.history,
 			reviewQueue: [...s.reviewQueue.values()],
 		})),
 	};
 }
 
-/** Restore a persisted snapshot into an existing (usually fresh) ProjectState in place. */
 export function restoreProjectState(st: ProjectState, raw: unknown, defaultSheetId: string): void {
 	const v = migrateState(raw, defaultSheetId);
-	if (v.rule && typeof v.rule === "object") {
-		try {
-			st.rule = parseRule(JSON.stringify(v.rule));
-		} catch {
-			// keep the default rule if the persisted one is malformed
-		}
-	}
-	if (Array.isArray(v.refineChat)) st.refineChat = v.refineChat;
-	if (Array.isArray(v.planCache)) st.planCache.load(v.planCache);
-	if (Array.isArray(v.baselines)) st.baseline.load(v.baselines);
+	st.defaultRule = safeParseRule(v.defaultRule) ?? establishRuleFromHeaders([]);
+	st.legacyBaseline = new MemoryBaselineStore();
+	if (Array.isArray(v.legacyBaselines)) st.legacyBaseline.load(v.legacyBaselines);
 	st.sheets = new Map();
-	if (Array.isArray(v.sheets)) {
-		for (const s of v.sheets) {
-			st.sheets.set(s.sheetId, {
-				history: Array.isArray(s.history) ? s.history : [],
-				reviewQueue: new Map((Array.isArray(s.reviewQueue) ? s.reviewQueue : []).map((it) => [it.caseId, it])),
-			});
-		}
+	for (const s of v.sheets) {
+		const ss = newSheetState(st.defaultRule);
+		ss.rule = safeParseRule(s.rule) ?? cloneRule(st.defaultRule);
+		ss.refineChat = Array.isArray(s.refineChat) ? s.refineChat : [];
+		ss.planCache.load(Array.isArray(s.planCache) ? s.planCache : []);
+		ss.baseline.load(Array.isArray(s.baselines) ? s.baselines : []);
+		ss.history = Array.isArray(s.history) ? s.history : [];
+		ss.reviewQueue = new Map((Array.isArray(s.reviewQueue) ? s.reviewQueue : []).map((it) => [it.caseId, it]));
+		st.sheets.set(s.sheetId, ss);
 	}
 }
 
-/** Write a project's runtime state to disk (best-effort; callers may swallow errors). */
 export function persistProjectState(projectId: string, st: ProjectState, baseDir = stateBaseDir()): void {
 	mkdirSync(baseDir, { recursive: true });
 	writeFileSync(stateFilePath(baseDir, projectId), JSON.stringify(serializeProjectState(st)));
 }
 
-/** Load a project's runtime state from disk into `st`. Returns true if a file was found. */
 export function loadProjectState(
 	projectId: string,
 	st: ProjectState,
@@ -218,7 +324,6 @@ export function loadProjectState(
 	}
 }
 
-/** Remove a project's persisted state file (e.g. when the project is deleted). */
 export function deleteProjectState(projectId: string, baseDir = stateBaseDir()): void {
 	rmSync(stateFilePath(baseDir, projectId), { force: true });
 }
