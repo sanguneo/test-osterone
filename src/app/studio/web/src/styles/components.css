@@ -203,6 +203,9 @@ tbody tr:hover { background: color-mix(in srgb, var(--ink) 3%, transparent); }
 
 .kicker { color: var(--lime) !important; font: 800 10px ui-monospace, Consolas, monospace; letter-spacing: 0.16em; text-transform: uppercase; }
 .welcome-projects { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-4) 0; justify-content: center; }
+.welcome-projects .context-item { min-height: 38px; padding: 0 16px; border-color: var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--ink); font-size: 13px; }
+.welcome-projects .context-item:hover { border-color: var(--line-strong); background: var(--surface-raised); }
+.welcome-projects .context-item.selected { border-color: var(--line-strong); }
 .sheet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-3); margin-top: var(--space-5); }
 .sheet-card { display: grid; gap: 6px; padding: clamp(14px, 2vw, 20px); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--panel); text-align: left; cursor: pointer; align-content: start; min-height: 96px; }
 .sheet-card:hover { border-color: var(--line-strong); }
