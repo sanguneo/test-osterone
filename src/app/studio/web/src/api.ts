@@ -27,7 +27,7 @@ const q = (pid: string) => `projectId=${encodeURIComponent(pid)}`;
 export const api = {
 	sheetContent: (projectId: string, sheetId: string) =>
 		j<{ csvText: string }>(`/api/sheet/content?projectId=${encodeURIComponent(projectId)}&sheetId=${encodeURIComponent(sheetId)}`),
-	status: (pid: string) => j<Status>(`/api/status?${q(pid)}`),
+	status: (pid: string, sheetId?: string) => j<Status>(`/api/status?${q(pid)}${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ""}`),
 	history: (pid: string, sheetId?: string) =>
 		j<RunView[]>(`/api/history?${q(pid)}${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ""}`),
 	connect: (body: { mode: string; token?: string; apiKey?: string; model?: string; baseUrl?: string; projectId: string }) =>
@@ -37,8 +37,8 @@ export const api = {
 		j<{ saved: Project; projects: Project[] }>("/api/projects", post(p)),
 	deleteProject: (id: string) => j<{ projects: Project[] }>("/api/projects/delete", post({ id })),
 	preview: (cfg: RunInput, signal?: AbortSignal) => j<PreviewResult>("/api/tc/preview", { ...post(cfg), signal }),
-	refine: (instruction: string, projectId: string) => j<RefineResult>("/api/refine", post({ instruction, projectId })),
-	refineReset: (projectId: string) => j<Status>("/api/refine/reset", post({ projectId })),
+	refine: (instruction: string, projectId: string, sheetId?: string) => j<RefineResult>("/api/refine", post({ instruction, projectId, sheetId })),
+	refineReset: (projectId: string, sheetId?: string) => j<Status>("/api/refine/reset", post({ projectId, sheetId })),
 	analyze: (body: { sheetUrl?: string; csvText?: string; projectId: string; sheetId: string }) =>
 		j<AnalyzeResult>("/api/sheet/analyze", post(body)),
 	reviewQueue: (pid: string, sheetId?: string, all?: boolean) =>

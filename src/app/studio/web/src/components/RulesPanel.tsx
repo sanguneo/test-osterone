@@ -20,6 +20,8 @@ export function RulesPanel({
 	onStatus: (s: Status) => void;
 	goToModel: () => void;
 }) {
+	void connected;
+	void goToModel;
 	const [instruction, setInstruction] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [refineMsg, setRefineMsg] = useState("");
@@ -32,22 +34,6 @@ export function RulesPanel({
 	const intents = status?.intents ?? {};
 	const warnings = status?.warnings ?? [];
 	const ruleVersion = status?.ruleVersion ?? 1;
-
-	if (!connected) {
-		return (
-			<section>
-				<h2 className="sec">AI 규칙 다듬기 (대화)</h2>
-				<div className="card muted">
-					이 탭은 모델 연결이 필요합니다. 연결 후 시트 해석과 규칙 다듬기를 대화로 진행합니다.
-					<div style={{ marginTop: 12 }}>
-						<button className="mini" type="button" onClick={goToModel}>
-							모델 연결로 이동 →
-						</button>
-					</div>
-				</div>
-			</section>
-		);
-	}
 
 	async function analyze() {
 		const src = project?.sheets?.find((s) => s.id === selSheetId) ?? project?.sheets?.[0];
@@ -65,7 +51,7 @@ export function RulesPanel({
 					: { csvText: src.csvText, projectId: selId, sheetId: src.id },
 			);
 			setAnalyzeMsg(`헤더: ${d.headers.join(", ")}`);
-			onStatus(await api.status(selId));
+			onStatus(await api.status(selId, selSheetId));
 		} catch (e) {
 			setAnalyzeErr(true);
 			setAnalyzeMsg(`시트 해석 실패: ${(e as Error).message} — 원본과 모델 연결을 확인한 뒤 다시 시도하세요.`);
@@ -80,13 +66,13 @@ export function RulesPanel({
 		setRefineErr(false);
 		setRefineMsg("AI가 규칙을 다듬는 중…");
 		try {
-			const d = await api.refine(instruction, selId);
+			const d = await api.refine(instruction, selId, selSheetId);
 			setInstruction("");
 			const diff = Object.entries(d.diff)
 				.map(([k, v]) => `${k} ${v.added.length ? `+${v.added.join(",")}` : ""}${v.removed.length ? ` -${v.removed.join(",")}` : ""}`)
 				.join("   ");
 			setRefineMsg((d.changed ? `규칙 v${d.ruleVersion} 갱신 · ` : "변경 없음 · ") + diff);
-			onStatus(await api.status(selId));
+			onStatus(await api.status(selId, selSheetId));
 		} catch (e) {
 			setRefineErr(true);
 			setRefineMsg(`규칙 다듬기 실패: ${(e as Error).message} — 다시 보내거나 모델 연결 상태를 확인하세요.`);
@@ -97,7 +83,7 @@ export function RulesPanel({
 
 	async function reset() {
 		try {
-			onStatus(await api.refineReset(selId));
+			onStatus(await api.refineReset(selId, selSheetId));
 			setRefineMsg("");
 		} catch (e) {
 			setRefineErr(true);

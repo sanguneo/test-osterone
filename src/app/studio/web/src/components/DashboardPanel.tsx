@@ -82,19 +82,59 @@ export function DashboardPanel({
 	}, [selId, project, refreshKey]);
 	useEffect(load, [load]);
 
-	const run = history?.[runIdx];
-	const prev = history?.[runIdx + 1];
+	// The dashboard's primary view is scoped to the selected sheet; fall back to the first sheet
+	// with any runs when nothing is selected yet.
+	const effectiveSheetId = useMemo(() => {
+		if (!history || history.length === 0) return selSheetId ?? "";
+		if (selSheetId && history.some((r) => r.sheetId === selSheetId)) return selSheetId;
+		return history[0]?.sheetId ?? selSheetId ?? "";
+	}, [history, selSheetId]);
+
+	const sheetRuns = useMemo(
+		() => (history ?? []).filter((r) => r.sheetId === effectiveSheetId),
+		[history, effectiveSheetId],
+	);
+
+	const sheetName = useMemo(() => {
+		const sheets = project?.sheets ?? [];
+		return sheets.find((s) => s.id === effectiveSheetId)?.name ?? project?.name ?? selId;
+	}, [project, effectiveSheetId, selId]);
+
+	// Project roll-up: for each sheet, take its latest run and aggregate the pass rate across those
+	// latest runs, plus how many sheets currently sit on a needs_review verdict.
+	const rollup = useMemo(() => {
+		const sheets = project?.sheets ?? [];
+		if (!history || sheets.length === 0) return null;
+		let passSum = 0;
+		let totalSum = 0;
+		let reviewSheets = 0;
+		for (const sheet of sheets) {
+			const latest = history.filter((r) => r.sheetId === sheet.id).sort((a, b) => b.at - a.at)[0];
+			if (!latest) continue;
+			passSum += latest.counts.pass || 0;
+			totalSum += latest.results.length;
+			if ((latest.counts.needs_review || 0) > 0) reviewSheets += 1;
+		}
+		return {
+			sheetCount: sheets.length,
+			reviewSheets,
+			rate: totalSum === 0 ? null : passSum / totalSum,
+		};
+	}, [history, project]);
+
+	const run = sheetRuns[runIdx];
+	const prev = sheetRuns[runIdx + 1];
 
 	const rate = run ? passRate(run) : null;
 	const prevRate = prev ? passRate(prev) : null;
 	const delta = rate !== null && prevRate !== null ? Math.round((rate - prevRate) * 100) : null;
 	const rates = useMemo(
 		() =>
-			(history ?? [])
+			sheetRuns
 				.map(passRate)
 				.filter((r): r is number => r !== null)
 				.reverse(),
-		[history],
+		[sheetRuns],
 	);
 
 	const queue = useMemo(() => {
@@ -127,10 +167,10 @@ export function DashboardPanel({
 					<h2 className="sec">실행 현황</h2>
 				</div>
 				<span className="ctx">
-					{project?.name ?? selId}
+					{sheetName}
 					{run ? ` · 마지막 실행 ${fmtAgo(run.at)}` : ""}
 				</span>
-				{history && history.length > 0 && (
+				{history && sheetRuns.length > 0 && (
 					<button className="mini" type="button" onClick={() => goTo("run")}>
 						새 실행 →
 					</button>
@@ -148,7 +188,7 @@ export function DashboardPanel({
 
 			{!loadErr && !history && <DashboardSkeleton />}
 
-			{history && history.length === 0 && (
+			{history && sheetRuns.length === 0 && (
 				<div className="card dash-empty">
 					<div className="empty-signal"><EmptyMotif /><span>Ready for first run</span></div>
 					<div>
@@ -169,6 +209,17 @@ export function DashboardPanel({
 
 			{run && (
 				<>
+					{rollup && (
+						<div className="metrics">
+							<div className="metric">
+								<div className="lbl">프로젝트 전체</div>
+								<div className="val">{rollup.rate === null ? "—" : `${Math.round(rollup.rate * 100)}%`}</div>
+								<div className="sub">
+									{rollup.sheetCount}개 시트 · 검토 대기 {rollup.reviewSheets}개
+								</div>
+							</div>
+						</div>
+					)}
 					<div className="metrics">
 						<div className="metric hero">
 							<div className="lbl">통과율</div>
@@ -228,9 +279,9 @@ export function DashboardPanel({
 							</button>
 						)}
 						<span className="spacer" />
-						{history.length > 1 && (
+						{sheetRuns.length > 1 && (
 							<select value={runIdx} onChange={(e) => setRunIdx(Number(e.target.value))} aria-label="실행 선택">
-								{history.map((v, i) => (
+								{sheetRuns.map((v, i) => (
 									<option key={v.at} value={i}>
 										{fmtRun(v)}
 									</option>

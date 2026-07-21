@@ -7,7 +7,6 @@ export type StudioTab = "dash" | "rules" | "run" | "review";
 interface StudioChromeProps {
 	readonly connected: boolean;
 	readonly modelLabel: string;
-	readonly modelStale: boolean;
 	readonly navReviewCount: number;
 	readonly onAddProject: () => void;
 	readonly onAddSheet: () => void;
@@ -114,7 +113,7 @@ export function StudioChrome(props: StudioChromeProps) {
 					))}
 				</nav>
 				<button
-					className={`model-status${props.connected ? " connected" : ""}${props.modelStale ? " stale" : ""}`}
+					className={`model-status${props.connected ? " connected" : ""}`}
 					type="button"
 					aria-label={props.modelLabel}
 					onClick={props.onModelOpen}

@@ -21,7 +21,6 @@ export function App() {
 	const [reviewCount, setReviewCount] = useState(0);
 	const [navReviewCount, setNavReviewCount] = useState(0);
 	const [projectError, setProjectError] = useState("");
-	const [statusStale, setStatusStale] = useState(false);
 	const [runSequence, setRunSequence] = useState(0);
 	const [modelOpen, setModelOpen] = useState(false);
 	const [projectModalOpen, setProjectModalOpen] = useState(false);
@@ -36,11 +35,10 @@ export function App() {
 	const connected = Boolean(status?.connected);
 
 	const refreshStatus = useCallback(() => {
-		api.status(selectedProjectId).then((nextStatus) => {
+		api.status(selectedProjectId, selectedSheetId).then((nextStatus) => {
 			setStatus(nextStatus);
-			setStatusStale(false);
-		}).catch(() => setStatusStale(true));
-	}, [selectedProjectId]);
+		}).catch(() => {});
+	}, [selectedProjectId, selectedSheetId]);
 
 	const loadProjects = useCallback(() => {
 		setProjectError("");
@@ -118,7 +116,6 @@ export function App() {
 				key={selectedProjectId}
 				connected={connected}
 				modelLabel={connected && status?.auth ? status.auth.model : "모델 연결"}
-				modelStale={statusStale}
 				navReviewCount={navReviewCount}
 				onAddProject={openNewProject}
 				onAddSheet={openNewSheet}
