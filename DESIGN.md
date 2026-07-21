@@ -2,7 +2,9 @@
 
 ## 1. Atmosphere & Identity
 
-Studio is a forensic operations workspace: calm at rest, decisive when a run needs attention. It keeps the existing charcoal and acid-lime identity, but the composition is rebuilt around a horizontal workspace context and a central run rail instead of a dashboard sidebar. The signature is the **run rail**: a continuous vertical line that connects readiness, execution, evidence, and review so the operator always knows what comes next.
+Studio is a forensic operations workspace: calm at rest, decisive when a run needs attention. It keeps the existing charcoal and acid-lime identity, but the composition is rebuilt around a horizontal workspace context and a central run rail instead of a dashboard sidebar. The signature is the **run rail**: a continuous vertical line that connects readiness, execution, evidence, and review so the operator always knows what comes next. The overall composition is a Project → Sheet → views drill-down: the Test Sheet, not the project, is the working unit, and each view — dashboard, rules, run & results, review — is scoped to whichever sheet is currently selected.
+
+Each sheet owns its interpretation rule, refine chat, and approved baselines; the project only holds a default rule used to seed new sheets and a read-only legacy baseline fallback for pre-migration approvals. This per-sheet ownership is why every view below reads as "the selected sheet's dashboard/rules/run/review", not a project-wide screen.
 
 ## 2. Color
 
@@ -66,9 +68,9 @@ Base unit: 4px.
 | `--space-10` | `2.5rem` | Page sections |
 | `--space-12` | `3rem` | Major regions |
 
-- Shell: `100dvh` grid with fixed header and context strip; `.workspace-main` owns vertical scroll.
+- Shell: `100dvh` grid with four fixed rows — app header, workspace context strip (project/sheet reels), a sheet-scoped nav row (`Project › Sheet` breadcrumb + the four view tabs), and `.workspace-main`, which owns vertical scroll.
 - Main content is capped at `90rem` and centered via automatic inline gutters; the scroll owner (`.workspace-main`) spans the full viewport so the scrollbar sits at the window edge. Fluid gutters use `clamp()`/`max()`.
-- Desktop: top navigation plus horizontal project/sheet context. Tablet compresses labels. Mobile turns the context strip into an explicit horizontal reel and the primary navigation into a bottom dock.
+- Desktop: the primary view-nav no longer lives in the top header; it sits in a `.sheet-nav` row below the project/sheet context strip, preceded by a `Project › Sheet` breadcrumb, so the four views read as belonging to the selected sheet. Tablet compresses labels. Mobile turns the context strip into an explicit horizontal reel and the sheet-nav into a bottom dock.
 - Primary content reflows to one readable column at 375px. Only tables and named reels may scroll horizontally.
 - Radius scale: `--radius-control 0.375rem`, `--radius-panel 0.75rem`, `--radius-overlay 1rem`, `--radius-round 999rem`.
 
@@ -80,17 +82,42 @@ Base unit: 4px.
 - **Accessibility**: product name remains real text.
 
 ### Primary navigation
-- **Structure**: four labeled buttons with one custom SVG icon family.
+- **Structure**: a `Project › Sheet` breadcrumb followed by four labeled view tabs, one custom SVG icon family each.
 - **Variants**: dashboard, rules, run, review.
 - **States**: default, hover, active (`aria-current="page"`), focus.
 - **Motion**: 120ms color/surface transition; no entrance animation.
-- **Layout**: cluster on desktop, bottom dock on mobile.
+- **Layout**: a sheet-scoped sub-navigation row (`.sheet-nav`) below the project/sheet context strip on desktop, bottom dock on mobile; hidden/collapsed until a sheet is selected.
+
+### Sheet nav (breadcrumb + views)
+- **Structure**: `Project › Sheet` breadcrumb + the four view tabs (dashboard, rules, run, review).
+- **States**: default, hover, active tab, focus; collapsed when no sheet is selected.
+- **Accessibility**: breadcrumb segments are real links/buttons; active tab exposed with `aria-current="page"`.
+- **Layout**: row sits between the workspace context strip and the main content region; it is the only place the four views are surfaced.
 
 ### Workspace switcher
 - **Structure**: project reel, sheet reel, contextual add/edit/remove controls.
 - **States**: default, hover, selected, focus, disabled, confirm-delete.
 - **Accessibility**: visible labels, icon buttons have `aria-label`, selected state exposed with `aria-pressed`.
 - **Layout**: horizontal reel owns horizontal scroll; it never becomes the page scroll owner.
+- **Behavior**: selecting a sheet drills into that sheet's four views (dashboard/rules/run/review); selecting a project with no sheet selected shows Project home instead.
+
+### Welcome screen
+- **Structure**: product lockup + a list of existing projects to pick from + a create-project action.
+- **States**: empty (no projects yet), populated list, busy (creating).
+- **Accessibility**: project list items are real buttons/links; create action is reachable by keyboard.
+- **Layout**: centered empty-state layout; shown only when no project is selected.
+
+### Project home
+- **Structure**: header with project name, target, and sheet count; the project's sheets as a selectable card grid (`.sheet-card`).
+- **States**: populated grid, empty (add-first-sheet CTA), hover/selected card, focus.
+- **Accessibility**: each `.sheet-card` is a single actionable region with a visible name and status summary.
+- **Layout**: shown when a project is selected but no sheet is selected; grid reflows to one column at 375px.
+
+### Sheet onboarding wizard
+- **Structure**: three steps — (1) source (name + Google Sheet/CSV + optional target/env override), (2) AI interpretation proposal (proposed column-mapping chips + a case preview table), (3) conversational rule refine.
+- **States**: step active, step complete, step error, busy (AI proposal generating).
+- **Accessibility**: step progress is exposed as text, not color alone; each step is keyboard-navigable.
+- **Layout**: overlay dialog with a linear step sequence; used only for adding a new sheet — editing an existing sheet uses the single-step form.
 
 ### Button
 - **Variants**: primary lime, secondary tonal, tertiary text, destructive outline, icon-only.

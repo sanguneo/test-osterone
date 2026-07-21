@@ -70,7 +70,7 @@ Spreadsheet (XLSX / Google Sheet)
 ```bash
 bun install            # installs Playwright Chromium via postinstall
 bun run setup          # or install the headless browser explicitly
-bun test               # 87/87
+bun test               # 89/89
 
 test-osterone --help
 test-osterone setup
@@ -120,21 +120,21 @@ bun run studio     # builds the React UI (Vite) then serves it — open http://l
 
 Model connection is **global**, in the top bar — a login-style control (● status + model name) that opens a modal with three modes: **Codex login** (auto-detects a local `codex login`), **paste a token** (+ optional model override), or **API Key / endpoint** — connect *any* OpenAI-compatible endpoint (Azure OpenAI, OpenRouter, Together, local vLLM/Ollama) via model + Base URL. The model is only ever used at **author time**; it never judges.
 
-Below the top bar, navigation is a **2-lane layout**: a Project lane and a Test Sheet lane, each with **direct add/edit/delete** (a project editor modal and a sheet editor modal — no separate "manage" screen). A **Project** holds one or more first-class **Test Sheets** (Google Sheet URL / pasted CSV / uploaded `.xlsx`), plus shared defaults (target URL, environment, test account, reference repo, AI toggle). Each **Test Sheet** can **override** the target URL, environment, and column mapping independently. There is **no cap on sheet count** — a search/filter appears once a project or sheet list exceeds ~8 items, the active item auto-scrolls into view, the sidebar is sticky with independent scrolling, lanes go responsive on narrow screens, and long names get tooltips.
+The top header shows the brand and model connection status. Below it, a horizontal **Project | Sheet** context strip lets you pick or switch the active project and sheet, with **inline add/edit/delete** for both (a project editor modal and a sheet editor modal — no separate "manage" screen). Below the context strip, a sheet-scoped **view-nav row** shows a `Project › Sheet` breadcrumb plus the four views — **Dashboard, Rules, Run & Results, Review** — all scoped to the selected sheet. Navigation is an explicit drill-down: with no project selected you land on a **Welcome** screen to pick or create one; with a project but no sheet selected you land on a **Project home** listing that project's sheets as a selectable grid (or an add-first-sheet prompt if it has none); selecting a sheet opens its four views. Deleting the active project returns you to Welcome. A **Project** holds one or more first-class **Test Sheets** (Google Sheet URL / pasted CSV / uploaded `.xlsx`), plus shared defaults (target URL, environment, test account, reference repo, AI toggle). Each **Test Sheet** can **override** the target URL, environment, and column mapping independently. There is **no cap on sheet count** — a search/filter appears once the sheet list exceeds ~8 items, the active item auto-scrolls into view, the context strip goes responsive on narrow screens, and long names get tooltips.
 
-- **Per-sheet runtime** — every sheet has its **own run history and review queue**; the dashboard aggregates across all sheets in a project, and the review nav badge shows a project-level roll-up. Running a sheet ingests only that sheet, with per-sheet dedupe.
-- **AI sheet interpretation (column mapping)** — **시트 해석** sends a sheet's headers + a sample row to the connected model, which proposes a column mapping (`id/title/step/expected/priority/…` → your header names) and writes it as a **delta onto the selected sheet** — the project's shared rule is untouched. You can adjust it conversationally ("use 중분류 as the title, not 소분류"); the mapping is **applied at ingestion** for that sheet.
+- **Per-sheet runtime** — every sheet has its **own run history and review queue**, and now its **own interpretation rule, refine chat, and approved baselines** (the project keeps a **default rule** that new sheets clone, plus a **legacy baseline fallback** for pre-upgrade approvals). The Dashboard view shows the selected sheet's data plus a compact **project roll-up** (aggregate pass rate across sheets), and the review nav badge shows a project-level roll-up. Running a sheet ingests only that sheet, with per-sheet dedupe.
+- **AI sheet interpretation & rule refine** — adding a sheet runs a **3-step onboarding wizard**: pick the **source** (Google Sheet URL / CSV / `.xlsx`) → the model proposes an **interpretation** (column mapping `id/title/step/expected/priority/…` → your header names, plus a case preview) → a **conversational refine** step where you adjust it in natural language ("use 중분류 as the title, not 소분류"). The resulting rule is stored **per sheet** (new sheets clone the project's default rule as a starting point) and is applied at ingestion for that sheet; you can keep refining a sheet's rule later from its Rules view.
 - **Run** — pick a project and sheet, optionally tick **AI 스텝 해석**, and **실행 (Run)**. Results **stream in per case** (NDJSON) — verdicts and a running pass/fail/needs_review tally appear live as each case finishes.
 
 The deterministic engine runs each case against real headless Chromium and renders verdict badges, per-assertion detail, self-heal events, and the needs_review queue — no CSV escaping, no terminal after launch.
 
-**Conversational rule refine.** Once connected, **AI 규칙 다듬기** refines the project-level interpretation rule in natural language (e.g. "recognize 누르기 as a click"). It is **conversational** — each turn builds on the last (e.g. "undo that") — and after every turn the UI shows an **intent diff** and flags **ambiguous or empty intents**, so the rule converges to an optimal, interpretable form. Changes bump the rule version; **초기화** resets the conversation.
+**Conversational rule refine.** Once connected, **AI 규칙 다듬기** refines the **selected sheet's** interpretation rule in natural language (e.g. "recognize 누르기 as a click"). It is **conversational** — each turn builds on the last (e.g. "undo that") — and after every turn the UI shows an **intent diff** and flags **ambiguous or empty intents**, so the rule converges to an optimal, interpretable form. Changes bump that sheet's rule version; **초기화** resets the conversation.
 
 **AI step interpretation.** Tick **AI 스텝 해석** on a run to let the connected model turn free natural-language steps (no quotes, no DSL) into a deterministic plan (actions + assertions). The plan is **authored once and cached**, then the engine replays it deterministically — identical `pass` / `fail` / `needs_review` semantics, false-pass still 0. The bundled sample ships a quote-free variant to demonstrate it.
 
-**Review queue.** `needs_review` cases surface with their evidence — a **screenshot**, the page text, and the reason (self-heal, missing baseline, …). Approve the baseline once and a matching re-run **passes**, across every sheet that shares the same case content (reconcile-on-read clears a stale needs_review elsewhere without re-running); if the page drifts it is re-flagged. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
+**Review queue.** `needs_review` cases surface with their evidence — a **screenshot**, the page text, and the reason (self-heal, missing baseline, …). Approve the baseline — the approved **reference screen** for that case — once and a matching re-run **passes**, across every sheet that shares the same case content (reconcile-on-read clears a stale needs_review elsewhere without re-running); if the page drifts it is re-flagged. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
 
-**Persistence.** Project metadata lives in `~/.test-osterone/studio-projects.json`; per-project runtime state (rule, refine chat, plan cache, approved baselines, per-sheet history + review queue) lives in `~/.test-osterone/studio-state/<projectId>.json`; and **sheet CSV content is offloaded to per-sheet files** (`sheet-data/<projectId>/<sheetId>.csv`) so neither file grows with sheet count — hence no cap. `baselineKey`/`assertionCacheKey` formats are unchanged, so false-pass=0 holds across all of this.
+**Persistence.** Project metadata lives in `~/.test-osterone/studio-projects.json`; per-project runtime state now lives in `~/.test-osterone/studio-state/<projectId>.json` as **per-sheet** rule, refine chat, plan cache, and approved baselines, plus a project **default rule** (cloned by new sheets) and a **legacy baseline fallback** for approvals made before the per-sheet upgrade — a `STATE_VERSION` v2→v3 migration lifts old project-level state into this shape **losslessly and idempotently**. **Sheet CSV content is offloaded to per-sheet files** (`sheet-data/<projectId>/<sheetId>.csv`) so neither file grows with sheet count — hence no cap. `baselineKey`/`assertionCacheKey` formats are unchanged, so false-pass=0 holds across all of this.
 
 ## Architecture
 
@@ -156,7 +156,7 @@ Two interchangeable clients behind one interface:
 
 ## Status
 
-**Built & verified (static, deterministic — 87/87 automated tests):** ingest → normalize → dedupe → rule (CLI) → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract · benchmark hard gate · web dashboard · orchestration (node/host) · auth (API key + OAuth proxy) + JUnit.
+**Built & verified (static, deterministic — 89/89 automated tests):** ingest → normalize → dedupe → rule (CLI) → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract · benchmark hard gate · web dashboard · orchestration (node/host) · auth (API key + OAuth proxy) + JUnit.
 
 **Pending environment-dependent integration (implemented, not yet live-verified):** live benchmark against real Chromium + docker fixtures / real OAuth-token ChatGPT calls — contracts and implementations are complete; only a smoke pass in a browser/docker/token environment remains.
 
@@ -175,7 +175,7 @@ src/
   testing/      fixture app + fixture model
   app/studio/   browser UI (Studio)
   cli.ts · index.ts
-test/           unit + smoke suites (87/87)
+test/           unit + smoke suites (89/89)
 examples/demo/  CLI live-run example
 ```
 
