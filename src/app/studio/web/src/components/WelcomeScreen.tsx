@@ -1,5 +1,4 @@
 import type { Project } from "../types";
-import { EmptyMotif } from "./DashboardParts";
 import { Icon } from "./Icon";
 
 export function WelcomeScreen({
@@ -13,26 +12,24 @@ export function WelcomeScreen({
 }) {
 	return (
 		<section>
-			<div className="card dash-empty">
-				<div className="empty-signal">
-					<EmptyMotif />
-					<span>test-osterone Studio</span>
-				</div>
+			<div className="dash-head">
 				<div>
 					<p className="kicker">test-osterone Studio</p>
-					<h2>프로젝트를 선택하거나 새로 만드세요</h2>
-					<p>프로젝트는 테스트 시트를 묶어 관리하는 단위입니다. 시트마다 규칙·실행·리뷰가 따로 유지됩니다.</p>
-					<div className="welcome-projects">
-						{projects.map((project) => (
-							<button key={project.id} className="context-item" type="button" onClick={() => onSelectProject(project.id)}>
-								{project.name}
-							</button>
-						))}
-					</div>
-					<button className="button primary" type="button" onClick={onNewProject}>
-						<Icon name="add" />새 프로젝트
-					</button>
+					<h2 className="sec">프로젝트</h2>
 				</div>
+				<span className="ctx">테스트 시트를 묶어 관리하는 단위입니다 · 시트마다 규칙·실행·리뀐가 따로 유지됩니다</span>
+			</div>
+			<div className="sheet-grid">
+				{projects.map((project) => (
+					<button key={project.id} className="sheet-card" type="button" onClick={() => onSelectProject(project.id)}>
+						<Icon name="project" />
+						<b>{project.name}</b>
+						<span className="detail">시트 {project.sheets.length}개{project.baseUrl ? ` · ${project.baseUrl}` : ""}</span>
+					</button>
+				))}
+				<button className="sheet-card sheet-card-add" type="button" onClick={onNewProject}>
+					<Icon name="add" />새 프로젝트
+				</button>
 			</div>
 		</section>
 	);
