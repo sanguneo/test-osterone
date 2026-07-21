@@ -1,5 +1,5 @@
 @media (max-width: 1120px) {
-	.app-header { grid-template-columns: auto 1fr auto; }
+	.app-header { grid-template-columns: 1fr auto; }
 	.brand-lockup > span:last-child { display: none; }
 	.nav-item { min-width: 90px; }
 	.metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -10,10 +10,10 @@
 
 @media (max-width: 820px) {
 	:root { --header-height: 58px; }
-	.app-header { grid-template-columns: auto 1fr auto; padding: 0 16px; backdrop-filter: none; }
+	.app-header { grid-template-columns: 1fr auto; padding: 0 16px; backdrop-filter: none; }
 	.brand-lockup > span:last-child { display: none; }
-	.app-header > .primary-nav { justify-self: center; min-width: 0; }
-	.app-header > .primary-nav .nav-item { min-width: 70px; padding: 0 9px; }
+	.primary-nav { justify-self: center; min-width: 0; }
+	.primary-nav .nav-item { min-width: 70px; padding: 0 9px; }
 	.nav-label { display: none; }
 	.nav-short-label { display: block; }
 	.nav-count { min-width: 18px; height: 18px; font-size: 9px; }
@@ -31,9 +31,9 @@
 }
 
 @media (max-width: 600px) {
-	.app-header { grid-template-columns: auto 1fr; }
+	.app-header { grid-template-columns: 1fr auto; }
 	.brand-lockup > span:last-child { display: grid; }
-	.app-header > .primary-nav {
+	.primary-nav {
 		position: fixed;
 		z-index: 45;
 		left: 12px;
@@ -47,10 +47,11 @@
 		box-shadow: 0 14px 50px color-mix(in srgb, var(--inset) 72%, transparent);
 		backdrop-filter: blur(18px);
 	}
-	.app-header > .primary-nav .nav-item { flex: 1; min-width: 0; padding: 0 6px; flex-direction: column; gap: 3px; font-size: 10px; border-radius: var(--radius-sm); }
-	.app-header > .primary-nav .nav-item::after { display: none; }
-	.app-header > .primary-nav .nav-item.active { background: var(--surface-active); color: var(--lime); }
-	.app-header > .primary-nav .nav-count { position: absolute; top: 2px; right: 10%; }
+	.primary-nav .nav-item { flex: 1; min-width: 0; padding: 0 6px; flex-direction: column; gap: 3px; font-size: 10px; border-radius: var(--radius-sm); }
+	.primary-nav .nav-item::after { display: none; }
+	.primary-nav .nav-item.active { background: var(--surface-active); color: var(--lime); }
+	.primary-nav .nav-count { position: absolute; top: 2px; right: 10%; }
+	.sheet-nav { min-height: 40px; border-bottom: 0; }
 	.workspace-main { padding: 28px 16px 104px; }
 	.run-workbench { grid-template-columns: 1fr; }
 	.run-workbench > .run-rail { position: static; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 0; }
