@@ -878,11 +878,38 @@ async function main(): Promise<number> {
 		await browserInstance?.close();
 		return ok ? 0 : 1;
 	}
-	for (const sig of ["SIGINT", "SIGTERM"] as const) {
-		process.on(sig, () => {
-			void browserInstance?.close().finally(() => process.exit(0));
-		});
-	}
+	// Restore the terminal on exit. An abrupt Ctrl+C — especially on Windows consoles with a
+	// Playwright child process — can leave the TTY in raw mode / cursor hidden / echo off. Show
+	// the cursor, reset attributes, and drop raw mode so the shell stays usable after shutdown.
+	const restoreTerminal = () => {
+		try {
+			if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function") process.stdin.setRawMode(false);
+		} catch {}
+		try {
+			if (process.stdout.isTTY) process.stdout.write("\u001b[?25h\u001b[0m");
+		} catch {}
+	};
+	let shuttingDown = false;
+	const shutdown = () => {
+		// A second Ctrl+C forces an immediate exit instead of waiting on cleanup.
+		if (shuttingDown) {
+			restoreTerminal();
+			process.exit(0);
+		}
+		shuttingDown = true;
+		restoreTerminal();
+		// Bounded cleanup: never hang the terminal on a slow/stuck browser close.
+		const timer = setTimeout(() => process.exit(0), 2000);
+		timer.unref();
+		void Promise.resolve(browserInstance?.close())
+			.catch(() => {})
+			.finally(() => {
+				clearTimeout(timer);
+				process.exit(0);
+			});
+	};
+	for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, shutdown);
+	process.on("exit", restoreTerminal);
 	const port = Number(process.env.PORT ?? 8686);
 	createServer((req, res) => {
 		handle(req, res).catch((err) => send(res, 500, JSON.stringify({ error: String(err) })));
