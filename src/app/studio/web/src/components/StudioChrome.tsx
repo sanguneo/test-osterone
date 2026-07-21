@@ -156,29 +156,33 @@ export function StudioChrome(props: StudioChromeProps) {
 					</button>
 				</div>
 			</section>
-			<nav className="sheet-nav" aria-label="시트 보기">
-				<span className="sheet-nav-context">
-					<Icon name="sheet" size={14} />
-					<span className="sheet-nav-crumb">{selected?.name ?? "프로젝트"}</span>
-					<span className="sheet-nav-sep" aria-hidden="true">›</span>
-					<b>{activeSheetName}</b>
-				</span>
-				<div className="primary-nav">
-					{NAV_ITEMS.map((item) => (
-						<button
-							key={item.tab}
-							className={`nav-item${props.tab === item.tab ? " active" : ""}`}
-							type="button"
-							aria-current={props.tab === item.tab ? "page" : undefined}
-							onClick={() => props.onTabChange(item.tab)}
-						>
-							<Icon name={item.icon} />
-							<span className="nav-label">{item.label}</span>
-							<span className="nav-short-label">{item.shortLabel}</span>
-							{item.tab === "review" && props.navReviewCount > 0 && <b className="nav-count">{props.navReviewCount}</b>}
-						</button>
-					))}
-				</div>
+			<nav className={`sheet-nav${props.selectedSheetId ? "" : " is-empty"}`} aria-label="시트 보기">
+				{props.selectedSheetId ? (
+					<>
+						<span className="sheet-nav-context">
+							<Icon name="sheet" size={14} />
+							<span className="sheet-nav-crumb">{selected?.name ?? "프로젝트"}</span>
+							<span className="sheet-nav-sep" aria-hidden="true">›</span>
+							<b>{activeSheetName}</b>
+						</span>
+						<div className="primary-nav">
+							{NAV_ITEMS.map((item) => (
+								<button
+									key={item.tab}
+									className={`nav-item${props.tab === item.tab ? " active" : ""}`}
+									type="button"
+									aria-current={props.tab === item.tab ? "page" : undefined}
+									onClick={() => props.onTabChange(item.tab)}
+								>
+									<Icon name={item.icon} />
+									<span className="nav-label">{item.label}</span>
+									<span className="nav-short-label">{item.shortLabel}</span>
+									{item.tab === "review" && props.navReviewCount > 0 && <b className="nav-count">{props.navReviewCount}</b>}
+								</button>
+							))}
+						</div>
+					</>
+				) : null}
 			</nav>
 		</>
 	);

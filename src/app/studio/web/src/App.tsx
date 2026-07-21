@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
+import { ProjectHome } from "./components/ProjectHome";
 import { DashboardPanel } from "./components/DashboardPanel";
 import { Icon } from "./components/Icon";
 import { ModalShell } from "./components/ModalShell";
@@ -9,12 +10,13 @@ import { ReviewPanel } from "./components/ReviewPanel";
 import { RulesPanel } from "./components/RulesPanel";
 import { RunPanel } from "./components/RunPanel";
 import { SheetEditorModal } from "./components/SheetEditorModal";
+import { WelcomeScreen } from "./components/WelcomeScreen";
 import { StudioChrome, type StudioTab } from "./components/StudioChrome";
 import type { Project, Status, TestSheet } from "./types";
 
 export function App() {
 	const [projects, setProjects] = useState<Project[]>([]);
-	const [selectedProjectId, setSelectedProjectId] = useState("sample");
+	const [selectedProjectId, setSelectedProjectId] = useState("");
 	const [selectedSheetId, setSelectedSheetId] = useState("");
 	const [status, setStatus] = useState<Status | null>(null);
 	const [tab, setTab] = useState<StudioTab>("dash");
@@ -29,7 +31,7 @@ export function App() {
 	const [editingSheet, setEditingSheet] = useState<TestSheet | null>(null);
 
 	const selectedProject = useMemo(
-		() => projects.find((project) => project.id === selectedProjectId) ?? projects[0],
+		() => projects.find((project) => project.id === selectedProjectId),
 		[projects, selectedProjectId],
 	);
 	const connected = Boolean(status?.connected);
@@ -53,7 +55,7 @@ export function App() {
 	useEffect(() => {
 		if (!selectedProject) return;
 		if (!selectedProject.sheets.some((sheet) => sheet.id === selectedSheetId)) {
-			setSelectedSheetId(selectedProject.sheets[0]?.id ?? "");
+			setSelectedSheetId("");
 		}
 	}, [selectedProject, selectedSheetId]);
 
@@ -142,18 +144,26 @@ export function App() {
 						<button className="button secondary compact" type="button" onClick={loadProjects}>다시 시도</button>
 					</div>
 				)}
-				<div hidden={tab !== "dash"}>
-					<DashboardPanel selId={selectedProjectId} project={selectedProject} selSheetId={selectedSheetId} reviewCount={navReviewCount} goTo={setTab} refreshKey={runSequence} />
-				</div>
-				<div hidden={tab !== "rules"}>
-					<RulesPanel status={status} selId={selectedProjectId} project={selectedProject} selSheetId={selectedSheetId} connected={connected} onStatus={setStatus} goToModel={() => setModelOpen(true)} />
-				</div>
-				<div hidden={tab !== "run"}>
-					<RunPanel key={`${selectedProjectId}:${selectedSheetId}`} project={selectedProject} selId={selectedProjectId} selSheetId={selectedSheetId} onDone={() => setRunSequence((value) => value + 1)} />
-				</div>
-				<div hidden={tab !== "review"}>
-					<ReviewPanel selId={selectedProjectId} selSheetId={selectedSheetId} onCount={setReviewCount} refreshKey={runSequence} />
-				</div>
+				{!selectedProject ? (
+					<WelcomeScreen projects={projects} onSelectProject={setSelectedProjectId} onNewProject={openNewProject} />
+				) : !selectedSheetId ? (
+					<ProjectHome project={selectedProject} onSelectSheet={setSelectedSheetId} onAddSheet={openNewSheet} />
+				) : (
+					<>
+						<div hidden={tab !== "dash"}>
+							<DashboardPanel selId={selectedProjectId} project={selectedProject} selSheetId={selectedSheetId} reviewCount={navReviewCount} goTo={setTab} refreshKey={runSequence} />
+						</div>
+						<div hidden={tab !== "rules"}>
+							<RulesPanel status={status} selId={selectedProjectId} project={selectedProject} selSheetId={selectedSheetId} connected={connected} onStatus={setStatus} goToModel={() => setModelOpen(true)} />
+						</div>
+						<div hidden={tab !== "run"}>
+							<RunPanel key={`${selectedProjectId}:${selectedSheetId}`} project={selectedProject} selId={selectedProjectId} selSheetId={selectedSheetId} onDone={() => setRunSequence((value) => value + 1)} />
+						</div>
+						<div hidden={tab !== "review"}>
+							<ReviewPanel selId={selectedProjectId} selSheetId={selectedSheetId} onCount={setReviewCount} refreshKey={runSequence} />
+						</div>
+					</>
+				)}
 			</main>
 
 			{modelOpen && <ModalShell label="모델 연결" onClose={closeModel}><ModelPanel status={status} selId={selectedProjectId} onStatus={setStatus} onClose={closeModel} /></ModalShell>}
