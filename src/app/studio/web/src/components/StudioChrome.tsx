@@ -30,7 +30,7 @@ const NAV_ITEMS: ReadonlyArray<{ icon: IconName; label: string; shortLabel: stri
 	{ icon: "overview", label: "대시보드", shortLabel: "현황", tab: "dash" },
 	{ icon: "rules", label: "규칙·해석", shortLabel: "규칙", tab: "rules" },
 	{ icon: "play", label: "실행 & 결과", shortLabel: "실행", tab: "run" },
-	{ icon: "review", label: "리뷰 큐", shortLabel: "리뷰", tab: "review" },
+	{ icon: "review", label: "리뷰 대기", shortLabel: "리뷰", tab: "review" },
 ];
 
 function ContextItem({

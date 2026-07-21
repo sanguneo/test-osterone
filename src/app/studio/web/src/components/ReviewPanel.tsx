@@ -46,7 +46,7 @@ export function ReviewPanel({
 			setItems(queue);
 			onCount(queue.length);
 		} catch (e) {
-			setApproveErr(`일괄 승인 실패: ${(e as Error).message} — 다시 시도하세요.`);
+			setApproveErr(`전체 승인 실패: ${(e as Error).message} — 다시 시도하세요.`);
 		} finally {
 			setBusyAll(false);
 		}
@@ -69,32 +69,36 @@ export function ReviewPanel({
 	return (
 		<section>
 			<div className="dash-head">
-				<h2 className="sec" style={{ margin: 0 }}>
-					리뷰 큐
-				</h2>
-				<span className="ctx" />
-				{items && items.length > 1 && !confirmAll && (
-					<button className="mini" type="button" disabled={busyAll} onClick={() => setConfirmAll(true)}>
-						{busyAll ? "일괄 승인 중…" : `전체 승인 (${items.length})`}
-					</button>
-				)}
-				{confirmAll && (
-					<>
-						<span className="muted" style={{ fontSize: 12.5 }}>
-							{items?.length}건의 증거를 모두 확인했습니까?
-						</span>
-						<button className="mini" type="button" style={{ color: "var(--review)" }} onClick={approveAll}>
-							모두 승인
-						</button>
-						<button className="mini" type="button" onClick={() => setConfirmAll(false)}>
-							취소
-						</button>
-					</>
+				<div>
+					<p className="kicker">Human review</p>
+					<h2 className="sec">리뷰 대기</h2>
+				</div>
+				<span className="ctx">엔진이 스스로 판정하지 못해, 사람이 화면을 보고 확정해야 하는 케이스입니다.</span>
+				{items && items.length > 1 && (
+					<div className="rev-actions">
+						{!confirmAll ? (
+							<button className="mini" type="button" disabled={busyAll} onClick={() => setConfirmAll(true)}>
+								{busyAll ? "승인 중…" : `전체 승인 (${items.length})`}
+							</button>
+						) : (
+							<>
+								<span className="muted" style={{ fontSize: 12.5 }}>
+									{items.length}건을 모두 확인했나요?
+								</span>
+								<button className="mini" type="button" style={{ color: "var(--review)" }} onClick={approveAll}>
+									모두 승인
+								</button>
+								<button className="mini" type="button" onClick={() => setConfirmAll(false)}>
+									취소
+								</button>
+							</>
+						)}
+					</div>
 				)}
 			</div>
 			{loadErr && (
 				<div className="card err">
-					리뷰 큐를 불러오지 못했습니다: {loadErr}{" "}
+					리뷰 대기 목록을 불러오지 못했습니다: {loadErr}{" "}
 					<button className="mini" type="button" onClick={load} style={{ marginLeft: 8 }}>
 						다시 시도
 					</button>
@@ -107,46 +111,52 @@ export function ReviewPanel({
 							<div className="skel" style={{ width: 260, height: 18 }} />
 							<div className="skel" style={{ height: 46 }} />
 							<div className="skel" style={{ height: 200, maxWidth: 520 }} />
-							<div className="skel" style={{ width: 140, height: 38, alignSelf: "flex-end" }} />
+							<div className="skel" style={{ width: 170, height: 38, alignSelf: "flex-end" }} />
 						</div>
 					))}
 				</div>
 			)}
 			{items && items.length === 0 && (
 				<div className="muted">
-					리뷰할 케이스가 없습니다. 판정 보류 케이스가 생기면 여기서 증거(스크린샷)를 확인하고 baseline을 승인합니다.
+					확인할 케이스가 없습니다. 엔진이 판정을 보류하면, 여기서 화면을 확인하고 기준 화면으로 승인합니다.
 				</div>
 			)}
 			{approveErr && <div className="card err">{approveErr}</div>}
 			{items?.map((it) => (
 				<article className="rev-item" key={it.caseId}>
-					<header className="rev-top">
-						<span className="rev-title">
-							<VerdictMark verdict={it.verdict} /> <b>{it.title}</b>
-						</span>
-						<span className="rev-meta">
-							{it.caseId}
-							{it.env ? ` · ${it.env}` : ""}
-						</span>
-					</header>
-					<div className="rev-reason">
-						<span className="lbl">보류 사유</span>
-						{it.reason}
+					<div className="rev-body">
+						<header className="rev-top">
+							<span className="rev-title">
+								<VerdictMark verdict={it.verdict} /> <b>{it.title}</b>
+							</span>
+							<span className="rev-meta">
+								{it.caseId}
+								{it.env ? ` · ${it.env}` : ""}
+							</span>
+						</header>
+						<div className="rev-reason">
+							<span className="lbl">확인이 필요한 이유</span>
+							{it.reason}
+						</div>
+						<div className="rev-txt-wrap">
+							<span className="lbl">화면 텍스트</span>
+							<div className="txt">{it.text || "(빈 페이지)"}</div>
+						</div>
 					</div>
-					{it.screenshot && (
+					{it.screenshot ? (
 						<figure className="rev-evidence">
-							<img src={it.screenshot} alt={`${it.title} 스크린샷`} />
-							<figcaption>증거 · {it.url || "URL 없음"}</figcaption>
+							<img src={it.screenshot} alt={`${it.title} 화면`} />
+							<figcaption>화면 · {it.url || "URL 없음"}</figcaption>
 						</figure>
+					) : (
+						<div className="rev-evidence rev-evidence-empty">화면 캡처가 없습니다</div>
 					)}
-					<div className="rev-txt-wrap">
-						<span className="lbl">페이지 텍스트</span>
-						<div className="txt">{it.text || "(빈 페이지)"}</div>
-					</div>
 					<footer className="rev-foot">
-						<span className="rev-foot-note">승인하면 이 화면이 baseline으로 확정됩니다</span>
+						<span className="rev-foot-note">
+							승인하면 이 화면을 <b>기준 화면</b>으로 저장합니다 — 다음 실행부터 같은 화면이면 자동으로 통과해요.
+						</span>
 						<button className="approve" type="button" disabled={busyId === it.caseId} onClick={() => approve(it.caseId)}>
-							{busyId === it.caseId ? "승인 중…" : "baseline 승인"}
+							{busyId === it.caseId ? "저장 중…" : "기준 화면으로 승인"}
 						</button>
 					</footer>
 				</article>

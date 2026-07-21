@@ -52,7 +52,7 @@ export function RulesPanel({
 	async function analyze() {
 		const src = project?.sheets?.find((s) => s.id === selSheetId) ?? project?.sheets?.[0];
 		if (!src) {
-			setAnalyzeMsg("TC 소스가 있는 프로젝트를 먼저 선택하세요.");
+			setAnalyzeMsg("테스트 원본이 있는 프로젝트를 먼저 선택하세요.");
 			return;
 		}
 		setBusy(true);
@@ -68,7 +68,7 @@ export function RulesPanel({
 			onStatus(await api.status(selId));
 		} catch (e) {
 			setAnalyzeErr(true);
-			setAnalyzeMsg(`시트 해석 실패: ${(e as Error).message} — 소스와 모델 연결을 확인한 뒤 다시 시도하세요.`);
+			setAnalyzeMsg(`시트 해석 실패: ${(e as Error).message} — 원본과 모델 연결을 확인한 뒤 다시 시도하세요.`);
 		} finally {
 			setBusy(false);
 		}

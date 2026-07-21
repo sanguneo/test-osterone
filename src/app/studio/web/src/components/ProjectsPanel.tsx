@@ -90,11 +90,11 @@ export function ProjectsPanel({ initialProject, onSaved, onClose }: { readonly i
 		} catch (error) { note(`저장 실패: ${(error as Error).message} — 다시 시도하세요.`, true); }
 	}
 	async function readPreview() {
-		note("TC 읽는 중…");
+		note("테스트 읽는 중…");
 		try {
 			setPreview(await api.preview({ sample: false, sheets: draft.sheets, baseUrl: draft.baseUrl, projectId: draft.id || "sample" }));
 			note("");
-		} catch (error) { setPreview(null); note(`TC 읽기 실패: ${(error as Error).message} — 소스 URL과 형식을 확인하세요.`, true); }
+		} catch (error) { setPreview(null); note(`테스트 읽기 실패: ${(error as Error).message} — 원본 URL과 형식을 확인하세요.`, true); }
 	}
 
 	return (
@@ -106,7 +106,7 @@ export function ProjectsPanel({ initialProject, onSaved, onClose }: { readonly i
 				<input id="project-name" type="text" value={draft.name} onChange={(event) => updateDraft({ name: event.target.value })} placeholder="예: 우리 서비스 회귀" />
 				<ProjectSourceSection draft={draft} addMode={addMode} csvText={csvText} onAddCsv={addCsv} onAddMode={setAddMode} onAddPicked={addPicked} onCsvText={setCsvText} onFile={readXlsx} onPick={(index, checked) => setPick((current) => ({ ...current, [index]: checked }))} onRemoveSheet={removeSheet} onSheetUrl={setSheetUrl} onAddSheet={addSheet} pick={pick} sheetUrl={sheetUrl} xlsxName={xlsxName} xlsxSheets={xlsxSheets} />
 				<ProjectEnvironmentSection draft={draft} onUpdate={updateDraft} />
-				<div className="editor-actions"><button className="run" type="button" onClick={save}>저장</button><button className="mini" type="button" onClick={readPreview}>TC 읽기 & 중복 확인</button><button className="mini" type="button" onClick={onClose}>취소</button><span className={statusError ? "err" : "muted"}>{statusMessage}</span></div>
+				<div className="editor-actions"><button className="run" type="button" onClick={save}>저장</button><button className="mini" type="button" onClick={readPreview}>테스트 읽기 & 중복 확인</button><button className="mini" type="button" onClick={onClose}>취소</button><span className={statusError ? "err" : "muted"}>{statusMessage}</span></div>
 				{preview && <ProjectPreview preview={preview} />}
 			</div>
 		</section>

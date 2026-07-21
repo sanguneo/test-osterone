@@ -195,7 +195,7 @@ export function DashboardPanel({
 							<div className="sub">
 								{reviewCount > 0 ? (
 									<button className="linkbtn" type="button" style={{ padding: 0 }} onClick={() => goTo("review")}>
-										리뷰 큐 열기 →
+										리뷰 대기 열기 →
 									</button>
 								) : (
 									"보류된 판정 없음"
@@ -249,7 +249,7 @@ export function DashboardPanel({
 									<tr>
 										<th>케이스</th>
 										<th>판정</th>
-										<th className="num">Assert</th>
+										<th className="num">검증</th>
 										<th className="num">신뢰도</th>
 										<th>상세</th>
 									</tr>

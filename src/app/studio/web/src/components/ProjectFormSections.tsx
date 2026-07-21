@@ -40,9 +40,9 @@ function sourceSummary(sheet: TestSheet): string {
 export function ProjectSourceSection(props: SourceSectionProps) {
 	return (
 		<>
-			<span className="field-label source-label">TC 소스 <span className="muted">— 시트 / CSV / XLSX를 여러 개 추가</span></span>
+			<span className="field-label source-label">테스트 원본 <span className="muted">— 시트 / CSV / XLSX를 여러 개 추가</span></span>
 			<div className="detail source-list">
-				{props.draft.sheets.length === 0 ? "아직 소스가 없습니다." : props.draft.sheets.map((sheet, index) => (
+				{props.draft.sheets.length === 0 ? "아직 원본이 없습니다." : props.draft.sheets.map((sheet, index) => (
 					<div className="plist-item compact-item" key={sheet.id}>
 						<span className="detail">{sourceSummary(sheet)}</span>
 						<button className="mini" type="button" onClick={() => props.onRemoveSheet(index)}>제거</button>

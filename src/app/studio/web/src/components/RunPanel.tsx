@@ -6,7 +6,7 @@ import { RunResults, type RunViewLike } from "./RunResults";
 
 function PreviewTable({ preview }: { readonly preview: PreviewResult }) {
 	if (preview.unique.length === 0) {
-		return <div className="card muted">읽을 케이스가 없습니다. 프로젝트에 TC 소스를 추가한 뒤 다시 확인하세요.</div>;
+		return <div className="card muted">읽을 케이스가 없습니다. 프로젝트에 테스트 원본을 추가한 뒤 다시 확인하세요.</div>;
 	}
 	return (
 		<div className="card preview-surface">
@@ -132,7 +132,7 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 					<div className="card run-config">
 						<p className="kicker">01 / Configure</p>
 						<h3>실행 준비</h3>
-						<p className="run-target">대상: {project.baseUrl || (project.id === "sample" ? "번들 fixture" : "대상 미설정")}<br />시트: {sheet?.name ?? "선택 안됨"}</p>
+						<p className="run-target">대상: {project.baseUrl || (project.id === "sample" ? "내장 예제" : "대상 미설정")}<br />시트: {sheet?.name ?? "선택 안됨"}</p>
 						<label className="run-toggle"><input type="checkbox" checked={ai} onChange={(event) => setAi(event.target.checked)} /><span>AI 스텝 해석<br /><small className="muted">자연어 스텝에만 사용하며 모델 연결이 필요합니다.</small></span></label>
 						<div className="run-actions"><button className="button primary" type="button" disabled={running} onClick={startRun}><Icon name="play" />{running ? "실행 중" : "실행 시작"}</button><span className="muted" aria-live="polite">{statusMessage}</span></div>
 					</div>

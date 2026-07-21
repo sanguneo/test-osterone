@@ -70,7 +70,7 @@ export function SheetEditorModal({
 
 					{!editSheet && (
 						<>
-							<span className="field-label" style={{ marginTop: 10 }}>소스</span>
+							<span className="field-label" style={{ marginTop: 10 }}>원본</span>
 							<div style={{ display: "flex", gap: 8 }}>
 								<button className={`mini${kind === "sheet" ? " on" : ""}`} type="button" onClick={() => setKind("sheet")}>
 									구글 시트
