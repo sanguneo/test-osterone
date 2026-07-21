@@ -20,8 +20,7 @@
 		"run:live": "node --experimental-transform-types examples/demo/run-demo.ts",
 		"studio": "bun run studio:build && node --experimental-transform-types src/app/studio/server.ts",
 		"studio:build": "cd src/app/studio/web && vite build",
-		"studio:webcheck": "bun node_modules/typescript/bin/tsc -p src/app/studio/web/tsconfig.json",
-		"doctor": "cd src/app/studio/web && bun ../../../../node_modules/react-doctor/bin/react-doctor.js"
+		"studio:webcheck": "bun node_modules/typescript/bin/tsc -p src/app/studio/web/tsconfig.json"
 	},
 	"engines": {
 		"bun": ">=1.3.0"
@@ -32,9 +31,6 @@
 		"@types/react": "^19.2.17",
 		"@types/react-dom": "^19.2.3",
 		"@vitejs/plugin-react": "^6.0.3",
-		"react-doctor": "^0.8.1",
-		"react-grab": "^0.1.48",
-		"react-scan": "^0.5.7",
 		"typescript": "^7.0.2",
 		"vite": "^8.1.5"
 	},

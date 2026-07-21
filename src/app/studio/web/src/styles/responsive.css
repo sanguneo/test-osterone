@@ -84,14 +84,6 @@
 	.modal-overlay { padding: 0; align-items: end; }
 	.rev-foot { align-items: stretch; flex-direction: column; }
 	.rev-foot-note { margin-right: 0; }
-	.showcase-shell { width: min(100% - 28px, 1180px); padding-top: 22px; }
-	.showcase-head { margin-bottom: 38px; }
-	.section-heading { grid-template-columns: 1fr; gap: 12px; }
-	.showcase-nav { width: 100%; overflow-x: auto; }
-	.showcase-nav .nav-item { min-width: 78px; }
-	.showcase-shell .showcase-nav { position: static; inset: auto; height: auto; box-shadow: none; backdrop-filter: none; }
-	.showcase-section .context-lane { grid-template-columns: auto minmax(0, 1fr) auto; }
-	.showcase-section .context-label { width: auto; }
 	input,
 	select,
 	textarea { font-size: 16px; }
