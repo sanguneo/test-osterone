@@ -1,11 +1,14 @@
 .app-shell {
 	display: grid;
-	grid-template-rows: auto auto auto minmax(0, 1fr);
+	grid-template-columns: auto 1fr;
+	grid-template-rows: auto auto minmax(0, 1fr);
+	grid-template-areas: "header header" "strip strip" "rail main";
 	height: 100dvh;
 	overflow: hidden;
 }
 
 .app-header {
+	grid-area: header;
 	position: sticky;
 	top: 0;
 	z-index: 30;
@@ -45,41 +48,6 @@
 	transform: skewX(-6deg);
 }
 
-.primary-nav { display: flex; align-items: stretch; align-self: stretch; gap: 2px; }
-
-.nav-item {
-	position: relative;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	gap: var(--space-2);
-	min-width: 108px;
-	padding: 0 15px;
-	border: 0;
-	background: transparent;
-	color: var(--dim);
-	cursor: pointer;
-}
-
-.nav-item::after {
-	position: absolute;
-	bottom: -1px;
-	left: 15px;
-	right: 15px;
-	height: 2px;
-	background: var(--lime);
-	content: "";
-	transform: scaleX(0);
-	transform-origin: center;
-	transition: transform 160ms ease;
-}
-
-.nav-item:hover { color: var(--ink); background: color-mix(in srgb, var(--panel) 52%, transparent); }
-.nav-item.active { color: var(--ink); }
-.nav-item.active .icon { color: var(--lime); }
-.nav-item.active::after { transform: scaleX(1); }
-.nav-short-label { display: none; }
-
 .nav-count {
 	display: inline-grid;
 	place-items: center;
@@ -114,6 +82,7 @@
 .connected .status-pulse { background: var(--lime); box-shadow: 0 0 0 4px var(--lime-soft); }
 
 .workspace-strip {
+	grid-area: strip;
 	position: sticky;
 	top: var(--header-height);
 	z-index: 25;
@@ -122,12 +91,6 @@
 	border-bottom: 1px solid var(--line);
 	background: var(--inset);
 }
-.sheet-nav { display: flex; align-items: center; gap: clamp(12px, 2vw, 28px); min-height: 48px; padding: 0 clamp(14px, 2vw, 28px); border-bottom: 1px solid var(--line); background: var(--bg); }
-.sheet-nav-context { display: inline-flex; align-items: center; gap: 7px; min-width: 0; color: var(--dim); font-size: 12px; }
-.sheet-nav-crumb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
-.sheet-nav-sep { color: var(--dim); }
-.sheet-nav-context b { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 700; }
-.sheet-nav .primary-nav { align-self: stretch; }
 
 .context-lane {
 	display: grid;
@@ -204,6 +167,7 @@
 .context-empty { color: var(--dim); font-size: 12px; }
 
 .workspace-main {
+	grid-area: main;
 	width: 100%;
 	min-height: 0;
 	height: 100%;
@@ -211,3 +175,10 @@
 	overflow-y: auto;
 	overscroll-behavior-y: contain;
 }
+.view-rail { grid-area: rail; display: flex; flex-direction: column; gap: 2px; width: clamp(148px, 15vw, 200px); padding: var(--space-4) var(--space-2); border-right: 1px solid var(--line); background: var(--inset); overflow-y: auto; }
+.view-item { display: flex; align-items: center; gap: var(--space-2); min-height: 40px; padding: 8px 12px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--dim); font: inherit; text-align: left; cursor: pointer; }
+.view-item:hover { color: var(--ink); background: color-mix(in srgb, var(--panel) 52%, transparent); }
+.view-item.active { color: var(--ink); background: var(--surface-active); box-shadow: inset 2px 0 0 var(--lime); }
+.view-item.active .icon { color: var(--lime); }
+.view-item-label { flex: 1; min-width: 0; }
+.view-rail .nav-count { margin-left: auto; }

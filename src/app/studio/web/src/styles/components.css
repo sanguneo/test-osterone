@@ -209,4 +209,3 @@ tbody tr:hover { background: color-mix(in srgb, var(--ink) 3%, transparent); }
 .sheet-card b { font-size: 15px; }
 .sheet-card .icon { color: var(--lime); }
 .sheet-card-add { align-content: center; justify-items: start; color: var(--dim); background: transparent; border-style: dashed; }
-.sheet-nav.is-empty { min-height: 0; border-bottom: 0; padding: 0; }

@@ -1,7 +1,6 @@
 @media (max-width: 1120px) {
 	.app-header { grid-template-columns: 1fr auto; }
 	.brand-lockup > span:last-child { display: none; }
-	.nav-item { min-width: 90px; }
 	.metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.metric { border-bottom: 1px solid var(--line); }
 	.metric:nth-child(odd) { border-left: 0; }
@@ -12,10 +11,6 @@
 	:root { --header-height: 58px; }
 	.app-header { grid-template-columns: 1fr auto; padding: 0 16px; backdrop-filter: none; }
 	.brand-lockup > span:last-child { display: none; }
-	.primary-nav { justify-self: center; min-width: 0; }
-	.primary-nav .nav-item { min-width: 70px; padding: 0 9px; }
-	.nav-label { display: none; }
-	.nav-short-label { display: block; }
 	.nav-count { min-width: 18px; height: 18px; font-size: 9px; }
 	.model-status { margin-left: auto; }
 	.model-status span:last-child { display: none; }
@@ -33,25 +28,26 @@
 @media (max-width: 600px) {
 	.app-header { grid-template-columns: 1fr auto; }
 	.brand-lockup > span:last-child { display: grid; }
-	.primary-nav {
+	.view-rail {
 		position: fixed;
 		z-index: 45;
 		left: 12px;
 		right: 12px;
 		bottom: max(10px, env(safe-area-inset-bottom));
-		height: 62px;
+		flex-direction: row;
+		width: auto;
 		padding: 5px;
 		border: 1px solid var(--line-strong);
+		border-right: 0;
 		border-radius: var(--radius-md);
 		background: color-mix(in srgb, var(--inset) 94%, transparent);
 		box-shadow: 0 14px 50px color-mix(in srgb, var(--inset) 72%, transparent);
 		backdrop-filter: blur(18px);
+		overflow: visible;
 	}
-	.primary-nav .nav-item { flex: 1; min-width: 0; padding: 0 6px; flex-direction: column; gap: 3px; font-size: 10px; border-radius: var(--radius-sm); }
-	.primary-nav .nav-item::after { display: none; }
-	.primary-nav .nav-item.active { background: var(--surface-active); color: var(--lime); }
-	.primary-nav .nav-count { position: absolute; top: 2px; right: 10%; }
-	.sheet-nav { min-height: 40px; border-bottom: 0; }
+	.view-item { flex: 1; flex-direction: column; gap: 3px; min-width: 0; padding: 0 6px; font-size: 10px; border-radius: var(--radius-sm); }
+	.view-item.active { box-shadow: none; background: var(--surface-active); color: var(--lime); }
+	.view-rail .nav-count { position: absolute; top: 2px; right: 10%; margin-left: 0; }
 	.workspace-main { padding: 28px 16px 104px; }
 	.run-workbench { grid-template-columns: 1fr; }
 	.run-workbench > .run-rail { position: static; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 0; }
@@ -96,7 +92,7 @@
 	.approve,
 	.mini,
 	.icon-button,
-	.nav-item,
+	.view-item,
 	.context-item,
 	.model-status,
 	.modes button,

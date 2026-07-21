@@ -2,7 +2,7 @@
 
 ## 1. Atmosphere & Identity
 
-Studio is a forensic operations workspace: calm at rest, decisive when a run needs attention. It keeps the existing charcoal and acid-lime identity, but the composition is rebuilt around a horizontal workspace context and a central run rail instead of a dashboard sidebar. The signature is the **run rail**: a continuous vertical line that connects readiness, execution, evidence, and review so the operator always knows what comes next. The overall composition is a Project → Sheet → views drill-down: the Test Sheet, not the project, is the working unit, and each view — dashboard, rules, run & results, review — is scoped to whichever sheet is currently selected.
+Studio is a forensic operations workspace: calm at rest, decisive when a run needs attention. It keeps the existing charcoal and acid-lime identity, but the composition is rebuilt around a horizontal workspace context and a central run rail instead of a dashboard sidebar. The signature is the **run rail**: a continuous vertical line that connects readiness, execution, evidence, and review so the operator always knows what comes next. The overall composition is a Project → Sheet → views drill-down: the Test Sheet, not the project, is the working unit, and each view — dashboard, rules, run & results, review — is scoped to whichever sheet is currently selected, with the four views surfaced in a left vertical rail beside the content rather than a horizontal nav row.
 
 Each sheet owns its interpretation rule, refine chat, and approved baselines; the project only holds a default rule used to seed new sheets and a read-only legacy baseline fallback for pre-migration approvals. This per-sheet ownership is why every view below reads as "the selected sheet's dashboard/rules/run/review", not a project-wide screen.
 
@@ -68,9 +68,9 @@ Base unit: 4px.
 | `--space-10` | `2.5rem` | Page sections |
 | `--space-12` | `3rem` | Major regions |
 
-- Shell: `100dvh` grid with four fixed rows — app header, workspace context strip (project/sheet reels), a sheet-scoped nav row (`Project › Sheet` breadcrumb + the four view tabs), and `.workspace-main`, which owns vertical scroll.
+- Shell: `100dvh` grid — the app header and the workspace context strip (project/sheet reels) span the full width across the top; below them the body is a two-column `rail | main` grid: a left vertical view-rail (the four view tabs, present only when a sheet is selected — it collapses to zero width otherwise) and `.workspace-main`, which owns vertical scroll.
 - Main content is capped at `90rem` and centered via automatic inline gutters; the scroll owner (`.workspace-main`) spans the full viewport so the scrollbar sits at the window edge. Fluid gutters use `clamp()`/`max()`.
-- Desktop: the primary view-nav no longer lives in the top header; it sits in a `.sheet-nav` row below the project/sheet context strip, preceded by a `Project › Sheet` breadcrumb, so the four views read as belonging to the selected sheet. Tablet compresses labels. Mobile turns the context strip into an explicit horizontal reel and the sheet-nav into a bottom dock.
+- Desktop: the primary view-nav no longer lives in the top header; it sits in a left vertical `.view-rail` beside `.workspace-main`, below the project/sheet context strip, so the four views read as belonging to the selected sheet. Tablet compresses labels. Mobile turns the context strip into an explicit horizontal reel and the view-rail into a bottom dock.
 - Primary content reflows to one readable column at 375px. Only tables and named reels may scroll horizontally.
 - Radius scale: `--radius-control 0.375rem`, `--radius-panel 0.75rem`, `--radius-overlay 1rem`, `--radius-round 999rem`.
 
@@ -81,18 +81,13 @@ Base unit: 4px.
 - **States**: static; the mark never acts as an unlabeled control.
 - **Accessibility**: product name remains real text.
 
-### Primary navigation
-- **Structure**: a `Project › Sheet` breadcrumb followed by four labeled view tabs, one custom SVG icon family each.
+### Sheet view rail
+- **Structure**: a left vertical rail of the four view tabs (dashboard, rules, run, review), one custom SVG icon family each; review carries a review-count badge.
 - **Variants**: dashboard, rules, run, review.
-- **States**: default, hover, active (`aria-current="page"`), focus.
+- **States**: default, hover, active (left lime accent, `aria-current="page"`), focus.
 - **Motion**: 120ms color/surface transition; no entrance animation.
-- **Layout**: a sheet-scoped sub-navigation row (`.sheet-nav`) below the project/sheet context strip on desktop, bottom dock on mobile; hidden/collapsed until a sheet is selected.
-
-### Sheet nav (breadcrumb + views)
-- **Structure**: `Project › Sheet` breadcrumb + the four view tabs (dashboard, rules, run, review).
-- **States**: default, hover, active tab, focus; collapsed when no sheet is selected.
-- **Accessibility**: breadcrumb segments are real links/buttons; active tab exposed with `aria-current="page"`.
-- **Layout**: row sits between the workspace context strip and the main content region; it is the only place the four views are surfaced.
+- **Accessibility**: active tab exposed with `aria-current="page"`; badge count also present as text.
+- **Layout**: left vertical rail (`.view-rail`) beside `.workspace-main` on desktop, bottom dock on mobile; present only when a sheet is selected, collapsed/hidden otherwise; it is the only place the four views are surfaced.
 
 ### Workspace switcher
 - **Structure**: project reel, sheet reel, contextual add/edit/remove controls.
