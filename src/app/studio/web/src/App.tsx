@@ -173,6 +173,11 @@ export function App() {
 						setSelectedSheetId(sheet.id);
 						setSheetModalOpen(false);
 					}}
+					onPersist={async (sheet) => {
+						const nextSheets = editingSheet ? selectedProject.sheets.map((item) => (item.id === editingSheet.id ? sheet : item)) : [...selectedProject.sheets, sheet];
+						await persistSheets(nextSheets);
+						setSelectedSheetId(sheet.id);
+					}}
 				/>
 			)}
 		</div>
