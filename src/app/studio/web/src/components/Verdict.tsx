@@ -1,4 +1,5 @@
 import type { Verdict } from "../types";
+import { Icon } from "./Icon";
 
 export const V_LABEL: Record<Verdict, string> = { pass: "통과", fail: "실패", needs_review: "리뷰 필요", error: "오류" };
 
@@ -40,5 +41,5 @@ export function VerdictCounts({ counts }: { counts: Record<Verdict, number> }) {
 /** Self-heal warning line under a case row; renders nothing when no healing happened. */
 export function SelfHealNote({ heal }: { heal: string[] }) {
 	if (heal.length === 0) return null;
-	return <div className="heal">⚠ self-heal: {stripAnsi(heal.join("; "))}</div>;
+	return <div className="heal"><Icon name="warning" size={14} /> self-heal: {stripAnsi(heal.join("; "))}</div>;
 }

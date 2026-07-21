@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import type { CaseView, Project, RunView, Verdict } from "../types";
-import { SelfHealNote, stripAnsi, V_LABEL, VerdictMark } from "./Verdict";
+import { DashboardQueueRow, DashboardSkeleton, EmptyMotif, Spark } from "./DashboardParts";
+import { Icon } from "./Icon";
+import { V_LABEL } from "./Verdict";
 
 type Tab = "dash" | "rules" | "run" | "review";
 type Filter = Verdict | "all";
@@ -27,86 +29,6 @@ function passRate(v: RunView): number | null {
 	return total === 0 ? null : (v.counts.pass || 0) / total;
 }
 
-/** Pass-rate sparkline over run history (oldest → newest), inline SVG. */
-function Spark({ rates }: { rates: number[] }) {
-	if (rates.length < 2) return null;
-	const w = 120;
-	const h = 32;
-	const min = Math.min(...rates);
-	const max = Math.max(...rates);
-	const span = max - min;
-	const pts = rates.map((r, i) => {
-		const x = (i / (rates.length - 1)) * w;
-		const y = span === 0 ? h / 2 : 3 + (1 - (r - min) / span) * (h - 6);
-		return `${x.toFixed(1)},${y.toFixed(1)}`;
-	});
-	return (
-		<svg className="spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" aria-hidden="true">
-			<defs>
-				<linearGradient id="sparkfill" x1="0" y1="0" x2="0" y2="1">
-					<stop offset="0" stopColor="var(--lime)" stopOpacity="0.15" />
-					<stop offset="1" stopColor="var(--lime)" stopOpacity="0" />
-				</linearGradient>
-			</defs>
-			<polygon fill="url(#sparkfill)" points={`0,${h} ${pts.join(" ")} ${w},${h}`} />
-			<polyline fill="none" stroke="var(--lime)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" points={pts.join(" ")} />
-			{/* zero-length round-capped stroke = endpoint dot that survives non-uniform scaling */}
-			<path
-				d={`M ${(pts[pts.length - 1] ?? "").replace(",", " ")} l 0.01 0`}
-				stroke="var(--lime)"
-				strokeWidth="5"
-				strokeLinecap="round"
-				vectorEffect="non-scaling-stroke"
-			/>
-		</svg>
-	);
-}
-
-/** Empty-state motif: a case grid with one lime check — the domain in one glyph. */
-function EmptyMotif() {
-	const cells = [0, 1, 2, 3, 4, 5, 6, 7, 8];
-	return (
-		<svg width="96" height="96" viewBox="0 0 96 96" aria-hidden="true">
-			{cells.map((i) => (
-				<rect
-					key={i}
-					x={6 + (i % 3) * 30}
-					y={6 + Math.floor(i / 3) * 30}
-					width="24"
-					height="24"
-					rx="6"
-					fill={i === 4 ? "rgba(158,230,0,.12)" : "none"}
-					stroke={i === 4 ? "var(--lime)" : "var(--line)"}
-					strokeWidth="1.5"
-				/>
-			))}
-			<path d="M42 48 l4 4 l8 -8" fill="none" stroke="var(--lime)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-		</svg>
-	);
-}
-
-function Skeleton() {
-	return (
-		<div className="late">
-			<div className="metrics">
-				{[0, 1, 2, 3].map((i) => (
-					<div className="metric" key={i}>
-						<div className="skel" style={{ width: 90, height: 12 }} />
-						<div className="skel" style={{ width: 70, height: i === 0 ? 34 : 26, marginTop: 8 }} />
-						<div className="skel" style={{ width: 110, height: 11, marginTop: 8 }} />
-						{i === 0 && <div className="skel" style={{ height: 32, marginTop: 10 }} />}
-					</div>
-				))}
-			</div>
-			<div className="card">
-				{[0, 1, 2, 3, 4].map((i) => (
-					<div className="skel" style={{ height: 20, marginTop: i === 0 ? 0 : 14 }} key={i} />
-				))}
-			</div>
-		</div>
-	);
-}
-
 export function DashboardPanel({
 	selId,
 	project,
@@ -127,8 +49,11 @@ export function DashboardPanel({
 	const [runIdx, setRunIdx] = useState(0);
 	const [filter, setFilter] = useState<Filter>("all");
 	const tbodyRef = useRef<HTMLTableSectionElement>(null);
+	const loadRequest = useRef(0);
 
 	const load = useCallback(() => {
+		const requestId = ++loadRequest.current;
+		void refreshKey;
 		setHistory(null);
 		setLoadErr("");
 		setRunIdx(0);
@@ -140,9 +65,19 @@ export function DashboardPanel({
 		}
 		// Roll up: fan out one /api/history call per sheet (small N), then merge newest-first —
 		// each RunView already carries its own sheetId, so the merged list stays self-describing.
-		Promise.all(sheets.map((s) => api.history(selId, s.id).catch(() => [] as RunView[])))
-			.then((lists) => setHistory(lists.flat().sort((a, b) => b.at - a.at)))
-			.catch((e) => setLoadErr((e as Error).message));
+		Promise.allSettled(sheets.map((sheet) => api.history(selId, sheet.id)))
+			.then((results) => {
+				if (requestId !== loadRequest.current) return;
+				const fulfilled = results.filter((result): result is PromiseFulfilledResult<RunView[]> => result.status === "fulfilled");
+				if (fulfilled.length === 0) {
+					const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+					throw firstFailure?.reason instanceof Error ? firstFailure.reason : new Error("실행 기록을 불러오지 못했습니다.");
+				}
+				setHistory(fulfilled.flatMap((result) => result.value).sort((a, b) => b.at - a.at));
+			})
+			.catch((error) => {
+				if (requestId === loadRequest.current) setLoadErr((error as Error).message);
+			});
 		// refreshKey bumps when a run finishes elsewhere — the panel stays mounted, so re-fetch explicitly.
 	}, [selId, project, refreshKey]);
 	useEffect(load, [load]);
@@ -165,7 +100,7 @@ export function DashboardPanel({
 	const queue = useMemo(() => {
 		if (!run) return [];
 		const rows = filter === "all" ? run.results : run.results.filter((r) => r.verdict === filter);
-		return [...rows].sort((a, b) => ACTION_ORDER[a.verdict] - ACTION_ORDER[b.verdict]);
+		return rows.toSorted((a, b) => ACTION_ORDER[a.verdict] - ACTION_ORDER[b.verdict]);
 	}, [run, filter]);
 
 	// Arrow keys move between queue rows; Enter opens the row's action (review for held verdicts).
@@ -187,9 +122,10 @@ export function DashboardPanel({
 	return (
 		<section>
 			<div className="dash-head">
-				<h2 className="sec" style={{ margin: 0 }}>
-					대시보드
-				</h2>
+				<div>
+					<p className="kicker">Quality operations</p>
+					<h2 className="sec">실행 현황</h2>
+				</div>
 				<span className="ctx">
 					{project?.name ?? selId}
 					{run ? ` · 마지막 실행 ${fmtAgo(run.at)}` : ""}
@@ -210,15 +146,24 @@ export function DashboardPanel({
 				</div>
 			)}
 
-			{!loadErr && !history && <Skeleton />}
+			{!loadErr && !history && <DashboardSkeleton />}
 
 			{history && history.length === 0 && (
 				<div className="card dash-empty">
-					<EmptyMotif />
-					<p>아직 실행 기록이 없습니다. 첫 실행이 끝나면 통과율 추이와 조치가 필요한 케이스가 여기에 모입니다.</p>
-					<button className="run" type="button" style={{ marginTop: 0 }} onClick={() => goTo("run")}>
-						첫 실행 시작
-					</button>
+					<div className="empty-signal"><EmptyMotif /><span>Ready for first run</span></div>
+					<div>
+						<p className="kicker">Start here</p>
+						<h3>시트에서 증거까지,<br />한 번의 실행으로 연결하세요.</h3>
+						<p>첫 실행이 끝나면 통과율, 조치가 필요한 실패, 사람이 확인할 판정만 이 화면에 모입니다.</p>
+						<ol className="run-rail empty-run-rail">
+							<li className="rail-step active"><span className="rail-node">1</span><div><b>케이스 확인</b><p>선택한 시트의 테스트 케이스를 미리 봅니다.</p></div></li>
+							<li className="rail-step"><span className="rail-node">2</span><div><b>브라우저 실행</b><p>규칙 또는 AI 해석으로 실제 동작을 검증합니다.</p></div></li>
+							<li className="rail-step"><span className="rail-node">3</span><div><b>증거 검토</b><p>실패와 보류 판정에만 집중합니다.</p></div></li>
+						</ol>
+						<button className="button primary" type="button" onClick={() => goTo("run")}>
+							<Icon name="play" /> 첫 실행 준비
+						</button>
+					</div>
 				</div>
 			)}
 
@@ -311,7 +256,7 @@ export function DashboardPanel({
 								</thead>
 								<tbody ref={tbodyRef}>
 									{queue.map((r) => (
-										<QueueRow key={r.caseId} r={r} onKey={(e) => onRowKey(e, r)} goReview={() => goTo("review")} />
+										<DashboardQueueRow key={r.caseId} result={r} onKey={(e) => onRowKey(e, r)} goReview={() => goTo("review")} />
 									))}
 								</tbody>
 								</table>
@@ -321,38 +266,5 @@ export function DashboardPanel({
 				</>
 			)}
 		</section>
-	);
-}
-
-function QueueRow({
-	r,
-	onKey,
-	goReview,
-}: {
-	r: CaseView;
-	onKey: (e: React.KeyboardEvent<HTMLTableRowElement>) => void;
-	goReview: () => void;
-}) {
-	const firstFail = r.assertions.find((a) => !a.passed);
-	return (
-		<tr tabIndex={0} onKeyDown={onKey}>
-			<td className="ttl">{r.title || r.caseId}</td>
-			<td>
-				<VerdictMark verdict={r.verdict} />
-			</td>
-			<td className="num">
-				{r.passed}/{r.total}
-			</td>
-			<td className="num">{r.confidence.toFixed(2)}</td>
-			<td>
-				{firstFail && <div className="detail">{stripAnsi(firstFail.detail)}</div>}
-				<SelfHealNote heal={r.heal} />
-				{r.verdict === "needs_review" && (
-					<button className="linkbtn" type="button" onClick={goReview}>
-						리뷰 →
-					</button>
-				)}
-			</td>
-		</tr>
 	);
 }

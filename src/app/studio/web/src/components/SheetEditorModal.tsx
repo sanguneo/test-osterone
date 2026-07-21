@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { TestSheet } from "../types";
+import { ModalShell } from "./ModalShell";
 
 export function SheetEditorModal({
 	editSheet,
@@ -20,18 +21,22 @@ export function SheetEditorModal({
 	const [baseUrl, setBaseUrl] = useState(editSheet?.baseUrl ?? "");
 	const [env, setEnv] = useState(editSheet?.env ?? "");
 	const [loadingCsv, setLoadingCsv] = useState(false);
+	const [loadError, setLoadError] = useState("");
 
 	// Existing csv sheets no longer carry csvText from the projects list (it now lives in a file); fetch on demand.
 	useEffect(() => {
 		if (editSheet && editSheet.kind === "csv" && !editSheet.csvText && projectId) {
 			setLoadingCsv(true);
+			setLoadError("");
 			let live = true;
 			api
 				.sheetContent(projectId, editSheet.id)
 				.then((r) => {
 					if (live) setCsvText(r.csvText);
 				})
-				.catch(() => {})
+				.catch((error) => {
+					if (live) setLoadError(`CSV를 불러오지 못했습니다: ${(error as Error).message}`);
+				})
 				.finally(() => {
 					if (live) setLoadingCsv(false);
 				});
@@ -57,27 +62,15 @@ export function SheetEditorModal({
 	}
 
 	return (
-		<div
-			className="modal-overlay"
-			role="dialog"
-			aria-modal="true"
-			aria-label="시트"
-			onClick={(e) => {
-				if (e.target === e.currentTarget) onClose();
-			}}
-		>
-			<div className="modal">
-				<button className="modal-close" type="button" aria-label="닫기" onClick={onClose}>
-					✕
-				</button>
+		<ModalShell label="시트" onClose={onClose}>
 				<h2 className="sec">{editSheet ? "시트 편집" : "새 시트"}</h2>
 				<div className="card">
-					<label>이름</label>
-					<input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 로그인 시나리오" />
+					<label htmlFor="sheet-name">이름</label>
+					<input id="sheet-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 로그인 시나리오" />
 
 					{!editSheet && (
 						<>
-							<label style={{ marginTop: 10 }}>소스</label>
+							<span className="field-label" style={{ marginTop: 10 }}>소스</span>
 							<div style={{ display: "flex", gap: 8 }}>
 								<button className={`mini${kind === "sheet" ? " on" : ""}`} type="button" onClick={() => setKind("sheet")}>
 									구글 시트
@@ -91,35 +84,37 @@ export function SheetEditorModal({
 
 					{(editSheet ? editSheet.kind : kind) === "sheet" ? (
 						<>
-							<label style={{ marginTop: 10 }}>구글 시트 URL</label>
-							<input type="text" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" />
+							<label htmlFor="sheet-url" style={{ marginTop: 10 }}>구글 시트 URL</label>
+							<input id="sheet-url" type="text" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" />
 						</>
 					) : (
 						<>
-							<label style={{ marginTop: 10 }}>CSV</label>
+							<label htmlFor="sheet-csv" style={{ marginTop: 10 }}>CSV</label>
 							<textarea
+								id="sheet-csv"
 								rows={4}
 								value={csvText}
 								onChange={(e) => setCsvText(e.target.value)}
 								placeholder={loadingCsv ? "불러오는 중…" : "Test ID,Title,Steps,Expected&#10;…"}
-								disabled={loadingCsv}
+								disabled={loadingCsv || Boolean(loadError)}
 							/>
+							{loadError && <p className="err" role="alert">{loadError}</p>}
 						</>
 					)}
 
-					<label style={{ marginTop: 10 }}>대상 URL 오버라이드 (선택)</label>
-					<input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://your.app" />
+					<label htmlFor="sheet-base-url" style={{ marginTop: 10 }}>대상 URL 오버라이드 (선택)</label>
+					<input id="sheet-base-url" type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://your.app" />
 
-					<label style={{ marginTop: 10 }}>환경 오버라이드 (선택)</label>
-					<input type="text" value={env} onChange={(e) => setEnv(e.target.value)} placeholder="staging" />
+					<label htmlFor="sheet-env" style={{ marginTop: 10 }}>환경 오버라이드 (선택)</label>
+					<input id="sheet-env" type="text" value={env} onChange={(e) => setEnv(e.target.value)} placeholder="staging" />
 
-					<div style={{ marginTop: 14 }}>
-						<button className="run" style={{ marginTop: 0 }} type="button" onClick={save}>
+					<div className="editor-actions" style={{ marginTop: 14 }}>
+						<button className="run" style={{ marginTop: 0 }} type="button" disabled={loadingCsv || Boolean(loadError)} onClick={save}>
 							저장
 						</button>
+						<button className="mini" type="button" onClick={onClose}>취소</button>
 					</div>
 				</div>
-			</div>
-		</div>
+		</ModalShell>
 	);
 }

@@ -36,7 +36,7 @@ export const api = {
 	saveProject: (p: Partial<Project> & { projectId: string; sample?: boolean }) =>
 		j<{ saved: Project; projects: Project[] }>("/api/projects", post(p)),
 	deleteProject: (id: string) => j<{ projects: Project[] }>("/api/projects/delete", post({ id })),
-	preview: (cfg: RunInput) => j<PreviewResult>("/api/tc/preview", post(cfg)),
+	preview: (cfg: RunInput, signal?: AbortSignal) => j<PreviewResult>("/api/tc/preview", { ...post(cfg), signal }),
 	refine: (instruction: string, projectId: string) => j<RefineResult>("/api/refine", post({ instruction, projectId })),
 	refineReset: (projectId: string) => j<Status>("/api/refine/reset", post({ projectId })),
 	analyze: (body: { sheetUrl?: string; csvText?: string; projectId: string; sheetId: string }) =>
@@ -52,8 +52,8 @@ export const api = {
 	xlsxConvert: (base64: string) => j<{ sheets: XlsxSheet[] }>("/api/xlsx/convert", post({ base64 })),
 
 	/** Stream a run: emits start / case / done / error events as they arrive. */
-	async runStream(cfg: RunInput, onEvent: (ev: RunEvent) => void): Promise<void> {
-		const res = await fetch("/api/run", post(cfg));
+	async runStream(cfg: RunInput, onEvent: (ev: RunEvent) => void, signal?: AbortSignal): Promise<void> {
+		const res = await fetch("/api/run", { ...post(cfg), signal });
 		if (!res.body) throw new Error("no stream");
 		const reader = res.body.getReader();
 		const dec = new TextDecoder();

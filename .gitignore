@@ -22,3 +22,7 @@ GEMINI.md
 
 # session handover (meta, not product)
 HANDOVER.md
+
+# QA scratch / evidence (not product)
+.artifacts/
+.omo/

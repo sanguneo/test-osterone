@@ -22,6 +22,7 @@ export function ReviewPanel({
 	const [busyAll, setBusyAll] = useState(false);
 
 	const load = useCallback(() => {
+		void refreshKey;
 		setItems(null);
 		setLoadErr("");
 		api
@@ -103,40 +104,52 @@ export function ReviewPanel({
 				<div className="late">
 					{[0, 1].map((i) => (
 						<div className="rev-item" key={i}>
-							<div className="skel" style={{ width: 200, height: 120 }} />
-							<div className="rev-body">
-								<div className="skel" style={{ width: 260, height: 16 }} />
-								<div className="skel" style={{ width: 180, height: 12, marginTop: 8 }} />
-								<div className="skel" style={{ height: 60, marginTop: 8 }} />
-							</div>
+							<div className="skel" style={{ width: 260, height: 18 }} />
+							<div className="skel" style={{ height: 46 }} />
+							<div className="skel" style={{ height: 200, maxWidth: 520 }} />
+							<div className="skel" style={{ width: 140, height: 38, alignSelf: "flex-end" }} />
 						</div>
 					))}
 				</div>
 			)}
 			{items && items.length === 0 && (
 				<div className="muted">
-					리뷰가 필요한 케이스가 없습니다. 실행 후 판정이 보류된 케이스가 생기면 여기서 증거(스크린샷)를 확인하고 baseline을
-					승인합니다.
+					리뷰할 케이스가 없습니다. 판정 보류 케이스가 생기면 여기서 증거(스크린샷)를 확인하고 baseline을 승인합니다.
 				</div>
 			)}
 			{approveErr && <div className="card err">{approveErr}</div>}
 			{items?.map((it) => (
-				<div className="rev-item" key={it.caseId}>
-					{it.screenshot && <img src={it.screenshot} alt={`${it.title} 스크린샷`} />}
-					<div className="rev-body">
-						<div>
+				<article className="rev-item" key={it.caseId}>
+					<header className="rev-top">
+						<span className="rev-title">
 							<VerdictMark verdict={it.verdict} /> <b>{it.title}</b>
-						</div>
-						<div className="why">
-							사유: {it.reason}
-							{it.url ? ` · ${it.url}` : ""}
-						</div>
+						</span>
+						<span className="rev-meta">
+							{it.caseId}
+							{it.env ? ` · ${it.env}` : ""}
+						</span>
+					</header>
+					<div className="rev-reason">
+						<span className="lbl">보류 사유</span>
+						{it.reason}
+					</div>
+					{it.screenshot && (
+						<figure className="rev-evidence">
+							<img src={it.screenshot} alt={`${it.title} 스크린샷`} />
+							<figcaption>증거 · {it.url || "URL 없음"}</figcaption>
+						</figure>
+					)}
+					<div className="rev-txt-wrap">
+						<span className="lbl">페이지 텍스트</span>
 						<div className="txt">{it.text || "(빈 페이지)"}</div>
+					</div>
+					<footer className="rev-foot">
+						<span className="rev-foot-note">승인하면 이 화면이 baseline으로 확정됩니다</span>
 						<button className="approve" type="button" disabled={busyId === it.caseId} onClick={() => approve(it.caseId)}>
 							{busyId === it.caseId ? "승인 중…" : "baseline 승인"}
 						</button>
-					</div>
-				</div>
+					</footer>
+				</article>
 			))}
 		</section>
 	);

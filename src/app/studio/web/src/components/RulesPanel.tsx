@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import type { Project, Status } from "../types";
+import { Icon } from "./Icon";
 
 export function RulesPanel({
 	status,
@@ -37,7 +38,7 @@ export function RulesPanel({
 			<section>
 				<h2 className="sec">AI 규칙 다듬기 (대화)</h2>
 				<div className="card muted">
-					이 탭은 모델 연결이 필요합니다. 연결하면 시트 해석과 규칙 다듬기를 대화로 진행할 수 있습니다.
+					이 탭은 모델 연결이 필요합니다. 연결 후 시트 해석과 규칙 다듬기를 대화로 진행합니다.
 					<div style={{ marginTop: 12 }}>
 						<button className="mini" type="button" onClick={goToModel}>
 							모델 연결로 이동 →
@@ -131,7 +132,7 @@ export function RulesPanel({
 				)}
 				<hr style={{ border: 0, borderTop: "1px solid var(--line)", margin: "14px 0" }} />
 				<div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-					<label style={{ margin: 0 }}>
+					<label htmlFor="rule-instruction" style={{ margin: 0 }}>
 						지시 <span className="muted">예: "누르기도 click으로", "그건 되돌려"</span>
 					</label>
 					<button className="linkbtn" type="button" onClick={reset}>
@@ -144,16 +145,16 @@ export function RulesPanel({
 							아직 대화가 없습니다. 아래 입력창에 자연어로 지시하면 규칙이 버전으로 쌓입니다 — 예: "누르기도 click으로 해석해".
 						</div>
 					)}
-					{chat.map((m, i) => (
-						<div key={i} className={`msg ${m.role === "user" ? "u" : "a"}`}>
+					{chat.map((m) => (
+						<div key={`${m.role}:${m.content}`} className={`msg ${m.role === "user" ? "u" : "a"}`}>
 							{m.content}
 						</div>
 					))}
 				</div>
 				<div className="warns">
-					{warnings.map((w, i) => (
-						<span key={i} className="warn">
-							⚠ {w}
+					{warnings.map((w) => (
+						<span key={w} className="warn">
+							<Icon name="warning" size={14} /> {w}
 						</span>
 					))}
 				</div>
@@ -165,6 +166,7 @@ export function RulesPanel({
 				</div>
 				<div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "flex-end" }}>
 					<textarea
+						id="rule-instruction"
 						rows={2}
 						style={{ flex: 1 }}
 						value={instruction}
