@@ -87,7 +87,7 @@ export function App() {
 		try {
 			const result = await api.deleteProject(id);
 			setProjects(result.projects);
-			if (selectedProjectId === id) setSelectedProjectId("sample");
+			if (selectedProjectId === id) setSelectedProjectId("");
 		} catch (error) {
 			setProjectError((error as Error).message);
 		}
