@@ -11,7 +11,6 @@ const S = {
 		firstSheetBody: "시트를 추가하면 AI가 해석안을 제안하고 대화로 규칙을 다듬은 뒤 실행합니다.",
 		newSheet: "새 시트",
 		googleSheet: "구글 시트",
-		importXlsx: "XLSX 가져오기",
 	},
 	en: {
 		noTarget: "No target set",
@@ -20,7 +19,6 @@ const S = {
 		firstSheetBody: "Once you add a sheet, AI proposes an interpretation, you refine the rules by chat, then run it.",
 		newSheet: "New Sheet",
 		googleSheet: "Google Sheet",
-		importXlsx: "Import XLSX",
 	},
 } as const;
 
@@ -28,12 +26,10 @@ export function ProjectHome({
 	project,
 	onSelectSheet,
 	onAddSheet,
-	onImport,
 }: {
 	readonly project: Project;
 	readonly onSelectSheet: (id: string) => void;
 	readonly onAddSheet: () => void;
-	readonly onImport: () => void;
 }) {
 	const t = S[useLang()];
 	return (
@@ -53,9 +49,6 @@ export function ProjectHome({
 						<button className="button primary" type="button" onClick={onAddSheet}>
 							<Icon name="add" />{t.newSheet}
 						</button>
-						<button className="button secondary" type="button" onClick={onImport} style={{ marginLeft: 8 }}>
-							<Icon name="import" />{t.importXlsx}
-						</button>
 					</div>
 				</div>
 			) : (
@@ -70,11 +63,6 @@ export function ProjectHome({
 					{project.id !== "sample" && (
 						<button className="sheet-card sheet-card-add" type="button" onClick={onAddSheet}>
 							<Icon name="add" />{t.newSheet}
-						</button>
-					)}
-					{project.id !== "sample" && (
-						<button className="sheet-card sheet-card-add" type="button" onClick={onImport}>
-							<Icon name="import" />{t.importXlsx}
 						</button>
 					)}
 				</div>

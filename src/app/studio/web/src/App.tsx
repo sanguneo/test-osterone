@@ -10,7 +10,6 @@ import { ReviewPanel } from "./components/ReviewPanel";
 import { RulesPanel } from "./components/RulesPanel";
 import { RunPanel } from "./components/RunPanel";
 import { SheetEditorModal } from "./components/SheetEditorModal";
-import { SheetImportModal } from "./components/SheetImportModal";
 import { WelcomeScreen } from "./components/WelcomeScreen";
 import { StudioChrome, type StudioTab } from "./components/StudioChrome";
 import type { Project, Status, TestSheet } from "./types";
@@ -110,7 +109,6 @@ export function App() {
 	const [editingProject, setEditingProject] = useState<Project | null>(null);
 	const [sheetModalOpen, setSheetModalOpen] = useState(false);
 	const [editingSheet, setEditingSheet] = useState<TestSheet | null>(null);
-	const [importOpen, setImportOpen] = useState(false);
 
 	const selectedProject = useMemo(
 		() => projects.find((project) => project.id === selectedProjectId),
@@ -222,7 +220,6 @@ export function App() {
 		setEditingSheet(null);
 		setSheetModalOpen(true);
 	}, []);
-	const openImport = useCallback(() => setImportOpen(true), []);
 	const closeModel = useCallback(() => setModelOpen(false), []);
 	const closeProjectModal = useCallback(() => setProjectModalOpen(false), []);
 
@@ -234,7 +231,6 @@ export function App() {
 				navReviewCount={navReviewCount}
 				onAddProject={openNewProject}
 				onAddSheet={openNewSheet}
-				onImportSheets={openImport}
 				onDeleteProject={deleteProject}
 				onEditProject={(project) => { setEditingProject(project); setProjectModalOpen(true); }}
 				onEditSheet={(sheet) => { setEditingSheet(sheet); setSheetModalOpen(true); }}
@@ -262,7 +258,7 @@ export function App() {
 				{!selectedProject ? (
 					<WelcomeScreen projects={projects} onSelectProject={setSelectedProjectId} onNewProject={openNewProject} />
 				) : !selectedSheetId ? (
-					<ProjectHome project={selectedProject} onSelectSheet={setSelectedSheetId} onAddSheet={openNewSheet} onImport={openImport} />
+					<ProjectHome project={selectedProject} onSelectSheet={setSelectedSheetId} onAddSheet={openNewSheet} />
 				) : (
 					<>
 						<div hidden={tab !== "dash"}>
@@ -303,15 +299,10 @@ export function App() {
 						await persistSheets(nextSheets);
 						setSelectedSheetId(sheet.id);
 					}}
-				/>
-			)}
-			{importOpen && selectedProject && (
-				<SheetImportModal
-					onClose={() => setImportOpen(false)}
-					onImported={(imported) => {
+					onImportSheets={(imported) => {
 						void persistSheets([...selectedProject.sheets, ...imported]);
 						if (imported[0]) setSelectedSheetId(imported[0].id);
-						setImportOpen(false);
+						setSheetModalOpen(false);
 					}}
 				/>
 			)}

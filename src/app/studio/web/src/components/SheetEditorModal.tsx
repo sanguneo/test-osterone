@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { getLang, useLang } from "../i18n";
-import type { AnalyzeResult, ChatMsg, PreviewResult, TestSheet } from "../types";
+import type { AnalyzeResult, ChatMsg, PreviewResult, TestSheet, XlsxSheet } from "../types";
 import { Icon } from "./Icon";
 import { ModalShell } from "./ModalShell";
 
@@ -52,6 +52,15 @@ const S = {
 		passwordLabel: "테스트 계정 비밀번호 (선택)",
 		usernamePlaceholder: "아이디",
 		passwordPlaceholder: "비밀번호",
+		xlsxSource: "XLSX",
+		chooseFile: "XLSX 파일 선택",
+		xlsxConvFail: (m: string) => `변환 실패: ${m} — 파일 형식을 확인하세요.`,
+		pickSheets: (name: string) => `${name} — 가져올 시트:`,
+		rowsN: (n: number) => `${n}행`,
+		nonTc: "비TC?",
+		importN: (n: number) => (n > 0 ? `선택 ${n}개 가져오기` : "선택 시트 가져오기"),
+		pickOne: "가져올 시트를 하나 이상 선택하세요.",
+		importing: "가져오는 중…",
 		save: "저장",
 		cancel: "취소",
 		next: "다음",
@@ -101,6 +110,15 @@ const S = {
 		passwordLabel: "Test account password (optional)",
 		usernamePlaceholder: "Username",
 		passwordPlaceholder: "Password",
+		xlsxSource: "XLSX",
+		chooseFile: "Choose XLSX file",
+		xlsxConvFail: (m: string) => `Conversion failed: ${m} — check the file format.`,
+		pickSheets: (name: string) => `${name} — sheets to import:`,
+		rowsN: (n: number) => `${n} row${n === 1 ? "" : "s"}`,
+		nonTc: "non-TC?",
+		importN: (n: number) => (n > 0 ? `Import ${n} selected` : "Import selected"),
+		pickOne: "Select at least one sheet to import.",
+		importing: "Importing…",
 		save: "Save",
 		cancel: "Cancel",
 		next: "Next",
@@ -183,12 +201,14 @@ export function SheetEditorModal({
 	onSave,
 	onPersist,
 	onClose,
+	onImportSheets,
 }: {
 	editSheet: TestSheet | null;
 	projectId: string;
 	onSave: (sheet: TestSheet) => void;
 	onPersist: (sheet: TestSheet) => Promise<void>;
 	onClose: () => void;
+	onImportSheets: (sheets: TestSheet[]) => void;
 }) {
 	const lang = useLang();
 	const t = S[lang];
@@ -203,6 +223,12 @@ export function SheetEditorModal({
 	const [password, setPassword] = useState(editSheet?.password ?? "");
 	const [loadingCsv, setLoadingCsv] = useState(false);
 	const [loadError, setLoadError] = useState("");
+	const [mode, setMode] = useState<"sheet" | "csv" | "xlsx">(editSheet?.kind ?? "sheet");
+	const [xlsxSheets, setXlsxSheets] = useState<XlsxSheet[] | null>(null);
+	const [xlsxName, setXlsxName] = useState("");
+	const [pick, setPick] = useState<Record<number, boolean>>({});
+	const [xlsxBusy, setXlsxBusy] = useState(false);
+	const [xlsxError, setXlsxError] = useState("");
 
 	// Existing csv sheets no longer carry csvText from the projects list (it now lives in a file); fetch on demand.
 	useEffect(() => {
@@ -315,6 +341,39 @@ export function SheetEditorModal({
 		}
 	}
 
+	async function onXlsxFile(file: File) {
+		setXlsxBusy(true);
+		setXlsxError("");
+		try {
+			const base64 = await new Promise<string>((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onload = () => resolve(String(reader.result).split(",")[1] ?? "");
+				reader.onerror = reject;
+				reader.readAsDataURL(file);
+			});
+			const result = await api.xlsxConvert(base64);
+			setXlsxSheets(result.sheets);
+			setXlsxName(file.name);
+			setPick(Object.fromEntries(result.sheets.map((sheet, index) => [index, Boolean(sheet.isTc)])));
+		} catch (error) {
+			setXlsxError(S[getLang()].xlsxConvFail((error as Error).message));
+		} finally {
+			setXlsxBusy(false);
+		}
+	}
+	function doImport() {
+		if (!xlsxSheets) return;
+		const picked: TestSheet[] = [];
+		for (const [index, sheet] of xlsxSheets.entries()) {
+			if (pick[index]) picked.push({ id: `sh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, kind: "csv", name: sheet.name, sheetUrl: "", csvText: sheet.csv, origin: "xlsx" });
+		}
+		if (picked.length === 0) {
+			setXlsxError(S[getLang()].pickOne);
+			return;
+		}
+		onImportSheets(picked);
+	}
+
 	async function sendRefine() {
 		if (!instruction.trim() || refineBusy) return;
 		const text = instruction.trim();
@@ -396,51 +455,71 @@ export function SheetEditorModal({
 
 			{step === 1 && (
 				<div className="card">
-					<label htmlFor="sheet-name">{t.nameLabel}</label>
-					<input id="sheet-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t.namePlaceholder} />
-
-					<span className="field-label" style={{ marginTop: 10 }}>{t.sourceLabel}</span>
+					<span className="field-label">{t.sourceLabel}</span>
 					<div className="modes">
-						<button className={kind === "sheet" ? "on" : ""} type="button" onClick={() => setKind("sheet")}>
-							{t.googleSheet}
-						</button>
-						<button className={kind === "csv" ? "on" : ""} type="button" onClick={() => setKind("csv")}>
-							CSV
-						</button>
+						<button className={mode === "sheet" ? "on" : ""} type="button" onClick={() => { setMode("sheet"); setKind("sheet"); }}>{t.googleSheet}</button>
+						<button className={mode === "csv" ? "on" : ""} type="button" onClick={() => { setMode("csv"); setKind("csv"); }}>CSV</button>
+						<button className={mode === "xlsx" ? "on" : ""} type="button" onClick={() => setMode("xlsx")}>{t.xlsxSource}</button>
 					</div>
 
-					{kind === "sheet" ? (
+					{mode === "xlsx" ? (
 						<>
-							<label htmlFor="sheet-url" style={{ marginTop: 10 }}>{t.sheetUrlLabel}</label>
-							<input id="sheet-url" type="text" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" />
+							<div className="source-actions" style={{ marginTop: 10 }}>
+								<label className="button secondary file-picker">{t.chooseFile}<input type="file" accept=".xlsx,.xls" onChange={(e) => { const file = e.target.files?.[0]; if (file) void onXlsxFile(file); e.target.value = ""; }} /></label>
+							</div>
+							{xlsxSheets && (
+								<div className="xlsx-picker" style={{ marginTop: 12 }}>
+									<p className="detail">{t.pickSheets(xlsxName)}</p>
+									<div className="xlsx-sheets">
+										{xlsxSheets.map((sheet, index) => <label key={sheet.name}><input type="checkbox" checked={Boolean(pick[index])} onChange={(e) => setPick((current) => ({ ...current, [index]: e.target.checked }))} /> {sheet.name} ({t.rowsN(sheet.rows)}){sheet.isTc === false ? <span className="muted"> · {t.nonTc}</span> : null}</label>)}
+									</div>
+								</div>
+							)}
+							{xlsxError && <p className="err" role="alert">{xlsxError}</p>}
+							<div className="editor-actions" style={{ marginTop: 14 }}>
+								<button className="run" style={{ marginTop: 0 }} type="button" disabled={xlsxBusy || !xlsxSheets} onClick={doImport}>{xlsxBusy ? t.importing : t.importN(xlsxSheets ? xlsxSheets.filter((_, index) => pick[index]).length : 0)}</button>
+								<button className="button secondary" type="button" onClick={onClose}>{t.cancel}</button>
+							</div>
 						</>
 					) : (
 						<>
-							<label htmlFor="sheet-csv" style={{ marginTop: 10 }}>{t.csvLabel}</label>
-							<textarea id="sheet-csv" rows={4} value={csvText} onChange={(e) => setCsvText(e.target.value)} placeholder={t.csvPlaceholder} />
+							<label htmlFor="sheet-name" style={{ marginTop: 10 }}>{t.nameLabel}</label>
+							<input id="sheet-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t.namePlaceholder} />
+
+							{mode === "sheet" ? (
+								<>
+									<label htmlFor="sheet-url" style={{ marginTop: 10 }}>{t.sheetUrlLabel}</label>
+									<input id="sheet-url" type="text" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" />
+								</>
+							) : (
+								<>
+									<label htmlFor="sheet-csv" style={{ marginTop: 10 }}>{t.csvLabel}</label>
+									<textarea id="sheet-csv" rows={4} value={csvText} onChange={(e) => setCsvText(e.target.value)} placeholder={t.csvPlaceholder} />
+								</>
+							)}
+
+							<label htmlFor="sheet-base-url" style={{ marginTop: 10 }}>{t.baseUrlLabel}</label>
+							<input id="sheet-base-url" type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://your.app" />
+
+							<label htmlFor="sheet-env" style={{ marginTop: 10 }}>{t.envLabel}</label>
+							<input id="sheet-env" type="text" value={env} onChange={(e) => setEnv(e.target.value)} placeholder="staging" />
+
+							<label htmlFor="sheet-username" style={{ marginTop: 10 }}>{t.usernameLabel}</label>
+							<input id="sheet-username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t.usernamePlaceholder} autoComplete="off" />
+
+							<label htmlFor="sheet-password" style={{ marginTop: 10 }}>{t.passwordLabel}</label>
+							<input id="sheet-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t.passwordPlaceholder} autoComplete="off" />
+
+							{persistError && <p className="err" role="alert">{persistError}</p>}
+
+							<div className="editor-actions" style={{ marginTop: 14 }}>
+								<button className="run" style={{ marginTop: 0 }} type="button" disabled={!canProceedStep1 || persistBusy} onClick={goToStep2}>
+									{persistBusy ? t.saving : t.next}
+								</button>
+								<button className="button secondary" type="button" onClick={onClose}>{t.cancel}</button>
+							</div>
 						</>
 					)}
-
-					<label htmlFor="sheet-base-url" style={{ marginTop: 10 }}>{t.baseUrlLabel}</label>
-					<input id="sheet-base-url" type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://your.app" />
-
-					<label htmlFor="sheet-env" style={{ marginTop: 10 }}>{t.envLabel}</label>
-					<input id="sheet-env" type="text" value={env} onChange={(e) => setEnv(e.target.value)} placeholder="staging" />
-
-					<label htmlFor="sheet-username" style={{ marginTop: 10 }}>{t.usernameLabel}</label>
-					<input id="sheet-username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t.usernamePlaceholder} autoComplete="off" />
-
-					<label htmlFor="sheet-password" style={{ marginTop: 10 }}>{t.passwordLabel}</label>
-					<input id="sheet-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t.passwordPlaceholder} autoComplete="off" />
-
-					{persistError && <p className="err" role="alert">{persistError}</p>}
-
-					<div className="editor-actions" style={{ marginTop: 14 }}>
-						<button className="run" style={{ marginTop: 0 }} type="button" disabled={!canProceedStep1 || persistBusy} onClick={goToStep2}>
-							{persistBusy ? t.saving : t.next}
-						</button>
-						<button className="button secondary" type="button" onClick={onClose}>{t.cancel}</button>
-					</div>
 				</div>
 			)}
 
