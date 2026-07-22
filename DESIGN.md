@@ -77,9 +77,9 @@ Base unit: 4px.
 ## 5. Components
 
 ### Brand lockup
-- **Structure**: custom CSS mark + product name + environment subtitle.
-- **States**: static; the mark never acts as an unlabeled control.
-- **Accessibility**: product name remains real text.
+- **Structure**: brand logo image (`logo.png`; the app renders the transparent `logo-mark.png` variant) + product name + environment subtitle. The lockup is a button that returns to the Welcome screen; the browser favicon reuses `logo.png`.
+- **States**: default, hover, focus; the logo mark is decorative (`aria-hidden`).
+- **Accessibility**: product name is real text; the lockup button carries an `aria-label`.
 
 ### Sheet view rail
 - **Structure**: a left vertical rail of the four view tabs (dashboard, rules, run, review), one custom SVG icon family each; review carries a review-count badge.
@@ -97,10 +97,10 @@ Base unit: 4px.
 - **Behavior**: selecting a sheet drills into that sheet's four views (dashboard/rules/run/review); selecting a project with no sheet selected shows Project home instead.
 
 ### Welcome screen
-- **Structure**: product lockup + a list of existing projects to pick from + a create-project action.
+- **Structure**: a left brand hero (`logo-forged.png`, with a soft lime glow) beside the product lockup, a list of existing projects to pick from, and a create-project action.
 - **States**: empty (no projects yet), populated list, busy (creating).
-- **Accessibility**: project list items are real buttons/links; create action is reachable by keyboard.
-- **Layout**: centered empty-state layout; shown only when no project is selected.
+- **Accessibility**: the hero image is decorative (`alt=""`); project list items are real buttons/links; create action is reachable by keyboard.
+- **Layout**: two-column (brand hero left, content right) on desktop, stacked on mobile; shown only when no project is selected.
 
 ### Project home
 - **Structure**: header with project name, target, and sheet count; the project's sheets as a selectable card grid (`.sheet-card`).
@@ -130,6 +130,18 @@ Base unit: 4px.
 - **Variants**: work queue, preview, result, evidence.
 - **States**: loading skeleton, empty with one next action, error with retry, partial with em dash, populated.
 - **Layout**: table scroll owner is `.table-scroll`; no nested card grid.
+
+### View header
+- **Structure**: one operational kicker, one page title, selected-sheet context, and at most one page-level action.
+- **States**: default, loading context, action unavailable.
+- **Accessibility**: the visible page title is the first heading in the view; context never replaces the heading.
+- **Layout**: the same two-row hierarchy is reused by dashboard, rules, run, and review so view changes preserve orientation.
+
+### Composed empty state
+- **Structure**: restrained status mark, direct state title, one-sentence explanation, and one next action when available.
+- **Variants**: first-run, no-review, no-project, no-sheet.
+- **Accessibility**: state meaning is text-first; decorative marks are hidden from assistive technology.
+- **Layout**: compact operational panel, never a full-height marketing hero inside the app shell.
 
 ### Run rail
 - **Structure**: vertical track, numbered stage node, content region.

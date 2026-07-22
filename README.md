@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.png" width="168" alt="test-osterone logo" />
+<img src="assets/logo-forged.png" width="200" alt="test-osterone logo" />
 
 # test-osterone
 
@@ -13,7 +13,7 @@ Spreadsheet-authored test cases → an AI agent reads them, writes the assertion
 ![stack](https://img.shields.io/badge/stack-Node%2FTS-3178c6)
 ![runtime](https://img.shields.io/badge/runtime-Bun%20%E2%89%A51.3-black)
 ![browser](https://img.shields.io/badge/engine-Playwright-2ead33)
-![tests](https://img.shields.io/badge/tests-87%2F87-9ccc00)
+![tests](https://img.shields.io/badge/tests-89%2F89-9ccc00)
 ![false--pass](https://img.shields.io/badge/false--pass-0-critical)
 
 </div>
@@ -76,7 +76,7 @@ test-osterone --help
 test-osterone setup
 ```
 
-> Requires **Bun ≥ 1.3**. `rule`, `run`, `benchmark`, and `dashboard` commands land in later phases; the CLI today exposes `setup`, `--version`, `--help`.
+> Requires **Bun ≥ 1.3**. test-osterone is **Studio-first** — the day-to-day UI is the browser Studio (`bun run studio`); the CLI is a thin bootstrap that exposes `setup`, `--version`, and `--help`.
 
 ## Try it — live demo
 
@@ -118,9 +118,9 @@ A point-and-click front door. Start it once; after that everything happens in th
 bun run studio     # builds the React UI (Vite) then serves it — open http://localhost:8686
 ```
 
-Model connection is **global**, in the top bar — a login-style control (● status + model name) that opens a modal with three modes: **Codex login** (auto-detects a local `codex login`), **paste a token** (+ optional model override), or **API Key / endpoint** — connect *any* OpenAI-compatible endpoint (Azure OpenAI, OpenRouter, Together, local vLLM/Ollama) via model + Base URL. The model is only ever used at **author time**; it never judges.
+Model connection is **global**, in the top bar — a login-style control (● status + model name) that opens a modal with three modes: **ChatGPT login** (native OpenAI **device-code** OAuth in the browser — **no `codex` CLI required**; also auto-detects a local `codex` session if present), **paste a token** (+ optional model override), or **API Key / endpoint** — connect *any* OpenAI-compatible endpoint (Azure OpenAI, OpenRouter, Together, local vLLM/Ollama) via model + Base URL. An optional **reasoning level** (minimal/low/medium/high/xhigh/max) applies to reasoning models. The model is only ever used at **author time**; it never judges.
 
-The top header shows the brand and model connection status. Below it, a horizontal **Project | Sheet** context strip lets you pick or switch the active project and sheet, with **inline add/edit/delete** for both (a project editor modal and a sheet editor modal — no separate "manage" screen). Below the context strip, a sheet-scoped **view-nav row** shows a `Project › Sheet` breadcrumb plus the four views — **Dashboard, Rules, Run & Results, Review** — all scoped to the selected sheet. Navigation is an explicit drill-down: with no project selected you land on a **Welcome** screen to pick or create one; with a project but no sheet selected you land on a **Project home** listing that project's sheets as a selectable grid (or an add-first-sheet prompt if it has none); selecting a sheet opens its four views. Deleting the active project returns you to Welcome. A **Project** holds one or more first-class **Test Sheets** (Google Sheet URL / pasted CSV / uploaded `.xlsx`), plus shared defaults (target URL, environment, test account, reference repo, AI toggle). Each **Test Sheet** can **override** the target URL, environment, and column mapping independently. There is **no cap on sheet count** — a search/filter appears once the sheet list exceeds ~8 items, the active item auto-scrolls into view, the context strip goes responsive on narrow screens, and long names get tooltips.
+The top header shows the brand mark, product name, the global model-connection status, and a **KO/EN language toggle**; clicking the brand returns you to the Welcome screen. Below it, a horizontal **Project | Sheet** context strip lets you pick or switch the active project and sheet, with **inline add/edit/delete** for both (a project editor modal and a sheet editor modal — no separate "manage" screen). Once a sheet is selected, a **left vertical view-rail** (a bottom dock on mobile) exposes the four sheet-scoped views — **Dashboard, Rules, Run & Results, Review** — beside the content, each with its own title and `project · sheet` context line. Navigation is an explicit drill-down: with no project selected you land on a **Welcome** screen (with a forged-logo brand hero on the left) to pick or create one; with a project but no sheet selected you land on a **Project home** listing that project's sheets as a selectable grid (or an add-first-sheet prompt if it has none); selecting a sheet opens its four views. Deleting the active project returns you to Welcome. A **Project** holds one or more first-class **Test Sheets** (Google Sheet URL / pasted CSV / uploaded `.xlsx`), plus shared defaults (target URL, environment, test account, reference repo, AI toggle). Each **Test Sheet** can **override** the target URL, environment, and column mapping independently. There is **no cap on sheet count** — a search/filter appears once the sheet list exceeds ~8 items, the active item auto-scrolls into view, the context strip goes responsive on narrow screens, and long names get tooltips.
 
 - **Per-sheet runtime** — every sheet has its **own run history and review queue**, and now its **own interpretation rule, refine chat, and approved baselines** (the project keeps a **default rule** that new sheets clone, plus a **legacy baseline fallback** for pre-upgrade approvals). The Dashboard view shows the selected sheet's data plus a compact **project roll-up** (aggregate pass rate across sheets), and the review nav badge shows a project-level roll-up. Running a sheet ingests only that sheet, with per-sheet dedupe.
 - **AI sheet interpretation & rule refine** — adding a sheet runs a **3-step onboarding wizard**: pick the **source** (Google Sheet URL / CSV / `.xlsx`) → the model proposes an **interpretation** (column mapping `id/title/step/expected/priority/…` → your header names, plus a case preview) → a **conversational refine** step where you adjust it in natural language ("use 중분류 as the title, not 소분류"). The resulting rule is stored **per sheet** (new sheets clone the project's default rule as a starting point) and is applied at ingestion for that sheet; you can keep refining a sheet's rule later from its Rules view.
@@ -156,7 +156,7 @@ Two interchangeable clients behind one interface:
 
 ## Status
 
-**Built & verified (static, deterministic — 89/89 automated tests):** ingest → normalize → dedupe → rule (CLI) → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract · benchmark hard gate · web dashboard · orchestration (node/host) · auth (API key + OAuth proxy) + JUnit.
+**Built & verified (static, deterministic — 89/89 automated tests):** ingest → normalize → dedupe → rule → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract · benchmark hard gate · web dashboard · orchestration (node/host) · auth (API key + OAuth proxy) + JUnit.
 
 **Pending environment-dependent integration (implemented, not yet live-verified):** live benchmark against real Chromium + docker fixtures / real OAuth-token ChatGPT calls — contracts and implementations are complete; only a smoke pass in a browser/docker/token environment remains.
 

@@ -16,7 +16,7 @@
 	grid-template-columns: 1fr auto;
 	align-items: center;
 	min-height: var(--header-height);
-	padding: 0 clamp(18px, 3vw, 48px);
+	padding: 0 calc(var(--gutter) + var(--sbw)) 0 var(--gutter);
 	border-bottom: 1px solid var(--line);
 	background: color-mix(in srgb, var(--bg) 94%, transparent);
 	backdrop-filter: blur(16px);
@@ -27,25 +27,24 @@
 	align-items: center;
 	gap: var(--space-3);
 	min-width: 0;
+	justify-self: start;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	text-align: left;
+	cursor: pointer;
 }
+
+.brand-lockup:hover .brand-mark { opacity: 0.85; }
 
 .brand-lockup > span:last-child { display: grid; line-height: 1.08; }
 .brand-lockup b { font-size: 14px; letter-spacing: -0.015em; }
 .brand-lockup small { margin-top: 4px; color: var(--lime); font-size: 10px; font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase; }
 
 .brand-mark {
-	display: grid;
-	place-items: center;
-	width: 32px;
-	height: 32px;
-	border: 1px solid color-mix(in srgb, var(--lime) 45%, var(--line));
-	border-radius: var(--radius-sm);
-	background: var(--lime-soft);
-	color: var(--lime);
-	font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-	font-size: 19px;
-	font-weight: 900;
-	transform: skewX(-6deg);
+	width: 40px;
+	height: 40px;
+	object-fit: contain;
 }
 
 .nav-count {
@@ -65,8 +64,8 @@
 	display: inline-flex;
 	align-items: center;
 	gap: var(--space-2);
-	max-width: 100%;
-	min-height: 38px;
+	max-width: min(48vw, 360px);
+	min-height: var(--control-h);
 	padding: 0 12px;
 	border: 1px solid var(--line);
 	border-radius: var(--radius-sm);
@@ -74,6 +73,8 @@
 	color: var(--dim);
 	cursor: pointer;
 }
+.model-status > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header-actions { display: inline-flex; align-items: center; gap: var(--space-3); justify-self: end; min-width: 0; }
 
 .model-status:hover { border-color: var(--line-strong); color: var(--ink); }
 .model-status.connected { color: var(--ink); }
@@ -90,6 +91,7 @@
 	grid-template-columns: 1fr 1fr;
 	border-bottom: 1px solid var(--line);
 	background: var(--inset);
+	padding: 0 calc(var(--gutter) + var(--sbw)) 0 var(--gutter);
 }
 
 .context-lane {
@@ -98,9 +100,12 @@
 	align-items: center;
 	min-width: 0;
 	min-height: 50px;
-	padding: 0 clamp(14px, 2vw, 28px);
+	padding: 0;
 	gap: var(--space-3);
 }
+
+.project-lane { padding-right: var(--space-5); }
+.sheet-lane { padding-left: var(--space-5); }
 
 .context-lane:has(.context-filter) { grid-template-columns: auto minmax(92px, 130px) minmax(0, 1fr) auto; }
 
@@ -146,7 +151,7 @@
 .context-group { display: inline-flex; align-items: center; flex: 0 0 auto; }
 
 .context-item {
-	min-height: 32px;
+	min-height: var(--control-h-sm);
 	max-width: 220px;
 	padding: 0 10px;
 	border: 1px solid transparent;
@@ -171,12 +176,13 @@
 	width: 100%;
 	min-height: 0;
 	height: 100%;
-	padding: clamp(28px, 4vw, 58px) max(clamp(18px, 4vw, 60px), (100% - var(--content-max)) / 2) 72px;
+	padding: clamp(28px, 4vw, 58px) var(--gutter) 72px;
+	scrollbar-gutter: stable;
 	overflow-y: auto;
 	overscroll-behavior-y: contain;
 }
 .view-rail { grid-area: rail; display: flex; flex-direction: column; gap: 2px; width: clamp(148px, 15vw, 200px); padding: var(--space-4) var(--space-2); border-right: 1px solid var(--line); background: var(--inset); overflow-y: auto; }
-.view-item { display: flex; align-items: center; gap: var(--space-2); min-height: 40px; padding: 8px 12px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--dim); font: inherit; text-align: left; cursor: pointer; }
+.view-item { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-h); padding: 8px 12px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--dim); font: inherit; text-align: left; cursor: pointer; }
 .view-item:hover { color: var(--ink); background: color-mix(in srgb, var(--panel) 52%, transparent); }
 .view-item.active { color: var(--ink); background: var(--surface-active); box-shadow: inset 2px 0 0 var(--lime); }
 .view-item.active .icon { color: var(--lime); }

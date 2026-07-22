@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
 /**
- * test-osterone CLI entrypoint. `setup` installs runtime prerequisites (the headless
- * browser); real commands (rule, run, benchmark, dashboard) land in later phases.
+ * test-osterone CLI entrypoint. This is a Studio-first product — the day-to-day UI is
+ * the browser Studio (`bun run studio`). The CLI only bootstraps prerequisites: `setup`
+ * installs the headless browser (Playwright Chromium).
  */
 
 export const NAME = "test-osterone";
@@ -12,11 +13,12 @@ export function help(): string {
 	return [
 		`${NAME} ${VERSION} — AI web test-automation (deterministic verdicts, sheet-driven cases)`,
 		"",
+		"Studio-first: run 'bun run studio' for the browser UI (no terminal needed).",
+		"",
 		"commands:",
 		"  setup                install runtime prerequisites (Playwright Chromium)",
 		"  --version, -v        print version",
 		"  --help, -h           show this help",
-		"  (rule · run · benchmark · dashboard land in later phases)",
 	].join("\n");
 }
 

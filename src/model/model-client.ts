@@ -30,6 +30,7 @@ export interface ApiKeyModelOptions {
 	baseUrl?: string;
 	apiKey: string;
 	model: string;
+	reasoning?: string;
 	fetchImpl?: typeof fetch;
 	maxTokens?: number;
 }
@@ -41,6 +42,7 @@ export class ApiKeyModelClient implements ModelClient {
 	private readonly model: string;
 	private readonly fetchImpl: typeof fetch;
 	private readonly maxTokens: number;
+	private readonly reasoning?: string;
 
 	constructor(opts: ApiKeyModelOptions) {
 		this.baseUrl = (opts.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
@@ -48,13 +50,20 @@ export class ApiKeyModelClient implements ModelClient {
 		this.model = opts.model;
 		this.fetchImpl = opts.fetchImpl ?? fetch;
 		this.maxTokens = opts.maxTokens ?? 512;
+		this.reasoning = opts.reasoning;
 	}
 
 	async complete(messages: ModelMessage[]): Promise<string> {
 		const res = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
 			method: "POST",
 			headers: { "content-type": "application/json", authorization: `Bearer ${this.apiKey}` },
-			body: JSON.stringify({ model: this.model, temperature: 0, max_tokens: this.maxTokens, messages }),
+			body: JSON.stringify({
+				model: this.model,
+				temperature: 0,
+				max_tokens: this.maxTokens,
+				messages,
+				...(this.reasoning ? { reasoning_effort: this.reasoning } : {}),
+			}),
 		});
 		if (!res.ok) {
 			throw new Error(`model request failed: ${res.status} ${(await res.text()).slice(0, 200)}`);

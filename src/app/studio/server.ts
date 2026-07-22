@@ -130,6 +130,7 @@ interface AuthState {
 	mode: string;
 	accountId?: string;
 	model: string;
+	reasoning?: string;
 	endpoint?: string;
 }
 interface AuthInput {
@@ -137,6 +138,7 @@ interface AuthInput {
 	token?: string;
 	apiKey?: string;
 	model?: string;
+	reasoning?: string;
 	baseUrl?: string;
 }
 
@@ -301,6 +303,7 @@ function statusPayload(projectId: string, sheetId?: string): Record<string, unkn
 	const ss = sheetState(st, sid);
 	return {
 		connected: !!modelClient,
+		codexAvailable: !!readCodexLogin(),
 		auth,
 		projectId,
 		ruleVersion: ss.rule.ruleVersion,
@@ -327,27 +330,112 @@ function intentDiff(
 	return diff;
 }
 
+const REASONING_LEVELS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"]);
+const CHAT_REASONING_LEVELS = new Set(["minimal", "low", "medium", "high"]);
+function normReasoning(v?: string): string | undefined {
+	const t = (v ?? "").trim();
+	return REASONING_LEVELS.has(t) ? t : undefined;
+}
+
 /** Provision a model client from Codex login / pasted token / API key. */
 function connect(input: AuthInput): AuthState {
 	const mode = input.mode ?? "codex";
+	const reasoning = normReasoning(input.reasoning);
 	if (mode === "apikey") {
 		const apiKey = (input.apiKey ?? "").trim();
 		if (!apiKey) throw new Error("API key is required.");
 		const model = input.model?.trim() || DEFAULT_APIKEY_MODEL;
 		const baseUrl = input.baseUrl?.trim() || undefined;
-		modelClient = new ApiKeyModelClient({ apiKey, model, baseUrl });
-		return { mode: "api-key", model, endpoint: baseUrl ?? "https://api.openai.com/v1" };
+		const apiReasoning = reasoning && CHAT_REASONING_LEVELS.has(reasoning) ? reasoning : undefined;
+		modelClient = new ApiKeyModelClient({ apiKey, model, baseUrl, reasoning: apiReasoning });
+		return { mode: "api-key", model, endpoint: baseUrl ?? "https://api.openai.com/v1", reasoning: apiReasoning };
 	}
 	let accessToken = (input.token ?? "").trim();
 	if (!accessToken && mode === "codex") {
 		const login = readCodexLogin();
-		if (!login) throw new Error("No local Codex login found — run `codex login`, or paste a token.");
+		if (!login) throw new Error("로컬 Codex 세션이 없습니다 — 브라우저 로그인을 실행하거나 토큰을 붙여넣으세요.");
 		accessToken = login.accessToken;
 	}
 	if (!accessToken) throw new Error("Access token is required.");
 	const model = input.model?.trim() || (mode === "codex" ? readCodexModel() : undefined) || DEFAULT_OAUTH_MODEL;
-	modelClient = new OAuthProxyModelClient({ accessToken, model });
-	return { mode: mode === "codex" ? "codex (oauth)" : "oauth token", accountId: getCodexAccountId(accessToken), model };
+	modelClient = new OAuthProxyModelClient({ accessToken, model, reasoning });
+	return {
+		mode: mode === "codex" ? "codex (oauth)" : "oauth token",
+		accountId: getCodexAccountId(accessToken),
+		model,
+		reasoning,
+	};
+}
+
+// --- Native OpenAI/ChatGPT device-code login (no codex CLI required; ported from gajae-code openai-codex OAuth) ---
+const OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+const OPENAI_TOKEN_URL = "https://auth.openai.com/oauth/token";
+const DEVICE_USERCODE_URL = "https://auth.openai.com/api/accounts/deviceauth/usercode";
+const DEVICE_TOKEN_URL = "https://auth.openai.com/api/accounts/deviceauth/token";
+const DEVICE_REDIRECT_URI = "https://auth.openai.com/deviceauth/callback";
+const DEVICE_AUTH_URL = "https://auth.openai.com/codex/device";
+
+interface DevicePending {
+	deviceAuthId: string;
+	userCode: string;
+	model?: string;
+	reasoning?: string;
+}
+let devicePending: DevicePending | null = null;
+
+async function exchangeDeviceCode(code: string, verifier: string): Promise<string> {
+	const res = await fetch(OPENAI_TOKEN_URL, {
+		method: "POST",
+		headers: { "Content-Type": "application/x-www-form-urlencoded" },
+		body: new URLSearchParams({
+			grant_type: "authorization_code",
+			client_id: OPENAI_CLIENT_ID,
+			code,
+			code_verifier: verifier,
+			redirect_uri: DEVICE_REDIRECT_URI,
+		}),
+		signal: AbortSignal.timeout(15_000),
+	});
+	if (!res.ok) throw new Error(`토큰 교환 실패: ${res.status} ${(await res.text()).slice(0, 200)}`);
+	const data = (await res.json()) as { access_token?: string };
+	if (!data.access_token) throw new Error("토큰 응답에 access_token이 없습니다.");
+	return data.access_token;
+}
+
+/** Start OpenAI device-code login: returns the user code + verification URL for the browser step. */
+async function startDeviceLogin(model?: string, reasoning?: string): Promise<{ userCode: string; url: string }> {
+	const res = await fetch(DEVICE_USERCODE_URL, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ client_id: OPENAI_CLIENT_ID }),
+		signal: AbortSignal.timeout(15_000),
+	});
+	if (!res.ok) throw new Error(`디바이스 인증 시작 실패: ${res.status}`);
+	const data = (await res.json()) as { device_auth_id?: string; user_code?: string };
+	if (!data.device_auth_id || !data.user_code) throw new Error("디바이스 인증 응답이 올바르지 않습니다.");
+	devicePending = { deviceAuthId: data.device_auth_id, userCode: data.user_code, model, reasoning };
+	return { userCode: data.user_code, url: DEVICE_AUTH_URL };
+}
+
+/** Poll the device-code endpoint once. Returns "pending", or an AuthState (and sets modelClient) on success. */
+async function pollDeviceLogin(): Promise<AuthState | "pending"> {
+	if (!devicePending) throw new Error("진행 중인 로그인이 없습니다. 다시 시작하세요.");
+	const res = await fetch(DEVICE_TOKEN_URL, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ device_auth_id: devicePending.deviceAuthId, user_code: devicePending.userCode }),
+		signal: AbortSignal.timeout(15_000),
+	});
+	if (res.status === 403 || res.status === 404) return "pending";
+	if (!res.ok) throw new Error(`로그인 확인 실패: ${res.status}`);
+	const data = (await res.json()) as { authorization_code?: string; code_verifier?: string };
+	if (!data.authorization_code || !data.code_verifier) return "pending";
+	const accessToken = await exchangeDeviceCode(data.authorization_code, data.code_verifier);
+	const reasoning = normReasoning(devicePending.reasoning);
+	const model = devicePending.model?.trim() || readCodexModel() || DEFAULT_OAUTH_MODEL;
+	modelClient = new OAuthProxyModelClient({ accessToken, model, reasoning });
+	devicePending = null;
+	return { mode: "chatgpt (oauth)", accountId: getCodexAccountId(accessToken), model, reasoning };
 }
 
 /** Fill in a CSV sheet's content from its offloaded file when the caller sent it empty (metadata only). */
@@ -466,7 +554,12 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 				passed: r.assertions.filter((a) => a.passed).length,
 				total: r.assertions.length,
 				heal: r.healEvents,
-				assertions: r.assertions.map((a) => ({ detail: a.detail, passed: a.passed })),
+				assertions: r.assertions.map((a) => ({
+					detail: a.detail,
+					passed: a.passed,
+					kind: a.assertion.kind,
+					value: a.assertion.value,
+				})),
 			};
 			results.push(view);
 			onProgress?.({ type: "case", index: results.length - 1, total: cases.length, result: view });
@@ -544,6 +637,26 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		try {
 			const body = JSON.parse((await readBody(req)) || "{}") as AuthInput & { projectId?: string };
 			auth = connect(body);
+			return send(res, 200, JSON.stringify(statusPayload(body.projectId || "sample")));
+		} catch (err) {
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
+	if (req.method === "POST" && url.pathname === "/api/auth/device/start") {
+		try {
+			const body = JSON.parse((await readBody(req)) || "{}") as AuthInput;
+			const started = await startDeviceLogin(body.model, body.reasoning);
+			return send(res, 200, JSON.stringify(started));
+		} catch (err) {
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
+	if (req.method === "POST" && url.pathname === "/api/auth/device/poll") {
+		try {
+			const body = JSON.parse((await readBody(req)) || "{}") as { projectId?: string };
+			const result = await pollDeviceLogin();
+			if (result === "pending") return send(res, 200, JSON.stringify({ pending: true }));
+			auth = result;
 			return send(res, 200, JSON.stringify(statusPayload(body.projectId || "sample")));
 		} catch (err) {
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));

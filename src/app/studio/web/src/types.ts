@@ -26,6 +26,8 @@ export interface Project {
 export interface AssertionView {
 	detail: string;
 	passed: boolean;
+	kind?: string;
+	value?: string;
 }
 
 export interface CaseView {
@@ -58,11 +60,13 @@ export interface AuthState {
 	mode: string;
 	accountId?: string;
 	model: string;
+	reasoning?: string;
 	endpoint?: string;
 }
 
 export interface Status {
 	connected: boolean;
+	codexAvailable?: boolean;
 	auth: AuthState | null;
 	projectId: string;
 	ruleVersion: number;

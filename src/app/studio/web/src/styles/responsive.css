@@ -14,13 +14,19 @@
 	.nav-count { min-width: 18px; height: 18px; font-size: 9px; }
 	.model-status { margin-left: auto; }
 	.model-status span:last-child { display: none; }
-	.workspace-strip { top: var(--header-height); grid-template-columns: 1fr; }
-	.context-lane { min-height: 44px; padding: 0 14px; }
+	.workspace-strip { top: var(--header-height); grid-template-columns: 1fr; padding: 0; }
+	.context-lane { min-height: 44px; padding: 0 16px; }
 	.context-lane + .context-lane { border-left: 0; border-top: 1px solid var(--line); }
-	.workspace-main { min-height: 0; padding: 32px 22px 72px; }
+	/* 좁은 화면은 헤더의 --sbw 보정이 빠지므로 gutter 예약도 해제해 좌우 균형 유지 */
+	.workspace-main { min-height: 0; padding: 32px 16px 72px; scrollbar-gutter: auto; }
+	.workspace-intro { align-items: flex-start; }
+	.welcome-screen { grid-template-columns: 1fr; gap: var(--space-6); }
+	.welcome-hero { justify-content: flex-start; position: static; }
+	.welcome-logo { max-width: 180px; }
 	.dash-empty { grid-template-columns: 1fr; min-height: 0; }
-	.dash-empty > svg { width: 130px; height: 130px; }
-	.dash-empty .empty-signal svg { width: 130px; height: 130px; }
+	.dash-empty > svg { width: 112px; height: 112px; }
+	.dash-empty .empty-signal svg { width: 112px; height: 112px; }
+	.rules-workspace { grid-template-columns: 1fr; }
 	.rev-item { grid-template-columns: 1fr; }
 	.rev-evidence { padding: var(--space-4) 0 0; border-left: 0; border-top: 1px solid var(--line); }
 }
@@ -52,7 +58,7 @@
 	.run-workbench { grid-template-columns: 1fr; }
 	.run-workbench > .run-rail { position: static; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; padding: 0; }
 	.run-workbench .rail-step { display: grid; grid-template-columns: 1fr; justify-items: center; gap: 8px; min-width: 0; min-height: 70px; text-align: center; }
-	.run-workbench .rail-step:not(:last-child)::after { display: block; top: 15px; bottom: auto; left: calc(50% + 15px); right: calc(-50% + 15px); width: auto; height: 1px; }
+	.run-workbench .rail-step:not(:last-child)::after { display: block; top: 12px; bottom: auto; left: calc(50% + 12px); right: calc(-50% + 12px); width: auto; height: 1px; }
 	.run-workbench .rail-step b { font-size: 12px; white-space: nowrap; }
 	.run-workbench .rail-step p { display: none; }
 	.modal-native[open] { align-items: end; padding: 0; }
@@ -67,10 +73,20 @@
 	.context-lane { grid-template-columns: 18px minmax(0, 1fr) 32px; gap: 9px; }
 	.context-lane:has(.context-filter) { grid-template-columns: 18px minmax(82px, 108px) minmax(0, 1fr) 32px; }
 	.context-item { max-width: 155px; }
-	.dash-empty { padding: 28px; }
+	.dash-empty { gap: var(--space-5); padding: 24px; }
+	.workspace-intro { align-items: stretch; flex-direction: column; }
+	.workspace-intro .button { width: 100%; }
 	.dash-empty .empty-signal { margin-bottom: 8px; }
-	.sec { font-size: 32px; }
+	.dash-empty .empty-signal svg { width: 96px; height: 96px; }
+	.dash-empty h2,
+	.dash-empty h3 { font-size: 25px; }
+	.dash-empty p { font-size: 14px; }
+	.sec { font-size: 22px; }
 	.dash-head { grid-template-columns: 1fr auto; margin-bottom: 24px; }
+	.rule-composer { grid-template-columns: 1fr; }
+	.rule-composer .button { width: 100%; }
+	.empty-state { margin-top: 24px; }
+	.empty-state .button { justify-self: stretch; }
 	.metrics { grid-template-columns: 1fr; }
 	.metric,
 	.metric:nth-child(odd) { min-height: 120px; border-left: 0; border-bottom: 1px solid var(--line); }

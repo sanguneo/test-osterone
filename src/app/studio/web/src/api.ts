@@ -30,8 +30,10 @@ export const api = {
 	status: (pid: string, sheetId?: string) => j<Status>(`/api/status?${q(pid)}${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ""}`),
 	history: (pid: string, sheetId?: string) =>
 		j<RunView[]>(`/api/history?${q(pid)}${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ""}`),
-	connect: (body: { mode: string; token?: string; apiKey?: string; model?: string; baseUrl?: string; projectId: string }) =>
+	connect: (body: { mode: string; token?: string; apiKey?: string; model?: string; baseUrl?: string; reasoning?: string; projectId: string }) =>
 		j<Status>("/api/auth", post(body)),
+	deviceStart: (body: { model?: string; reasoning?: string }) => j<{ userCode: string; url: string }>("/api/auth/device/start", post(body)),
+	devicePoll: (body: { projectId: string }) => j<Status & { pending?: boolean }>("/api/auth/device/poll", post(body)),
 	projects: () => j<Project[]>("/api/projects"),
 	saveProject: (p: Partial<Project> & { projectId: string; sample?: boolean }) =>
 		j<{ saved: Project; projects: Project[] }>("/api/projects", post(p)),

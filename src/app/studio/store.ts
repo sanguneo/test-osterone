@@ -41,7 +41,7 @@ export interface CaseView {
 	passed: number;
 	total: number;
 	heal: string[];
-	assertions: { detail: string; passed: boolean }[];
+	assertions: { detail: string; passed: boolean; kind?: string; value?: string }[];
 }
 
 export interface RunView {

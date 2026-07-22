@@ -1,5 +1,12 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { useLang } from "../i18n";
 import { Icon } from "./Icon";
+
+const S = {
+	ko: { close: "닫기" },
+	en: { close: "Close" },
+} as const;
+
 
 interface ModalShellProps {
 	readonly children: ReactNode;
@@ -9,6 +16,7 @@ interface ModalShellProps {
 }
 
 export function ModalShell({ children, label, onClose, wide = false }: ModalShellProps) {
+	const t = S[useLang()];
 	const dialogRef = useRef<HTMLDialogElement>(null);
 	const onCloseRef = useRef(onClose);
 	useEffect(() => {
@@ -45,7 +53,7 @@ export function ModalShell({ children, label, onClose, wide = false }: ModalShel
 			onClose={() => onCloseRef.current()}
 		>
 			<div className={`modal${wide ? " modal-wide" : ""}`}>
-				<button className="icon-button modal-close" type="button" aria-label="닫기" onClick={() => onCloseRef.current()}>
+				<button className="icon-button modal-close" type="button" aria-label={t.close} onClick={() => onCloseRef.current()}>
 					<Icon name="close" />
 				</button>
 				{children}

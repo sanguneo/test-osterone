@@ -12,6 +12,7 @@ export interface OAuthProxyOptions {
 	accessToken: string;
 	baseUrl?: string;
 	model: string;
+	reasoning?: string;
 	fetchImpl?: typeof fetch;
 
 	originator?: string;
@@ -80,6 +81,7 @@ export class OAuthProxyModelClient implements ModelClient {
 	private readonly fetchImpl: typeof fetch;
 
 	private readonly originator: string;
+	private readonly reasoning?: string;
 
 	constructor(opts: OAuthProxyOptions) {
 		this.url = codexResponsesUrl(opts.baseUrl ?? "https://chatgpt.com/backend-api");
@@ -88,6 +90,7 @@ export class OAuthProxyModelClient implements ModelClient {
 		this.fetchImpl = opts.fetchImpl ?? fetch;
 
 		this.originator = opts.originator ?? "codex_cli_rs";
+		this.reasoning = opts.reasoning;
 	}
 
 	async complete(messages: ModelMessage[]): Promise<string> {
@@ -119,6 +122,7 @@ export class OAuthProxyModelClient implements ModelClient {
 			headers,
 			body: JSON.stringify({
 				model: this.model,
+				...(this.reasoning ? { reasoning: { effort: this.reasoning } } : {}),
 				instructions,
 				input,
 				stream: true,

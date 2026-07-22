@@ -1,6 +1,21 @@
 import type { Project } from "../types";
-import { EmptyMotif } from "./DashboardParts";
+import { useLang } from "../i18n";
 import { Icon } from "./Icon";
+
+const S = {
+	ko: {
+		title: "프로젝트",
+		intro: "작업할 프로젝트를 선택하세요. 규칙과 실행 기록은 시트별로 관리됩니다.",
+		newProject: "새 프로젝트",
+		sheets: (n: number) => `시트 ${n}개`,
+	},
+	en: {
+		title: "Projects",
+		intro: "Pick a project to work on. Rules and run history are managed per sheet.",
+		newProject: "New Project",
+		sheets: (n: number) => `${n} sheet${n === 1 ? "" : "s"}`,
+	},
+} as const;
 
 export function WelcomeScreen({
 	projects,
@@ -11,30 +26,29 @@ export function WelcomeScreen({
 	readonly onSelectProject: (id: string) => void;
 	readonly onNewProject: () => void;
 }) {
+	const t = S[useLang()];
 	return (
-		<section>
-			<div className="card dash-empty">
-				<div className="empty-signal">
-					<EmptyMotif />
-					<span>test-osterone Studio</span>
-				</div>
-				<div>
-					<p className="kicker">test-osterone Studio</p>
-					<h2>프로젝트를 선택하거나 새로 만드세요</h2>
-					<p>프로젝트는 테스트 시트를 묶어 관리하는 단위입니다. 시트마다 규칙·실행·리뷰가 따로 유지됩니다.</p>
-				</div>
+		<section className="welcome-screen">
+			<div className="welcome-hero" aria-hidden="true">
+				<img className="welcome-logo" src="/logo-forged.png" alt="" width={512} height={512} loading="eager" decoding="async" />
 			</div>
-			<div className="sheet-grid">
-				{projects.map((project) => (
-					<button key={project.id} className="sheet-card" type="button" onClick={() => onSelectProject(project.id)}>
-						<Icon name="project" />
-						<b>{project.name}</b>
-						<span className="detail">시트 {project.sheets.length}개{project.baseUrl ? ` · ${project.baseUrl}` : ""}</span>
-					</button>
-				))}
-				<button className="sheet-card sheet-card-add" type="button" onClick={onNewProject}>
-					<Icon name="add" />새 프로젝트
-				</button>
+			<div className="welcome-content">
+				<div className="workspace-intro">
+					<div>
+						<h2>{t.title}</h2>
+						<p>{t.intro}</p>
+					</div>
+					<button className="button primary" type="button" onClick={onNewProject}><Icon name="add" />{t.newProject}</button>
+				</div>
+				<div className="sheet-grid">
+					{projects.map((project) => (
+						<button key={project.id} className="sheet-card" type="button" onClick={() => onSelectProject(project.id)}>
+							<Icon name="project" />
+							<b>{project.name}</b>
+							<span className="detail">{t.sheets(project.sheets.length)}{project.baseUrl ? ` · ${project.baseUrl}` : ""}</span>
+						</button>
+					))}
+				</div>
 			</div>
 		</section>
 	);

@@ -1,23 +1,90 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import { useLang } from "../i18n";
 import type { ReviewItem } from "../types";
+import { Icon } from "./Icon";
 import { VerdictMark } from "./Verdict";
+
+const S = {
+	ko: {
+		sectionTitle: "리뷰 대기",
+		approving: "승인 중…",
+		approveAll: (n: number) => `전체 승인 (${n})`,
+		confirmAllQuestion: (n: number) => `${n}건을 모두 확인했나요?`,
+		approveAllBtn: "모두 승인",
+		cancel: "취소",
+		viewIntro: "엔진이 보류한 판정을 화면 증거와 함께 확인합니다.",
+		loadFailed: (msg: string) => `리뷰 대기 목록을 불러오지 못했습니다: ${msg}`,
+		retry: "다시 시도",
+		emptyTitle: "보류 판정 없음",
+		emptyBody: "엔진이 판정을 보류하면 화면 증거와 함께 여기에 표시됩니다.",
+		openRunBench: "실행 작업대 열기",
+		approveAllFailed: (msg: string) => `전체 승인 실패: ${msg} — 다시 시도하세요.`,
+		approveFailed: (msg: string) => `승인 실패: ${msg} — 다시 시도하거나 서버 로그를 확인하세요.`,
+		reasonLabel: "확인이 필요한 이유",
+		screenTextLabel: "화면 텍스트",
+		emptyPage: "(빈 페이지)",
+		screenAlt: (title: string) => `${title} 화면`,
+		screenCaption: (url: string) => `화면 · ${url}`,
+		noUrl: "URL 없음",
+		noScreenshot: "화면 캡처가 없습니다",
+		confirmSaveNote: "이 증거를 기준 화면으로 저장하면 다음 실행부터 자동 판정에 사용합니다.",
+		saveConfirm: "저장 확정",
+		reviewFootNote: "화면과 판정 사유를 확인한 뒤 기준 화면으로 저장합니다.",
+		saving: "저장 중…",
+		reviewBaseline: "기준 화면 검토",
+	},
+	en: {
+		sectionTitle: "Review queue",
+		approving: "Approving…",
+		approveAll: (n: number) => `Approve all (${n})`,
+		confirmAllQuestion: (n: number) => `Have you checked all ${n} items?`,
+		approveAllBtn: "Approve all",
+		cancel: "Cancel",
+		viewIntro: "Review verdicts the engine held, along with screen evidence.",
+		loadFailed: (msg: string) => `Failed to load the review queue: ${msg}`,
+		retry: "Retry",
+		emptyTitle: "No pending verdicts",
+		emptyBody: "When the engine holds a verdict, it appears here with screen evidence.",
+		openRunBench: "Open run bench",
+		approveAllFailed: (msg: string) => `Approve all failed: ${msg} — try again.`,
+		approveFailed: (msg: string) => `Approve failed: ${msg} — try again or check the server logs.`,
+		reasonLabel: "Reason for review",
+		screenTextLabel: "Screen text",
+		emptyPage: "(empty page)",
+		screenAlt: (title: string) => `${title} screenshot`,
+		screenCaption: (url: string) => `Screen · ${url}`,
+		noUrl: "No URL",
+		noScreenshot: "No screen capture available",
+		confirmSaveNote: "Saving this evidence as baseline uses it for automatic verdicts from the next run onward.",
+		saveConfirm: "Confirm save",
+		reviewFootNote: "Review the screen and verdict reason, then save it as the baseline.",
+		saving: "Saving…",
+		reviewBaseline: "Review baseline",
+	},
+} as const;
 
 export function ReviewPanel({
 	selId,
 	selSheetId,
+	sheetName,
 	onCount,
+	onRun,
 	refreshKey = 0,
 }: {
 	selId: string;
 	selSheetId: string;
+	sheetName: string;
 	onCount: (n: number) => void;
+	onRun: () => void;
 	refreshKey?: number;
 }) {
+	const t = S[useLang()];
 	const [items, setItems] = useState<ReviewItem[] | null>(null);
 	const [loadErr, setLoadErr] = useState("");
 	const [approveErr, setApproveErr] = useState("");
 	const [busyId, setBusyId] = useState("");
+	const [confirmId, setConfirmId] = useState("");
 	const [confirmAll, setConfirmAll] = useState(false);
 	const [busyAll, setBusyAll] = useState(false);
 
@@ -46,13 +113,14 @@ export function ReviewPanel({
 			setItems(queue);
 			onCount(queue.length);
 		} catch (e) {
-			setApproveErr(`전체 승인 실패: ${(e as Error).message} — 다시 시도하세요.`);
+			setApproveErr(t.approveAllFailed((e as Error).message));
 		} finally {
 			setBusyAll(false);
 		}
 	}
 
 	async function approve(caseId: string) {
+		setConfirmId("");
 		setBusyId(caseId);
 		setApproveErr("");
 		try {
@@ -60,7 +128,7 @@ export function ReviewPanel({
 			setItems(queue);
 			onCount(queue.length);
 		} catch (e) {
-			setApproveErr(`승인 실패: ${(e as Error).message} — 다시 시도하거나 서버 로그를 확인하세요.`);
+			setApproveErr(t.approveFailed((e as Error).message));
 		} finally {
 			setBusyId("");
 		}
@@ -69,38 +137,36 @@ export function ReviewPanel({
 	return (
 		<section>
 			<div className="dash-head">
-				<div>
-					<p className="kicker">Human review</p>
-					<h2 className="sec">리뷰 대기</h2>
-				</div>
-				<span className="ctx">엔진이 스스로 판정하지 못해, 사람이 화면을 보고 확정해야 하는 케이스입니다.</span>
+				<h2 className="sec">{t.sectionTitle}</h2>
+				<span className="ctx">{sheetName}</span>
 				{items && items.length > 1 && (
 					<div className="rev-actions">
 						{!confirmAll ? (
 							<button className="mini" type="button" disabled={busyAll} onClick={() => setConfirmAll(true)}>
-								{busyAll ? "승인 중…" : `전체 승인 (${items.length})`}
+								{busyAll ? t.approving : t.approveAll(items.length)}
 							</button>
 						) : (
 							<>
 								<span className="muted" style={{ fontSize: 12.5 }}>
-									{items.length}건을 모두 확인했나요?
+									{t.confirmAllQuestion(items.length)}
 								</span>
 								<button className="mini" type="button" style={{ color: "var(--review)" }} onClick={approveAll}>
-									모두 승인
+									{t.approveAllBtn}
 								</button>
 								<button className="mini" type="button" onClick={() => setConfirmAll(false)}>
-									취소
+									{t.cancel}
 								</button>
 							</>
 						)}
 					</div>
 				)}
 			</div>
+			{items && items.length > 0 && <p className="view-intro">{t.viewIntro}</p>}
 			{loadErr && (
 				<div className="card err">
-					리뷰 대기 목록을 불러오지 못했습니다: {loadErr}{" "}
+					{t.loadFailed(loadErr)}{" "}
 					<button className="mini" type="button" onClick={load} style={{ marginLeft: 8 }}>
-						다시 시도
+						{t.retry}
 					</button>
 				</div>
 			)}
@@ -117,8 +183,13 @@ export function ReviewPanel({
 				</div>
 			)}
 			{items && items.length === 0 && (
-				<div className="muted">
-					확인할 케이스가 없습니다. 엔진이 판정을 보류하면, 여기서 화면을 확인하고 기준 화면으로 승인합니다.
+				<div className="empty-state review-empty">
+					<span className="empty-state-icon"><Icon name="review" size={24} /></span>
+					<div>
+						<h3>{t.emptyTitle}</h3>
+						<p>{t.emptyBody}</p>
+					</div>
+					<button className="button secondary" type="button" onClick={onRun}><Icon name="play" />{t.openRunBench}</button>
 				</div>
 			)}
 			{approveErr && <div className="card err">{approveErr}</div>}
@@ -135,29 +206,37 @@ export function ReviewPanel({
 							</span>
 						</header>
 						<div className="rev-reason">
-							<span className="lbl">확인이 필요한 이유</span>
+							<span className="lbl">{t.reasonLabel}</span>
 							{it.reason}
 						</div>
 						<div className="rev-txt-wrap">
-							<span className="lbl">화면 텍스트</span>
-							<div className="txt">{it.text || "(빈 페이지)"}</div>
+							<span className="lbl">{t.screenTextLabel}</span>
+							<div className="txt">{it.text || t.emptyPage}</div>
 						</div>
 					</div>
 					{it.screenshot ? (
 						<figure className="rev-evidence">
-							<img src={it.screenshot} alt={`${it.title} 화면`} />
-							<figcaption>화면 · {it.url || "URL 없음"}</figcaption>
+							<img src={it.screenshot} alt={t.screenAlt(it.title)} />
+							<figcaption>{t.screenCaption(it.url || t.noUrl)}</figcaption>
 						</figure>
 					) : (
-						<div className="rev-evidence rev-evidence-empty">화면 캡처가 없습니다</div>
+						<div className="rev-evidence rev-evidence-empty">{t.noScreenshot}</div>
 					)}
 					<footer className="rev-foot">
-						<span className="rev-foot-note">
-							승인하면 이 화면을 <b>기준 화면</b>으로 저장합니다 — 다음 실행부터 같은 화면이면 자동으로 통과해요.
-						</span>
-						<button className="approve" type="button" disabled={busyId === it.caseId} onClick={() => approve(it.caseId)}>
-							{busyId === it.caseId ? "저장 중…" : "기준 화면으로 승인"}
-						</button>
+						{confirmId === it.caseId ? (
+							<>
+								<span className="rev-foot-note confirm-note">{t.confirmSaveNote}</span>
+								<button className="button secondary compact" type="button" onClick={() => setConfirmId("")}>{t.cancel}</button>
+								<button className="approve" type="button" onClick={() => approve(it.caseId)}>{t.saveConfirm}</button>
+							</>
+						) : (
+							<>
+								<span className="rev-foot-note">{t.reviewFootNote}</span>
+								<button className="approve" type="button" disabled={busyId === it.caseId} onClick={() => setConfirmId(it.caseId)}>
+									{busyId === it.caseId ? t.saving : t.reviewBaseline}
+								</button>
+							</>
+						)}
 					</footer>
 				</article>
 			))}

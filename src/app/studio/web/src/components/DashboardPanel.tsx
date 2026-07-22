@@ -1,27 +1,100 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
+import { useLang } from "../i18n";
+import type { Lang } from "../i18n";
 import type { CaseView, Project, RunView, Verdict } from "../types";
-import { DashboardQueueRow, DashboardSkeleton, EmptyMotif, Spark } from "./DashboardParts";
+import { DashboardQueueRow, DashboardSkeleton, Spark } from "./DashboardParts";
 import { Icon } from "./Icon";
-import { V_LABEL } from "./Verdict";
+import { vLabel } from "./Verdict";
+
+const S = {
+	ko: {
+		dashTitle: "실행 현황",
+		lastRun: (rel: string) => ` · 마지막 실행 ${rel}`,
+		newRun: "새 실행 →",
+		historyFail: (msg: string) => `실행 기록을 불러오지 못했습니다: ${msg}`,
+		retry: "다시 시도",
+		firstRunTitle: "첫 실행 전",
+		firstRunBody: "실행하면 판정 결과와 통과율 추이가 여기에 정리됩니다.",
+		openWorkbench: "실행 작업대 열기",
+		passRate: "통과율",
+		casesBasis: (n: number) => `케이스 ${n}개 기준`,
+		sameAsPrev: "이전 실행과 동일",
+		vsPrev: (delta: number) => `이전 실행 대비 ${delta > 0 ? "+" : ""}${delta}%p`,
+		sparkHint: "실행이 쌓이면 추이가 표시됩니다",
+		actionable: "조치 필요",
+		failErrorLine: (fail: number, error: number) => `실패 ${fail} · 오류 ${error}`,
+		reviewQueue: "리뷰 대기",
+		openReviewQueue: "리뷰 대기 열기 →",
+		noHeldVerdicts: "보류된 판정 없음",
+		recentRun: "최근 실행",
+		caseInterpretLine: (interp: string, rel: string) => `케이스 · ${interp} 해석 · ${rel}`,
+		ai: "AI",
+		rule: "규칙",
+		all: (n: number) => `전체 ${n}`,
+		clearFilter: "필터 해제",
+		selectRunAria: "실행 선택",
+		noCasesInRun: "이 실행에는 케이스가 없습니다.",
+		noVerdictCases: (v: string) => `${v} 케이스가 없습니다.`,
+		caseCol: "케이스",
+		verdictCol: "판정",
+		verifyCol: "검증",
+		confidenceCol: "신뢰도",
+		detailCol: "상세",
+	},
+	en: {
+		dashTitle: "Run overview",
+		lastRun: (rel: string) => ` · Last run ${rel}`,
+		newRun: "New run →",
+		historyFail: (msg: string) => `Failed to load run history: ${msg}`,
+		retry: "Retry",
+		firstRunTitle: "Before the first run",
+		firstRunBody: "Once you run, verdicts and pass-rate trends will appear here.",
+		openWorkbench: "Open run workbench",
+		passRate: "Pass rate",
+		casesBasis: (n: number) => `Based on ${n} cases`,
+		sameAsPrev: "Same as previous run",
+		vsPrev: (delta: number) => `${delta > 0 ? "+" : ""}${delta}%p vs previous run`,
+		sparkHint: "Trend appears once runs accumulate",
+		actionable: "Needs action",
+		failErrorLine: (fail: number, error: number) => `Fail ${fail} · Error ${error}`,
+		reviewQueue: "Review queue",
+		openReviewQueue: "Open review queue →",
+		noHeldVerdicts: "No held verdicts",
+		recentRun: "Recent run",
+		caseInterpretLine: (interp: string, rel: string) => `Cases · ${interp} interpreted · ${rel}`,
+		ai: "AI",
+		rule: "Rule",
+		all: (n: number) => `All ${n}`,
+		clearFilter: "Clear filter",
+		selectRunAria: "Select run",
+		noCasesInRun: "This run has no cases.",
+		noVerdictCases: (v: string) => `No ${v} cases.`,
+		caseCol: "Case",
+		verdictCol: "Verdict",
+		verifyCol: "Verify",
+		confidenceCol: "Confidence",
+		detailCol: "Detail",
+	},
+} as const;
 
 type Tab = "dash" | "rules" | "run" | "review";
 type Filter = Verdict | "all";
 
 const ACTION_ORDER: Record<Verdict, number> = { fail: 0, error: 1, needs_review: 2, pass: 3 };
 
-function fmtAgo(at: number): string {
+function fmtAgo(at: number, lang: Lang): string {
 	const s = Math.max(0, Math.round((Date.now() - at) / 1000));
+	if (lang === "en") {
+		if (s < 60) return "just now";
+		if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+		if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+		return `${Math.floor(s / 86400)}d ago`;
+	}
 	if (s < 60) return "방금 전";
 	if (s < 3600) return `${Math.floor(s / 60)}분 전`;
 	if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
 	return `${Math.floor(s / 86400)}일 전`;
-}
-
-function fmtRun(v: RunView): string {
-	const d = new Date(v.at);
-	const t = `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-	return `${t} · ${v.interpreter === "ai" ? "AI" : "규칙"} 해석`;
 }
 
 function passRate(v: RunView): number | null {
@@ -44,6 +117,8 @@ export function DashboardPanel({
 	goTo: (t: Tab) => void;
 	refreshKey?: number;
 }) {
+	const lang = useLang();
+	const t = S[lang];
 	const [history, setHistory] = useState<RunView[] | null>(null);
 	const [loadErr, setLoadErr] = useState("");
 	const [runIdx, setRunIdx] = useState(0);
@@ -58,69 +133,28 @@ export function DashboardPanel({
 		setLoadErr("");
 		setRunIdx(0);
 		setFilter("all");
-		const sheets = project?.sheets ?? [];
-		if (sheets.length === 0) {
+		if (!selSheetId) {
 			setHistory([]);
 			return;
 		}
-		// Roll up: fan out one /api/history call per sheet (small N), then merge newest-first —
-		// each RunView already carries its own sheetId, so the merged list stays self-describing.
-		Promise.allSettled(sheets.map((sheet) => api.history(selId, sheet.id)))
-			.then((results) => {
+		api.history(selId, selSheetId)
+			.then((runs) => {
 				if (requestId !== loadRequest.current) return;
-				const fulfilled = results.filter((result): result is PromiseFulfilledResult<RunView[]> => result.status === "fulfilled");
-				if (fulfilled.length === 0) {
-					const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-					throw firstFailure?.reason instanceof Error ? firstFailure.reason : new Error("실행 기록을 불러오지 못했습니다.");
-				}
-				setHistory(fulfilled.flatMap((result) => result.value).sort((a, b) => b.at - a.at));
+				setHistory(runs.toSorted((a, b) => b.at - a.at));
 			})
 			.catch((error) => {
 				if (requestId === loadRequest.current) setLoadErr((error as Error).message);
 			});
 		// refreshKey bumps when a run finishes elsewhere — the panel stays mounted, so re-fetch explicitly.
-	}, [selId, project, refreshKey]);
+	}, [selId, selSheetId, refreshKey]);
 	useEffect(load, [load]);
 
-	// The dashboard's primary view is scoped to the selected sheet; fall back to the first sheet
-	// with any runs when nothing is selected yet.
-	const effectiveSheetId = useMemo(() => {
-		if (!history || history.length === 0) return selSheetId ?? "";
-		if (selSheetId && history.some((r) => r.sheetId === selSheetId)) return selSheetId;
-		return history[0]?.sheetId ?? selSheetId ?? "";
-	}, [history, selSheetId]);
-
-	const sheetRuns = useMemo(
-		() => (history ?? []).filter((r) => r.sheetId === effectiveSheetId),
-		[history, effectiveSheetId],
-	);
+	const sheetRuns = history ?? [];
 
 	const sheetName = useMemo(() => {
 		const sheets = project?.sheets ?? [];
-		return sheets.find((s) => s.id === effectiveSheetId)?.name ?? project?.name ?? selId;
-	}, [project, effectiveSheetId, selId]);
-
-	// Project roll-up: for each sheet, take its latest run and aggregate the pass rate across those
-	// latest runs, plus how many sheets currently sit on a needs_review verdict.
-	const rollup = useMemo(() => {
-		const sheets = project?.sheets ?? [];
-		if (!history || sheets.length === 0) return null;
-		let passSum = 0;
-		let totalSum = 0;
-		let reviewSheets = 0;
-		for (const sheet of sheets) {
-			const latest = history.filter((r) => r.sheetId === sheet.id).sort((a, b) => b.at - a.at)[0];
-			if (!latest) continue;
-			passSum += latest.counts.pass || 0;
-			totalSum += latest.results.length;
-			if ((latest.counts.needs_review || 0) > 0) reviewSheets += 1;
-		}
-		return {
-			sheetCount: sheets.length,
-			reviewSheets,
-			rate: totalSum === 0 ? null : passSum / totalSum,
-		};
-	}, [history, project]);
+		return sheets.find((sheet) => sheet.id === selSheetId)?.name ?? project?.name ?? selId;
+	}, [project, selId, selSheetId]);
 
 	const run = sheetRuns[runIdx];
 	const prev = sheetRuns[runIdx + 1];
@@ -162,26 +196,23 @@ export function DashboardPanel({
 	return (
 		<section>
 			<div className="dash-head">
-				<div>
-					<p className="kicker">Quality operations</p>
-					<h2 className="sec">실행 현황</h2>
-				</div>
+				<h2 className="sec">{t.dashTitle}</h2>
 				<span className="ctx">
 					{sheetName}
-					{run ? ` · 마지막 실행 ${fmtAgo(run.at)}` : ""}
+					{run ? t.lastRun(fmtAgo(run.at, lang)) : ""}
 				</span>
 				{history && sheetRuns.length > 0 && (
 					<button className="mini" type="button" onClick={() => goTo("run")}>
-						새 실행 →
+						{t.newRun}
 					</button>
 				)}
 			</div>
 
 			{loadErr && (
 				<div className="card err">
-					실행 기록을 불러오지 못했습니다: {loadErr}{" "}
+					{t.historyFail(loadErr)}{" "}
 					<button className="mini" type="button" onClick={load} style={{ marginLeft: 8 }}>
-						다시 시도
+						{t.retry}
 					</button>
 				</div>
 			)}
@@ -189,75 +220,56 @@ export function DashboardPanel({
 			{!loadErr && !history && <DashboardSkeleton />}
 
 			{history && sheetRuns.length === 0 && (
-				<div className="card dash-empty">
-					<div className="empty-signal"><EmptyMotif /><span>Ready for first run</span></div>
+				<div className="empty-state first-run-empty">
+					<span className="empty-state-icon"><Icon name="play" size={24} /></span>
 					<div>
-						<p className="kicker">Start here</p>
-						<h3>시트에서 증거까지,<br />한 번의 실행으로 연결하세요.</h3>
-						<p>첫 실행이 끝나면 통과율, 조치가 필요한 실패, 사람이 확인할 판정만 이 화면에 모입니다.</p>
-						<ol className="run-rail empty-run-rail">
-							<li className="rail-step active"><span className="rail-node">1</span><div><b>케이스 확인</b><p>선택한 시트의 테스트 케이스를 미리 봅니다.</p></div></li>
-							<li className="rail-step"><span className="rail-node">2</span><div><b>브라우저 실행</b><p>규칙 또는 AI 해석으로 실제 동작을 검증합니다.</p></div></li>
-							<li className="rail-step"><span className="rail-node">3</span><div><b>증거 검토</b><p>실패와 보류 판정에만 집중합니다.</p></div></li>
-						</ol>
-						<button className="button primary" type="button" onClick={() => goTo("run")}>
-							<Icon name="play" /> 첫 실행 준비
-						</button>
+						<h3>{t.firstRunTitle}</h3>
+						<p>{t.firstRunBody}</p>
 					</div>
+					<button className="button primary" type="button" onClick={() => goTo("run")}><Icon name="play" />{t.openWorkbench}</button>
 				</div>
 			)}
 
 			{run && (
 				<>
-					{rollup && (
-						<div className="metrics">
-							<div className="metric">
-								<div className="lbl">프로젝트 전체</div>
-								<div className="val">{rollup.rate === null ? "—" : `${Math.round(rollup.rate * 100)}%`}</div>
-								<div className="sub">
-									{rollup.sheetCount}개 시트 · 검토 대기 {rollup.reviewSheets}개
-								</div>
-							</div>
-						</div>
-					)}
 					<div className="metrics">
 						<div className="metric hero">
-							<div className="lbl">통과율</div>
+							<div className="lbl">{t.passRate}</div>
 							<div className="val">{rate === null ? "—" : `${Math.round(rate * 100)}%`}</div>
 							<div className="sub">
 								{delta === null
-									? `케이스 ${run.results.length}개 기준`
+									? t.casesBasis(run.results.length)
 									: delta === 0
-										? "이전 실행과 동일"
-										: `이전 실행 대비 ${delta > 0 ? "+" : ""}${delta}%p`}
+										? t.sameAsPrev
+										: t.vsPrev(delta)}
 							</div>
-							{rates.length >= 2 ? <Spark rates={rates} /> : <div className="spark-hint">실행이 쌓이면 추이가 표시됩니다</div>}
+							{rates.length >= 2 ? <Spark rates={rates} /> : <div className="spark-hint">{t.sparkHint}</div>}
 						</div>
 						<div className="metric">
-							<div className="lbl">조치 필요</div>
+							<div className="lbl">{t.actionable}</div>
 							<div className="val">{actionable}</div>
 							<div className="sub">
-								실패 {run.counts.fail || 0} · 오류 {run.counts.error || 0}
+								{t.failErrorLine(run.counts.fail || 0, run.counts.error || 0)}
 							</div>
 						</div>
 						<div className="metric">
-							<div className="lbl">리뷰 대기</div>
+							<div className="lbl">{t.reviewQueue}</div>
 							<div className="val">{reviewCount}</div>
 							<div className="sub">
 								{reviewCount > 0 ? (
 									<button className="linkbtn" type="button" style={{ padding: 0 }} onClick={() => goTo("review")}>
-										리뷰 대기 열기 →
+										{t.openReviewQueue}
 									</button>
 								) : (
-									"보류된 판정 없음"
+									t.noHeldVerdicts
 								)}
 							</div>
 						</div>
 						<div className="metric">
-							<div className="lbl">최근 실행</div>
+							<div className="lbl">{t.recentRun}</div>
 							<div className="val">{run.results.length}</div>
 							<div className="sub">
-								케이스 · {run.interpreter === "ai" ? "AI" : "규칙"} 해석 · {fmtAgo(run.at)}
+								{t.caseInterpretLine(run.interpreter === "ai" ? t.ai : t.rule, fmtAgo(run.at, lang))}
 							</div>
 						</div>
 					</div>
@@ -270,39 +282,31 @@ export function DashboardPanel({
 								className={`f${filter === f ? " on" : ""}`}
 								onClick={() => setFilter(f)}
 							>
-								{f === "all" ? `전체 ${run.results.length}` : `${V_LABEL[f]} ${run.counts[f] || 0}`}
+								{f === "all" ? t.all(run.results.length) : `${vLabel(f, lang)} ${run.counts[f] || 0}`}
 							</button>
 						))}
 						{filter !== "all" && (
 							<button className="linkbtn" type="button" onClick={() => setFilter("all")}>
-								필터 해제
+								{t.clearFilter}
 							</button>
 						)}
 						<span className="spacer" />
-						{sheetRuns.length > 1 && (
-							<select value={runIdx} onChange={(e) => setRunIdx(Number(e.target.value))} aria-label="실행 선택">
-								{sheetRuns.map((v, i) => (
-									<option key={v.at} value={i}>
-										{fmtRun(v)}
-									</option>
-								))}
-							</select>
-						)}
+						{sheetRuns.length > 1 && <select value={runIdx} onChange={(event) => setRunIdx(Number(event.target.value))} aria-label={t.selectRunAria}>{sheetRuns.map((item, index) => <option key={item.at} value={index}>{new Date(item.at).toLocaleString("ko-KR")} · {item.interpreter === "ai" ? t.ai : t.rule}</option>)}</select>}
 					</div>
 
-					<div className="card">
+					<div className="data-surface">
 						{queue.length === 0 ? (
-							<div className="muted">{filter === "all" ? "이 실행에는 케이스가 없습니다." : `${V_LABEL[filter as Verdict]} 케이스가 없습니다.`}</div>
+							<div className="muted">{filter === "all" ? t.noCasesInRun : t.noVerdictCases(vLabel(filter as Verdict, lang))}</div>
 						) : (
 							<div className="tscroll">
 								<table className="queue">
 								<thead>
 									<tr>
-										<th>케이스</th>
-										<th>판정</th>
-										<th className="num">검증</th>
-										<th className="num">신뢰도</th>
-										<th>상세</th>
+										<th>{t.caseCol}</th>
+										<th>{t.verdictCol}</th>
+										<th className="num">{t.verifyCol}</th>
+										<th className="num">{t.confidenceCol}</th>
+										<th>{t.detailCol}</th>
 									</tr>
 								</thead>
 								<tbody ref={tbodyRef}>

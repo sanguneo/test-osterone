@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
+import { getLang, useLang } from "../i18n";
 import type { AnalyzeResult, ChatMsg, PreviewResult, TestSheet } from "../types";
 import { Icon } from "./Icon";
 import { ModalShell } from "./ModalShell";
 
-const FIELD_LABELS: Record<string, string> = {
+const FIELD_LABELS_KO: Record<string, string> = {
 	id: "ID",
 	title: "제목",
 	step: "스텝",
@@ -14,14 +15,118 @@ const FIELD_LABELS: Record<string, string> = {
 	env: "환경",
 };
 
+const FIELD_LABELS_EN: Record<string, string> = {
+	id: "ID",
+	title: "Title",
+	step: "Step",
+	expected: "Expected",
+	priority: "Priority",
+	role: "Role",
+	env: "Env",
+};
+
+const S = {
+	ko: {
+		wizardSteps: ["소스", "해석 제안", "규칙 미세조정"] as const,
+		wizardAriaLabel: "새 시트 추가 단계",
+		noCases: "읽을 케이스가 없습니다. 원본 내용을 확인하세요.",
+		titleCol: "제목",
+		stepCol: "스텝",
+		expectedCol: "기대결과",
+		moreCases: (n: number) => `외 ${n}개 케이스`,
+		csvLoadFailed: (msg: string) => `CSV를 불러오지 못했습니다: ${msg}`,
+		defaultSheetName: "시트",
+		editSheetTitle: "시트 편집",
+		newSheetTitle: (label: string) => `새 시트 · ${label}`,
+		nameLabel: "이름",
+		namePlaceholder: "예: 로그인 시나리오",
+		sourceLabel: "원본",
+		googleSheet: "구글 시트",
+		sheetUrlLabel: "구글 시트 URL",
+		csvLabel: "CSV",
+		csvLoading: "불러오는 중…",
+		csvPlaceholder: "Test ID,Title,Steps,Expected&#10;…",
+		baseUrlLabel: "대상 URL 오버라이드 (선택)",
+		envLabel: "환경 오버라이드 (선택)",
+		save: "저장",
+		cancel: "취소",
+		next: "다음",
+		saving: "저장 중…",
+		loading: "불러오는 중…",
+		analyzeFailed: (msg: string) => `해석 실패: ${msg}`,
+		retry: "다시 시도",
+		aiInterpreted: "AI가 이렇게 해석했어요",
+		columnMapping: "열 매핑",
+		unique: "고유",
+		duplicates: "중복",
+		prev: "이전",
+		nextRuleTune: "다음: 규칙 미세조정",
+		done: "완료",
+		noChatYet: '아직 대화가 없습니다. 아래 입력창에 자연어로 지시하면 규칙이 다듬어집니다 — 예: "누르기도 click으로 해석해".',
+		refineFailed: (msg: string) => `규칙 다듬기 실패: ${msg}`,
+		refinePlaceholder: '예: "누르기도 click으로 해석해"',
+		sending: "전송 중…",
+		send: "보내기",
+		ruleUpdated: (v: number) => `규칙 v${v} 갱신`,
+		ruleVersionLabel: (v: number) => `규칙 v${v}`,
+		noChange: "변경 없음",
+	},
+	en: {
+		wizardSteps: ["Source", "Interpretation", "Rule tuning"] as const,
+		wizardAriaLabel: "Add sheet steps",
+		noCases: "No cases to read. Check the source content.",
+		titleCol: "Title",
+		stepCol: "Step",
+		expectedCol: "Expected",
+		moreCases: (n: number) => `+${n} more cases`,
+		csvLoadFailed: (msg: string) => `Failed to load CSV: ${msg}`,
+		defaultSheetName: "Sheet",
+		editSheetTitle: "Edit sheet",
+		newSheetTitle: (label: string) => `New sheet · ${label}`,
+		nameLabel: "Name",
+		namePlaceholder: "e.g. Login scenario",
+		sourceLabel: "Source",
+		googleSheet: "Google Sheet",
+		sheetUrlLabel: "Google Sheet URL",
+		csvLabel: "CSV",
+		csvLoading: "Loading…",
+		csvPlaceholder: "Test ID,Title,Steps,Expected&#10;…",
+		baseUrlLabel: "Target URL override (optional)",
+		envLabel: "Env override (optional)",
+		save: "Save",
+		cancel: "Cancel",
+		next: "Next",
+		saving: "Saving…",
+		loading: "Loading…",
+		analyzeFailed: (msg: string) => `Interpretation failed: ${msg}`,
+		retry: "Retry",
+		aiInterpreted: "Here's how the AI interpreted it",
+		columnMapping: "Column mapping",
+		unique: "Unique",
+		duplicates: "Duplicates",
+		prev: "Back",
+		nextRuleTune: "Next: rule tuning",
+		done: "Done",
+		noChatYet: 'No conversation yet. Type an instruction in natural language below to refine the rules — e.g. "treat 누르기 as click too".',
+		refineFailed: (msg: string) => `Rule refine failed: ${msg}`,
+		refinePlaceholder: 'e.g. "treat 누르기 as click too"',
+		sending: "Sending…",
+		send: "Send",
+		ruleUpdated: (v: number) => `Rule v${v} updated`,
+		ruleVersionLabel: (v: number) => `Rule v${v}`,
+		noChange: "No change",
+	},
+} as const;
+
 function WizardRail({ step }: { readonly step: 1 | 2 | 3 }) {
+	const t = S[useLang()];
 	const items: [1 | 2 | 3, string][] = [
-		[1, "소스"],
-		[2, "해석 제안"],
-		[3, "규칙 미세조정"],
+		[1, t.wizardSteps[0]],
+		[2, t.wizardSteps[1]],
+		[3, t.wizardSteps[2]],
 	];
 	return (
-		<ol className="run-rail" aria-label="새 시트 추가 단계">
+		<ol className="run-rail" aria-label={t.wizardAriaLabel}>
 			{items.map(([n, label]) => (
 				<li key={n} className={`rail-step ${step > n ? "complete" : step === n ? "active" : ""}`}>
 					<span className="rail-node">{step > n ? <Icon name="check" size={15} /> : n}</span>
@@ -35,17 +140,18 @@ function WizardRail({ step }: { readonly step: 1 | 2 | 3 }) {
 }
 
 function InterpretationPreview({ preview }: { readonly preview: PreviewResult }) {
+	const t = S[useLang()];
 	if (preview.unique.length === 0) {
-		return <div className="muted">읽을 케이스가 없습니다. 원본 내용을 확인하세요.</div>;
+		return <div className="muted">{t.noCases}</div>;
 	}
 	return (
 		<div className="tscroll">
 			<table>
 				<thead>
 					<tr>
-						<th>제목</th>
-						<th>스텝</th>
-						<th>기대결과</th>
+						<th>{t.titleCol}</th>
+						<th>{t.stepCol}</th>
+						<th>{t.expectedCol}</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -58,7 +164,7 @@ function InterpretationPreview({ preview }: { readonly preview: PreviewResult })
 					))}
 				</tbody>
 			</table>
-			{preview.unique.length > 20 && <p className="table-foot">외 {preview.unique.length - 20}개 케이스</p>}
+			{preview.unique.length > 20 && <p className="table-foot">{t.moreCases(preview.unique.length - 20)}</p>}
 		</div>
 	);
 }
@@ -76,6 +182,9 @@ export function SheetEditorModal({
 	onPersist: (sheet: TestSheet) => Promise<void>;
 	onClose: () => void;
 }) {
+	const lang = useLang();
+	const t = S[lang];
+	const fieldLabels = lang === "ko" ? FIELD_LABELS_KO : FIELD_LABELS_EN;
 	const [name, setName] = useState(editSheet?.name ?? "");
 	const [kind, setKind] = useState<"sheet" | "csv">(editSheet?.kind ?? "sheet");
 	const [sheetUrl, setSheetUrl] = useState(editSheet?.sheetUrl ?? "");
@@ -97,7 +206,7 @@ export function SheetEditorModal({
 					if (live) setCsvText(r.csvText);
 				})
 				.catch((error) => {
-					if (live) setLoadError(`CSV를 불러오지 못했습니다: ${(error as Error).message}`);
+					if (live) setLoadError(S[getLang()].csvLoadFailed((error as Error).message));
 				})
 				.finally(() => {
 					if (live) setLoadingCsv(false);
@@ -142,7 +251,7 @@ export function SheetEditorModal({
 	const buildSheet = useCallback(
 		(): TestSheet => ({
 			id: sheetId,
-			name: name.trim() || "시트",
+			name: name.trim() || S[getLang()].defaultSheetName,
 			kind,
 			sheetUrl,
 			csvText,
@@ -203,7 +312,7 @@ export function SheetEditorModal({
 			const result = await api.refine(text, projectId, sheetId);
 			setMessages((prev) => [...prev, { role: "assistant", content: result.message }]);
 			setRuleVersion(result.ruleVersion);
-			setRefineNote(result.changed ? `규칙 v${result.ruleVersion} 갱신` : "변경 없음");
+			setRefineNote(result.changed ? S[getLang()].ruleUpdated(result.ruleVersion) : S[getLang()].noChange);
 		} catch (error) {
 			setRefineError((error as Error).message);
 		} finally {
@@ -214,43 +323,43 @@ export function SheetEditorModal({
 	// ---- Edit mode: unchanged single-step form ----
 	if (editSheet) {
 		return (
-			<ModalShell label="시트" onClose={onClose}>
-				<h2 className="sec">시트 편집</h2>
+			<ModalShell label={t.defaultSheetName} onClose={onClose}>
+				<h2 className="sec">{t.editSheetTitle}</h2>
 				<div className="card">
-					<label htmlFor="sheet-name">이름</label>
-					<input id="sheet-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 로그인 시나리오" />
+					<label htmlFor="sheet-name">{t.nameLabel}</label>
+					<input id="sheet-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t.namePlaceholder} />
 
 					{editSheet.kind === "sheet" ? (
 						<>
-							<label htmlFor="sheet-url" style={{ marginTop: 10 }}>구글 시트 URL</label>
+							<label htmlFor="sheet-url" style={{ marginTop: 10 }}>{t.sheetUrlLabel}</label>
 							<input id="sheet-url" type="text" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" />
 						</>
 					) : (
 						<>
-							<label htmlFor="sheet-csv" style={{ marginTop: 10 }}>CSV</label>
+							<label htmlFor="sheet-csv" style={{ marginTop: 10 }}>{t.csvLabel}</label>
 							<textarea
 								id="sheet-csv"
 								rows={4}
 								value={csvText}
 								onChange={(e) => setCsvText(e.target.value)}
-								placeholder={loadingCsv ? "불러오는 중…" : "Test ID,Title,Steps,Expected&#10;…"}
+								placeholder={loadingCsv ? t.csvLoading : t.csvPlaceholder}
 								disabled={loadingCsv || Boolean(loadError)}
 							/>
 							{loadError && <p className="err" role="alert">{loadError}</p>}
 						</>
 					)}
 
-					<label htmlFor="sheet-base-url" style={{ marginTop: 10 }}>대상 URL 오버라이드 (선택)</label>
+					<label htmlFor="sheet-base-url" style={{ marginTop: 10 }}>{t.baseUrlLabel}</label>
 					<input id="sheet-base-url" type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://your.app" />
 
-					<label htmlFor="sheet-env" style={{ marginTop: 10 }}>환경 오버라이드 (선택)</label>
+					<label htmlFor="sheet-env" style={{ marginTop: 10 }}>{t.envLabel}</label>
 					<input id="sheet-env" type="text" value={env} onChange={(e) => setEnv(e.target.value)} placeholder="staging" />
 
 					<div className="editor-actions" style={{ marginTop: 14 }}>
 						<button className="run" style={{ marginTop: 0 }} type="button" disabled={loadingCsv || Boolean(loadError)} onClick={save}>
-							저장
+							{t.save}
 						</button>
-						<button className="mini" type="button" onClick={onClose}>취소</button>
+						<button className="button secondary" type="button" onClick={onClose}>{t.cancel}</button>
 					</div>
 				</div>
 			</ModalShell>
@@ -258,22 +367,22 @@ export function SheetEditorModal({
 	}
 
 	// ---- New mode: 3-step onboarding wizard ----
-	const stepLabel = step === 1 ? "소스" : step === 2 ? "해석 제안" : "규칙 미세조정";
+	const stepLabel = step === 1 ? t.wizardSteps[0] : step === 2 ? t.wizardSteps[1] : t.wizardSteps[2];
 
 	return (
-		<ModalShell label="시트" onClose={onClose}>
-			<h2 className="sec">새 시트 · {stepLabel}</h2>
+		<ModalShell label={t.defaultSheetName} onClose={onClose}>
+			<h2 className="sec">{t.newSheetTitle(stepLabel)}</h2>
 			<WizardRail step={step} />
 
 			{step === 1 && (
 				<div className="card">
-					<label htmlFor="sheet-name">이름</label>
-					<input id="sheet-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="예: 로그인 시나리오" />
+					<label htmlFor="sheet-name">{t.nameLabel}</label>
+					<input id="sheet-name" type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder={t.namePlaceholder} />
 
-					<span className="field-label" style={{ marginTop: 10 }}>원본</span>
+					<span className="field-label" style={{ marginTop: 10 }}>{t.sourceLabel}</span>
 					<div className="modes">
 						<button className={kind === "sheet" ? "on" : ""} type="button" onClick={() => setKind("sheet")}>
-							구글 시트
+							{t.googleSheet}
 						</button>
 						<button className={kind === "csv" ? "on" : ""} type="button" onClick={() => setKind("csv")}>
 							CSV
@@ -282,29 +391,29 @@ export function SheetEditorModal({
 
 					{kind === "sheet" ? (
 						<>
-							<label htmlFor="sheet-url" style={{ marginTop: 10 }}>구글 시트 URL</label>
+							<label htmlFor="sheet-url" style={{ marginTop: 10 }}>{t.sheetUrlLabel}</label>
 							<input id="sheet-url" type="text" value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/…" />
 						</>
 					) : (
 						<>
-							<label htmlFor="sheet-csv" style={{ marginTop: 10 }}>CSV</label>
-							<textarea id="sheet-csv" rows={4} value={csvText} onChange={(e) => setCsvText(e.target.value)} placeholder="Test ID,Title,Steps,Expected&#10;…" />
+							<label htmlFor="sheet-csv" style={{ marginTop: 10 }}>{t.csvLabel}</label>
+							<textarea id="sheet-csv" rows={4} value={csvText} onChange={(e) => setCsvText(e.target.value)} placeholder={t.csvPlaceholder} />
 						</>
 					)}
 
-					<label htmlFor="sheet-base-url" style={{ marginTop: 10 }}>대상 URL 오버라이드 (선택)</label>
+					<label htmlFor="sheet-base-url" style={{ marginTop: 10 }}>{t.baseUrlLabel}</label>
 					<input id="sheet-base-url" type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://your.app" />
 
-					<label htmlFor="sheet-env" style={{ marginTop: 10 }}>환경 오버라이드 (선택)</label>
+					<label htmlFor="sheet-env" style={{ marginTop: 10 }}>{t.envLabel}</label>
 					<input id="sheet-env" type="text" value={env} onChange={(e) => setEnv(e.target.value)} placeholder="staging" />
 
 					{persistError && <p className="err" role="alert">{persistError}</p>}
 
 					<div className="editor-actions" style={{ marginTop: 14 }}>
 						<button className="run" style={{ marginTop: 0 }} type="button" disabled={!canProceedStep1 || persistBusy} onClick={goToStep2}>
-							{persistBusy ? "저장 중…" : "다음"}
+							{persistBusy ? t.saving : t.next}
 						</button>
-						<button className="mini" type="button" onClick={onClose}>취소</button>
+						<button className="button secondary" type="button" onClick={onClose}>{t.cancel}</button>
 					</div>
 				</div>
 			)}
@@ -316,28 +425,28 @@ export function SheetEditorModal({
 							{[0, 1, 2].map((index) => (
 								<div className="skel" style={{ height: 18, marginTop: index === 0 ? 0 : 12 }} key={index} />
 							))}
-							<p className="muted" style={{ marginTop: 12 }}>불러오는 중…</p>
+							<p className="muted" style={{ marginTop: 12 }}>{t.loading}</p>
 						</div>
 					)}
 
 					{!interpretLoading && interpretError && (
 						<div className="err" role="alert">
-							해석 실패: {interpretError} <button className="mini" type="button" onClick={loadInterpretation}>다시 시도</button>
+							{t.analyzeFailed(interpretError)} <button className="mini" type="button" onClick={loadInterpretation}>{t.retry}</button>
 						</div>
 					)}
 
 					{!interpretLoading && !interpretError && analyzeResult && preview && (
 						<>
-							<p className="kicker">AI가 이렇게 해석했어요</p>
+							<p className="kicker">{t.aiInterpreted}</p>
 							<div className="summary">
-								<b>열 매핑</b>
+								<b>{t.columnMapping}</b>
 								{Object.entries(analyzeResult.mapping).map(([field, header]) => (
 									<span className="chip" key={field}>
-										{FIELD_LABELS[field] ?? field} → {header}
+										{fieldLabels[field] ?? field} → {header}
 									</span>
 								))}
-								<span className="chip">고유 <b>{preview.counts.unique}</b></span>
-								<span className="chip review-chip">중복 <b>{preview.counts.duplicates}</b></span>
+								<span className="chip">{t.unique} <b>{preview.counts.unique}</b></span>
+								<span className="chip review-chip">{t.duplicates} <b>{preview.counts.duplicates}</b></span>
 							</div>
 							<InterpretationPreview preview={preview} />
 							{analyzeResult.warnings.length > 0 && (
@@ -353,20 +462,20 @@ export function SheetEditorModal({
 					)}
 
 					<div className="editor-actions" style={{ marginTop: 14 }}>
-						<button className="mini" type="button" onClick={() => setStep(1)}>이전</button>
-						<button className="run" style={{ marginTop: 0 }} type="button" onClick={() => setStep(3)}>다음: 규칙 미세조정</button>
-						<button className="button secondary" type="button" onClick={onClose}>완료</button>
+						<button className="button secondary" type="button" onClick={() => setStep(1)}>{t.prev}</button>
+						<button className="run" style={{ marginTop: 0 }} type="button" onClick={() => setStep(3)}>{t.nextRuleTune}</button>
+						<button className="button secondary" type="button" onClick={onClose}>{t.done}</button>
 					</div>
 				</div>
 			)}
 
 			{step === 3 && (
 				<div className="card">
-					<p className="detail">규칙 v{ruleVersion}</p>
+					<p className="detail">{t.ruleVersionLabel(ruleVersion)}</p>
 					<div className="chatlog">
 						{messages.length === 0 && (
 							<div className="msg a muted">
-								아직 대화가 없습니다. 아래 입력창에 자연어로 지시하면 규칙이 다듬어집니다 — 예: "누르기도 click으로 해석해".
+								{t.noChatYet}
 							</div>
 						)}
 						{messages.map((m, index) => (
@@ -376,23 +485,23 @@ export function SheetEditorModal({
 						))}
 					</div>
 					{refineNote && <p className="detail">{refineNote}</p>}
-					{refineError && <p className="err" role="alert">규칙 다듬기 실패: {refineError}</p>}
+					{refineError && <p className="err" role="alert">{t.refineFailed(refineError)}</p>}
 					<div style={{ display: "flex", gap: 10, marginTop: 10, alignItems: "flex-end" }}>
 						<textarea
 							rows={2}
 							style={{ flex: 1 }}
 							value={instruction}
 							onChange={(e) => setInstruction(e.target.value)}
-							placeholder={'예: "누르기도 click으로 해석해"'}
+							placeholder={t.refinePlaceholder}
 						/>
 						<button className="run" style={{ marginTop: 0 }} type="button" disabled={refineBusy || !instruction.trim()} onClick={sendRefine}>
-							{refineBusy ? "전송 중…" : "보내기"}
+							{refineBusy ? t.sending : t.send}
 						</button>
 					</div>
 
 					<div className="editor-actions" style={{ marginTop: 14 }}>
-						<button className="mini" type="button" onClick={() => setStep(2)}>이전</button>
-						<button className="button primary" type="button" onClick={onClose}>완료</button>
+						<button className="button secondary" type="button" onClick={() => setStep(2)}>{t.prev}</button>
+						<button className="button primary" type="button" onClick={onClose}>{t.done}</button>
 					</div>
 				</div>
 			)}

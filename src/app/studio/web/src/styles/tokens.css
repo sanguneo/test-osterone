@@ -35,6 +35,18 @@
 	--space-8: 32px;
 	--space-10: 40px;
 	--content-max: 1440px;
+	--gutter: max(clamp(18px, 4vw, 60px), (100vw - var(--content-max)) / 2);
+	--text-display: 2.5rem;
+	--text-h1: 1.75rem;
+	--text-h2: 1.125rem;
+	--text-body: 0.9375rem;
+	--text-small: 0.8125rem;
+	--text-caption: 0.75rem;
+	--text-micro: 0.6875rem;
+	--control-h: 40px;
+	--control-h-sm: 32px;
+	--control-h-xs: 28px;
+	--sbw: 0px;
 	--header-height: 68px;
 }
 
@@ -50,6 +62,8 @@ body {
 	color: var(--ink);
 	-webkit-font-smoothing: antialiased;
 	word-break: keep-all;
+	font-size: var(--text-body);
+	line-height: 1.55;
 }
 
 button,
@@ -84,7 +98,7 @@ p { margin-top: 0; }
 
 h1,
 h2,
-h3 { letter-spacing: -0.025em; }
+h3 { letter-spacing: -0.025em; line-height: 1.2; }
 
 .muted,
 .ctx { color: var(--dim); }
