@@ -101,7 +101,6 @@ const XLSX = createRequire(import.meta.url)("xlsx") as {
 
 export interface Account {
 	id: string;
-	label: string;
 	role: string;
 	username: string;
 	password: string;
@@ -269,13 +268,9 @@ function sanitizeAccounts(raw: unknown, legacyUser?: unknown, legacyPass?: unkno
 				.slice(0, 200)
 				.trim();
 			const password = String(o.password ?? "").slice(0, 200);
-			const label = String(o.label ?? "")
-				.slice(0, 60)
-				.trim();
-			if (!username && !password && !label) continue;
+			if (!username && !password) continue;
 			out.push({
 				id: typeof o.id === "string" && o.id ? o.id : `acct_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-				label: label || username || "account",
 				role: String(o.role ?? "")
 					.slice(0, 60)
 					.trim(),
@@ -287,7 +282,7 @@ function sanitizeAccounts(raw: unknown, legacyUser?: unknown, legacyPass?: unkno
 	if (out.length === 0) {
 		const u = String(legacyUser ?? "").trim();
 		const p = String(legacyPass ?? "");
-		if (u || p) out.push({ id: `acct_${Date.now()}_mig`, label: u || "account", role: "", username: u, password: p });
+		if (u || p) out.push({ id: `acct_${Date.now()}_mig`, role: "", username: u, password: p });
 	}
 	return out;
 }

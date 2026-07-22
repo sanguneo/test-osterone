@@ -8,7 +8,6 @@ const S = {
 		env: "환경 (기본값)",
 		accountsLabel: "테스트 계정",
 		accountsHint: "— 시트가 기본 계정을 연결하고, 케이스는 role이 일치하는 계정으로 자동 로그인",
-		acctLabel: "이름",
 		acctRole: "권한(role)",
 		acctUser: "아이디",
 		acctPass: "비밀번호",
@@ -25,7 +24,6 @@ const S = {
 		env: "Environment (default)",
 		accountsLabel: "Test accounts",
 		accountsHint: "— sheets link a default account; cases auto-login with the account whose role matches",
-		acctLabel: "Label",
 		acctRole: "Role",
 		acctUser: "Username",
 		acctPass: "Password",
@@ -39,7 +37,7 @@ const S = {
 } as const;
 
 function newAccount(): Account {
-	return { id: `acct_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, label: "", role: "", username: "", password: "" };
+	return { id: `acct_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, role: "", username: "", password: "" };
 }
 
 export interface ProjectDraft {
@@ -71,7 +69,6 @@ export function ProjectEnvironmentSection({ draft, onUpdate }: { readonly draft:
 				{draft.accounts.length === 0 && <p className="detail">{t.noAccounts}</p>}
 				{draft.accounts.map((account, index) => (
 					<div className="account-row" key={account.id}>
-						<input aria-label={t.acctLabel} type="text" value={account.label} onChange={(event) => patchAccount(index, { label: event.target.value })} placeholder={t.acctLabel} />
 						<input aria-label={t.acctRole} type="text" value={account.role} onChange={(event) => patchAccount(index, { role: event.target.value })} placeholder={t.acctRole} />
 						<input aria-label={t.acctUser} type="text" value={account.username} onChange={(event) => patchAccount(index, { username: event.target.value })} placeholder={t.acctUser} autoComplete="off" />
 						<input aria-label={t.acctPass} type="password" value={account.password} onChange={(event) => patchAccount(index, { password: event.target.value })} placeholder={t.acctPass} autoComplete="off" />

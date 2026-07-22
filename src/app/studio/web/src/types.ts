@@ -2,7 +2,6 @@ export type Verdict = "pass" | "fail" | "needs_review" | "error";
 
 export interface Account {
 	id: string;
-	label: string;
 	role: string;
 	username: string;
 	password: string;

@@ -426,7 +426,7 @@ export function SheetEditorModal({
 					<label htmlFor="sheet-account" style={{ marginTop: 10 }}>{t.accountLabel}</label>
 					<select id="sheet-account" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
 						<option value="">{t.accountNone}</option>
-						{accounts.map((a) => <option key={a.id} value={a.id}>{a.label || a.username}{a.role ? ` (${a.role})` : ""}</option>)}
+						{accounts.map((a) => <option key={a.id} value={a.id}>{a.username || a.id}{a.role ? ` (${a.role})` : ""}</option>)}
 					</select>
 
 					<div className="editor-actions" style={{ marginTop: 14 }}>
@@ -502,7 +502,7 @@ export function SheetEditorModal({
 							<label htmlFor="sheet-account" style={{ marginTop: 10 }}>{t.accountLabel}</label>
 							<select id="sheet-account" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
 								<option value="">{t.accountNone}</option>
-								{accounts.map((a) => <option key={a.id} value={a.id}>{a.label || a.username}{a.role ? ` (${a.role})` : ""}</option>)}
+								{accounts.map((a) => <option key={a.id} value={a.id}>{a.username || a.id}{a.role ? ` (${a.role})` : ""}</option>)}
 							</select>
 
 							{persistError && <p className="err" role="alert">{persistError}</p>}
