@@ -171,6 +171,9 @@
 .inline-source textarea { grid-column: 1 / -1; }
 .xlsx-picker { display: grid; gap: 7px; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--inset); }
 .xlsx-picker p { margin: 0; }
+.xlsx-sheets { display: grid; gap: 6px; max-height: 216px; overflow-y: auto; overflow-x: hidden; }
+.xlsx-sheets label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.xlsx-sheets label span { flex: 0 0 auto; }
 .field-row { margin-top: var(--space-2); }
 .check-label { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1); cursor: pointer; }
 .editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-1); }
@@ -229,6 +232,7 @@
 .preview-surface,
 .run-results { margin-top: var(--space-6); }
 .run-target { color: var(--dim); font-size: 13px; line-height: 1.55; }
-.run-toggle { display: flex; align-items: flex-start; gap: var(--space-2); margin-top: var(--space-4); cursor: pointer; }
+.run-toggles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: var(--space-3); margin-top: var(--space-4); }
+.run-toggle { display: flex; align-items: flex-start; gap: var(--space-2); cursor: pointer; }
 .run-actions { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
 .preview-surface table { min-width: 760px; }

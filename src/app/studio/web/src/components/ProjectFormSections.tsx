@@ -122,7 +122,9 @@ export function ProjectSourceSection(props: SourceSectionProps) {
 			{props.xlsxSheets && (
 				<div className="xlsx-picker">
 					<p className="detail">{t.xlsxPick(props.xlsxName)}</p>
-					{props.xlsxSheets.map((sheet, index) => <label key={sheet.name}><input type="checkbox" checked={Boolean(props.pick[index])} onChange={(event) => props.onPick(index, event.target.checked)} /> {sheet.name} ({t.rows(sheet.rows)}){sheet.isTc === false ? <span className="muted"> · {t.nonTc}</span> : null}</label>)}
+					<div className="xlsx-sheets">
+						{props.xlsxSheets.map((sheet, index) => <label key={sheet.name}><input type="checkbox" checked={Boolean(props.pick[index])} onChange={(event) => props.onPick(index, event.target.checked)} /> {sheet.name} ({t.rows(sheet.rows)}){sheet.isTc === false ? <span className="muted"> · {t.nonTc}</span> : null}</label>)}
+					</div>
 					<button className="mini" type="button" onClick={props.onAddPicked}>{t.addPicked}</button>
 				</div>
 			)}

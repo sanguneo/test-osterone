@@ -272,8 +272,10 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 					<div className="run-config">
 						<h3>{t.runReady}</h3>
 						<p className="run-target">{t.target(project.baseUrl || (project.id === "sample" ? t.builtinSample : t.targetUnset))}<br />{t.sheet(sheet?.name ?? t.sheetUnselected)}</p>
-						<label className="run-toggle"><input type="checkbox" checked={ai} onChange={(event) => setAi(event.target.checked)} /><span>{t.aiInterpret}<br /><small className="muted">{t.aiInterpretHint}</small></span></label>
-						<label className="run-toggle"><input type="checkbox" checked={headed} onChange={(event) => setHeaded(event.target.checked)} /><span>{t.showBrowser}<br /><small className="muted">{t.showBrowserHint}</small></span></label>
+						<div className="run-toggles">
+							<label className="run-toggle"><input type="checkbox" checked={ai} onChange={(event) => setAi(event.target.checked)} /><span>{t.aiInterpret}<br /><small className="muted">{t.aiInterpretHint}</small></span></label>
+							<label className="run-toggle"><input type="checkbox" checked={headed} onChange={(event) => setHeaded(event.target.checked)} /><span>{t.showBrowser}<br /><small className="muted">{t.showBrowserHint}</small></span></label>
+						</div>
 						<div className="run-actions"><button className="button primary" type="button" disabled={running} onClick={startRun}><Icon name="play" />{running ? t.running : t.start}</button>{project.sheets.length > 1 && <button className="button secondary" type="button" disabled={running} onClick={startRunAll}>{t.runAll}</button>}<span className="muted" aria-live="polite">{statusMessage}</span></div>
 					</div>
 					{previewError && <div className="card err">{t.previewFail(previewError)} <button className="mini" type="button" onClick={loadPreview}>{t.retry}</button></div>}
