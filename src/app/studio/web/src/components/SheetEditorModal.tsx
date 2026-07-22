@@ -48,6 +48,10 @@ const S = {
 		csvPlaceholder: "Test ID,Title,Steps,Expected&#10;…",
 		baseUrlLabel: "대상 URL 오버라이드 (선택)",
 		envLabel: "환경 오버라이드 (선택)",
+		usernameLabel: "테스트 계정 아이디 (선택)",
+		passwordLabel: "테스트 계정 비밀번호 (선택)",
+		usernamePlaceholder: "아이디",
+		passwordPlaceholder: "비밀번호",
 		save: "저장",
 		cancel: "취소",
 		next: "다음",
@@ -93,6 +97,10 @@ const S = {
 		csvPlaceholder: "Test ID,Title,Steps,Expected&#10;…",
 		baseUrlLabel: "Target URL override (optional)",
 		envLabel: "Env override (optional)",
+		usernameLabel: "Test account username (optional)",
+		passwordLabel: "Test account password (optional)",
+		usernamePlaceholder: "Username",
+		passwordPlaceholder: "Password",
 		save: "Save",
 		cancel: "Cancel",
 		next: "Next",
@@ -191,6 +199,8 @@ export function SheetEditorModal({
 	const [csvText, setCsvText] = useState(editSheet?.csvText ?? "");
 	const [baseUrl, setBaseUrl] = useState(editSheet?.baseUrl ?? "");
 	const [env, setEnv] = useState(editSheet?.env ?? "");
+	const [username, setUsername] = useState(editSheet?.username ?? "");
+	const [password, setPassword] = useState(editSheet?.password ?? "");
 	const [loadingCsv, setLoadingCsv] = useState(false);
 	const [loadError, setLoadError] = useState("");
 
@@ -226,6 +236,8 @@ export function SheetEditorModal({
 			csvText,
 			baseUrl: baseUrl || undefined,
 			env: env || undefined,
+			username: username || undefined,
+			password: password || undefined,
 		};
 		onSave(sheet);
 	}
@@ -257,8 +269,10 @@ export function SheetEditorModal({
 			csvText,
 			baseUrl: baseUrl || undefined,
 			env: env || undefined,
+			username: username || undefined,
+			password: password || undefined,
 		}),
-		[sheetId, name, kind, sheetUrl, csvText, baseUrl, env],
+		[sheetId, name, kind, sheetUrl, csvText, baseUrl, env, username, password],
 	);
 
 	const loadInterpretation = useCallback(() => {
@@ -355,6 +369,12 @@ export function SheetEditorModal({
 					<label htmlFor="sheet-env" style={{ marginTop: 10 }}>{t.envLabel}</label>
 					<input id="sheet-env" type="text" value={env} onChange={(e) => setEnv(e.target.value)} placeholder="staging" />
 
+					<label htmlFor="sheet-username" style={{ marginTop: 10 }}>{t.usernameLabel}</label>
+					<input id="sheet-username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t.usernamePlaceholder} autoComplete="off" />
+
+					<label htmlFor="sheet-password" style={{ marginTop: 10 }}>{t.passwordLabel}</label>
+					<input id="sheet-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t.passwordPlaceholder} autoComplete="off" />
+
 					<div className="editor-actions" style={{ marginTop: 14 }}>
 						<button className="run" style={{ marginTop: 0 }} type="button" disabled={loadingCsv || Boolean(loadError)} onClick={save}>
 							{t.save}
@@ -406,6 +426,12 @@ export function SheetEditorModal({
 
 					<label htmlFor="sheet-env" style={{ marginTop: 10 }}>{t.envLabel}</label>
 					<input id="sheet-env" type="text" value={env} onChange={(e) => setEnv(e.target.value)} placeholder="staging" />
+
+					<label htmlFor="sheet-username" style={{ marginTop: 10 }}>{t.usernameLabel}</label>
+					<input id="sheet-username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t.usernamePlaceholder} autoComplete="off" />
+
+					<label htmlFor="sheet-password" style={{ marginTop: 10 }}>{t.passwordLabel}</label>
+					<input id="sheet-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t.passwordPlaceholder} autoComplete="off" />
 
 					{persistError && <p className="err" role="alert">{persistError}</p>}
 

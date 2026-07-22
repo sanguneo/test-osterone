@@ -108,6 +108,8 @@ export interface TestSheet {
 	baseUrl?: string;
 	env?: string;
 	mapping?: InterpretationRule["mapping"];
+	username?: string;
+	password?: string;
 }
 export interface RunInput {
 	sample?: boolean;
@@ -248,6 +250,12 @@ function sanitizeSheet(raw: unknown): TestSheet {
 		.slice(0, 60)
 		.trim();
 	if (env) sheet.env = env;
+	const username = String(o.username ?? "")
+		.slice(0, 200)
+		.trim();
+	if (username) sheet.username = username;
+	const password = String(o.password ?? "").slice(0, 200);
+	if (password) sheet.password = password;
 	const mapping = sanitizeSheetMapping(o.mapping);
 	if (Object.keys(mapping).length) sheet.mapping = mapping;
 	return sheet;
@@ -515,8 +523,8 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 					? (
 							await getOrAuthorPlan(tc, sheetSt.rule, sheetSt.planCache, modelClient, {
 								referenceRepo: input.referenceRepo,
-								username: input.username,
-								password: input.password,
+								username: sheet?.username ?? input.username,
+								password: sheet?.password ?? input.password,
 							})
 						).plan
 					: undefined;

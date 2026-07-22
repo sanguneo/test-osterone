@@ -9,6 +9,8 @@ export interface TestSheet {
 	baseUrl?: string;
 	env?: string;
 	mapping?: Record<string, string>;
+	username?: string;
+	password?: string;
 }
 
 export interface Project {
