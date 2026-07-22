@@ -74,7 +74,7 @@ export function SheetImportModal({ onImported, onClose }: { onImported: (sheets:
 		if (!sheets) return;
 		const picked: TestSheet[] = [];
 		for (const [index, sheet] of sheets.entries()) {
-			if (pick[index]) picked.push({ id: `sh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, kind: "csv", name: sheet.name, sheetUrl: "", csvText: sheet.csv });
+			if (pick[index]) picked.push({ id: `sh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, kind: "csv", name: sheet.name, sheetUrl: "", csvText: sheet.csv, origin: "xlsx" });
 		}
 		if (picked.length === 0) {
 			setErr(true);

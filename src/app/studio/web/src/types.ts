@@ -11,6 +11,7 @@ export interface TestSheet {
 	mapping?: Record<string, string>;
 	username?: string;
 	password?: string;
+	origin?: "sheet" | "csv" | "xlsx";
 }
 
 export interface Project {

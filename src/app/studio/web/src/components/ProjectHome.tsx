@@ -64,7 +64,7 @@ export function ProjectHome({
 						<button key={sheet.id} className="sheet-card" type="button" onClick={() => onSelectSheet(sheet.id)}>
 							<Icon name="sheet" />
 							<b>{sheet.name}</b>
-							<div className="detail">{sheet.kind === "sheet" ? t.googleSheet : "CSV"}{sheet.env ? ` · ${sheet.env}` : ""}</div>
+							<div className="detail">{sheet.origin === "xlsx" ? "XLSX" : sheet.kind === "sheet" ? t.googleSheet : "CSV"}{sheet.env ? ` · ${sheet.env}` : ""}</div>
 						</button>
 					))}
 					{project.id !== "sample" && (

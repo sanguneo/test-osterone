@@ -110,6 +110,7 @@ export interface TestSheet {
 	mapping?: InterpretationRule["mapping"];
 	username?: string;
 	password?: string;
+	origin?: "sheet" | "csv" | "xlsx";
 }
 export interface RunInput {
 	sample?: boolean;
@@ -256,6 +257,7 @@ function sanitizeSheet(raw: unknown): TestSheet {
 	if (username) sheet.username = username;
 	const password = String(o.password ?? "").slice(0, 200);
 	if (password) sheet.password = password;
+	if (o.origin === "sheet" || o.origin === "csv" || o.origin === "xlsx") sheet.origin = o.origin;
 	const mapping = sanitizeSheetMapping(o.mapping);
 	if (Object.keys(mapping).length) sheet.mapping = mapping;
 	return sheet;
