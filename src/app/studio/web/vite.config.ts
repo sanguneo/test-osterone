@@ -6,10 +6,12 @@ import { defineConfig } from "vite";
 const rootDir = dirname(fileURLToPath(import.meta.url));
 
 // Built to ./dist and served as static assets by the Studio API server.
+// base: "/" so hashed assets and the favicon resolve from the site root on any
+// client route (path-based history routing serves index.html for deep links).
 // publicDir points at the project-root `assets/` dir so logo.png / logo-forged.png
 // stay the single source of truth and are copied verbatim to dist root (favicon + hero).
 export default defineConfig({
-	base: "./",
+	base: "/",
 	publicDir: resolve(rootDir, "../../../../assets"),
 	plugins: [react()],
 	build: { outDir: "dist", emptyOutDir: true },

@@ -94,3 +94,5 @@ Studio UI 재구성 최종 리뷰(2026-07-21, 정리된 `.omo/evidence/*`)에서
 > 브랜딩/에셋: 브랜드 마크·파비콘은 `assets/logo.png`(파비콘) 및 투명 배경 `logo-mark.png`(topbar)를 쓰고, 환영 화면 좌측 히어로는 `logo-forged.png`(라임 글로우)를 쓴다. 세 에셋은 Vite `publicDir`을 프로젝트 루트 `assets/`로 지정해 단일 소스로 유지하며 빌드 시 `dist/` 루트로 복사된다. `logo-mark.png`는 `logo.png`의 검정 배경을 알파 키잉(max-channel 임계 + 안티앨리어싱)으로 제거한 버전이다.
 
 > i18n(전역): UI 크롬 전체를 **KO/EN 토글**로 전환한다 — 상단 바 `header-actions`의 `LangToggle`, 공유 `useLang()`/`setLang()` 스토어(`src/i18n.ts`, `localStorage: to_lang`, 기본 한국어). 번역은 **컴포넌트 인접(co-located) 딕셔너리**(`const S = {ko,en}; const t = S[useLang()]`)로 두어 중앙 카탈로그 없이 유지한다. **엔진 생성 문구**는 구조화 데이터로 로컬라이즈: assertion detail은 `kind`+`value`로 KO 재구성(EN은 엔진 canonical), self-heal 접두어·verdict 라벨(`vLabel`)도 언어별. **비대상**(시트 언어를 따름): 프로젝트/시트 이름, 케이스 제목·스텝·기대결과·따옴표 값, 서버 생성 리뷰 사유. 구(舊) 실행 데이터는 assertion `kind/value`가 없어 EN detail로 폴백.
+
+> 라우팅: SPA에 **경로 기반 history 라우팅**(`/p/{projectId}/{sheetId}/{tab}`, dash는 생략). state↔URL을 `pushState`/`popstate`로 동기해 **새로고침·딥링크·뒤로/앞으로**를 지원한다. Vite `base: "/"`(절대 경로)로 어떤 딥경로에서도 에셋/파비콘이 사이트 루트에서 로드되고, Studio 서버의 기존 정적 SPA fallback(파일 없으면 index.html)이 딥링크를 받는다. 라이브러리 없이 `App.tsx`의 `readRoute()`/`routePath()`로 구현.
