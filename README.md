@@ -13,7 +13,7 @@ Spreadsheet-authored test cases → an AI agent reads them, writes the assertion
 ![stack](https://img.shields.io/badge/stack-Node%2FTS-3178c6)
 ![runtime](https://img.shields.io/badge/runtime-Bun%20%E2%89%A51.3-black)
 ![browser](https://img.shields.io/badge/engine-Playwright-2ead33)
-![tests](https://img.shields.io/badge/tests-89%2F89-9ccc00)
+![tests](https://img.shields.io/badge/tests-114%2F114-9ccc00)
 ![false--pass](https://img.shields.io/badge/false--pass-0-critical)
 
 </div>
@@ -70,7 +70,7 @@ Spreadsheet (XLSX / Google Sheet)
 ```bash
 bun install            # installs Playwright Chromium via postinstall
 bun run setup          # or install the headless browser explicitly
-bun test               # 89/89
+bun test               # 114/114
 
 test-osterone --help
 test-osterone setup
@@ -125,6 +125,8 @@ The top header shows the brand mark, product name, the global model-connection s
 - **Per-sheet runtime** — every sheet has its **own run history and review queue**, and now its **own interpretation rule, refine chat, and approved baselines** (the project keeps a **default rule** that new sheets clone, plus a **legacy baseline fallback** for pre-upgrade approvals). The Dashboard view shows the selected sheet's data plus a compact **project roll-up** (aggregate pass rate across sheets), and the review nav badge shows a project-level roll-up. Running a sheet ingests only that sheet, with per-sheet dedupe.
 - **AI sheet interpretation & rule refine** — adding a sheet runs a **3-step onboarding wizard**: pick the **source** (Google Sheet URL / CSV / `.xlsx`) → the model proposes an **interpretation** (column mapping `id/title/step/expected/priority/…` → your header names, plus a case preview) → a **conversational refine** step where you adjust it in natural language ("use 중분류 as the title, not 소분류"). The resulting rule is stored **per sheet** (new sheets clone the project's default rule as a starting point) and is applied at ingestion for that sheet; you can keep refining a sheet's rule later from its Rules view.
 - **Run** — pick a project and sheet, optionally tick **AI 스텝 해석**, and **실행 (Run)**. Results **stream in per case** (NDJSON) — verdicts and a running pass/fail/needs_review tally appear live as each case finishes.
+- **Account pool + role routing** — a project holds an **account pool**; each sheet links a default account and each case routes by its `role` to the matching account (legacy username/password migrates to a single account).
+- **Run modes** — run a single sheet or **all sheets at once** (`run-all`: per-sheet stream + aggregate verdicts), and toggle **headed** mode to watch a visible Chromium (slowMo).
 
 The deterministic engine runs each case against real headless Chromium and renders verdict badges, per-assertion detail, self-heal events, and the needs_review queue — no CSV escaping, no terminal after launch.
 
@@ -132,7 +134,11 @@ The deterministic engine runs each case against real headless Chromium and rende
 
 **AI step interpretation.** Tick **AI 스텝 해석** on a run to let the connected model turn free natural-language steps (no quotes, no DSL) into a deterministic plan (actions + assertions). The plan is **authored once and cached**, then the engine replays it deterministically — identical `pass` / `fail` / `needs_review` semantics, false-pass still 0. The bundled sample ships a quote-free variant to demonstrate it.
 
+**Live recon & repo context (accuracy levers).** From the Rules view, **Analyze live app** (`reconApp`) logs in with the sheet's account and scans the app's structure (nav, form fields, buttons, table headers) into a concise Korean domain brief → the sheet's **appContext**. **Analyze repo** (`repo-recon`) resolves the project's reference repo (local path / cache / shallow clone, with optional token + re-clone), scans it (AGENTS.md, README, routes, components) — and folds in a **CodeGraph** exploration when that CLI is installed — into a code brief → the sheet's **codeContext**. Both run at **author time**, are human-reviewed before saving, and are injected into plan authoring, so determinism is unaffected.
+
 **Review queue.** `needs_review` cases surface with their evidence — a **screenshot**, the page text, and the reason (self-heal, missing baseline, …). Approve the baseline — the approved **reference screen** for that case — once and a matching re-run **passes**, across every sheet that shares the same case content (reconcile-on-read clears a stale needs_review elsewhere without re-running); if the page drifts it is re-flagged. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
+
+For held cases the review also embeds a **Playwright trace** — the bundled trace viewer is served **same-origin** (dodging the public viewer's Private Network Access block), so you can scrub the run action-by-action inline, open it in a new tab, or download the `trace.zip`. Traces are captured per case and kept only for `needs_review`/`error` (a clean pass keeps nothing).
 
 **Persistence.** Project metadata lives in `~/.test-osterone/studio-projects.json`; per-project runtime state now lives in `~/.test-osterone/studio-state/<projectId>.json` as **per-sheet** rule, refine chat, plan cache, and approved baselines, plus a project **default rule** (cloned by new sheets) and a **legacy baseline fallback** for approvals made before the per-sheet upgrade — a `STATE_VERSION` v2→v3 migration lifts old project-level state into this shape **losslessly and idempotently**. **Sheet CSV content is offloaded to per-sheet files** (`sheet-data/<projectId>/<sheetId>.csv`) so neither file grows with sheet count — hence no cap. `baselineKey`/`assertionCacheKey` formats are unchanged, so false-pass=0 holds across all of this.
 
@@ -156,7 +162,7 @@ Two interchangeable clients behind one interface:
 
 ## Status
 
-**Built & verified (static, deterministic — 89/89 automated tests):** ingest → normalize → dedupe → rule → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract · benchmark hard gate · web dashboard · orchestration (node/host) · auth (API key + OAuth proxy) + JUnit.
+**Built & verified (static, deterministic — 114/114 automated tests):** ingest → normalize → dedupe → rule → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract · benchmark hard gate · web dashboard · orchestration (node/host) · auth (API key + OAuth proxy + **native OpenAI device-code login**) + JUnit · **browser Studio** — per-sheet first-class · AI column mapping + conversational refine · AI step interpretation (author-once plan) · **account pool + role routing** · **multi-sheet run-all** · **headed runs** · **XLSX multi-sheet import + per-sheet TC auto-detect** · **KO/EN toggle + path-based routing** · **live recon → appContext** · **repo code-context → codeContext (CodeGraph optional)** · **Playwright trace capture + self-hosted trace viewer**.
 
 **Pending environment-dependent integration (implemented, not yet live-verified):** live benchmark against real Chromium + docker fixtures / real OAuth-token ChatGPT calls — contracts and implementations are complete; only a smoke pass in a browser/docker/token environment remains.
 
@@ -175,7 +181,7 @@ src/
   testing/      fixture app + fixture model
   app/studio/   browser UI (Studio)
   cli.ts · index.ts
-test/           unit + smoke suites (89/89)
+test/           unit + smoke suites (114/114)
 examples/demo/  CLI live-run example
 ```
 

@@ -13,7 +13,7 @@
 ![stack](https://img.shields.io/badge/stack-Node%2FTS-3178c6)
 ![runtime](https://img.shields.io/badge/runtime-Bun%20%E2%89%A51.3-black)
 ![browser](https://img.shields.io/badge/engine-Playwright-2ead33)
-![tests](https://img.shields.io/badge/tests-89%2F89-9ccc00)
+![tests](https://img.shields.io/badge/tests-114%2F114-9ccc00)
 ![false--pass](https://img.shields.io/badge/false--pass-0-critical)
 
 </div>
@@ -70,7 +70,7 @@
 ```bash
 bun install            # postinstall이 Playwright Chromium 설치
 bun run setup          # 또는 헤드리스 브라우저 명시 설치
-bun test               # 89/89
+bun test               # 114/114
 
 test-osterone --help
 test-osterone setup
@@ -125,6 +125,8 @@ bun run studio     # React UI(Vite) 빌드 후 서빙 — 켠 뒤 http://localho
 - **시트별 런타임** — 모든 시트는 **자신만의 실행 히스토리와 리뷰 대기**를 가지며, 이제 **자신만의 해석 규칙·다듬기 대화·승인된 기준 화면**도 갖습니다(프로젝트는 새 시트가 복제해 가는 **기본 규칙**과, 업그레이드 이전 승인을 위한 **레거시 기준 화면 폴백**을 유지합니다). 대시보드 뷰는 선택된 시트의 데이터와 함께 간결한 **프로젝트 롤업**(시트 전체 합격률 집계)을 보여주고, 리뷰 네비 배지는 프로젝트 단위 롤업을 보여줍니다. 시트를 실행하면 그 시트만 인제스트됩니다(시트별 dedupe).
 - **AI 시트 해석 & 규칙 다듬기** — 시트를 추가하면 **3단계 온보딩 마법사**가 실행됩니다: **원본** 선택(구글 시트 URL / CSV / `.xlsx`) → 모델이 **해석 제안**(열 매핑 `id/title/step/expected/priority/…` → 실제 헤더명, 케이스 미리보기 포함)을 제시 → **대화형 다듬기** 단계에서 자연어로 조정합니다("소분류 말고 중분류를 제목으로"). 결과 규칙은 **시트별로** 저장되며(새 시트는 시작점으로 프로젝트의 기본 규칙을 복제), 해당 시트의 인제스트에 적용됩니다. 이후에도 해당 시트의 규칙 뷰에서 계속 다듬을 수 있습니다.
 - **실행** — 프로젝트와 시트를 고르고 필요하면 **AI 스텝 해석**을 켠 뒤 **실행**을 누릅니다. 결과는 **케이스 단위로 스트리밍**됩니다(NDJSON) — 각 케이스가 끝나는 즉시 판정과 pass/fail/needs_review 집계가 실시간으로 갱신됩니다.
+- **계정 풀 + 역할 라우팅** — 프로젝트가 **계정 풀**을 갖고, 각 시트는 기본 계정을 링크하며 각 케이스는 자신의 `role`로 맞는 계정에 라우팅됩니다(레거시 username/password는 단일 계정으로 마이그레이션).
+- **실행 모드** — 단일 시트 또는 **전체 시트 일괄 실행**(`run-all`: 시트별 스트림 + 집계 판정), 그리고 **헤디드** 토글로 보이는 Chromium(slowMo)을 지켜볼 수 있습니다.
 
 결정적 엔진이 각 케이스를 실제 헤드리스 Chromium으로 실행해 판정 배지·assertion 상세·self-heal 이벤트·needs_review 큐를 브라우저에 그려 줍니다. CSV 이스케이프도, 실행 후 터미널도 필요 없습니다.
 
@@ -132,7 +134,11 @@ bun run studio     # React UI(Vite) 빌드 후 서빙 — 켠 뒤 http://localho
 
 **AI 스텝 해석.** 실행 시 **AI 스텝 해석**을 켜면, 연결된 모델이 따옴표·DSL 없는 자유 자연어 스텝을 결정적 계획(actions + assertions)으로 바꿉니다. 계획은 **1회 작성 후 캐시**되고 엔진이 결정적으로 재생합니다 — `pass` / `fail` / `needs_review` 의미 동일, false-pass 0 유지. 번들 샘플에 따옴표 없는 변형이 포함되어 바로 확인할 수 있습니다.
 
+**라이브 정찰 & 레포 맥락(정확도 레버).** 규칙 뷰에서 **라이브 앱 분석**(`reconApp`)은 시트 계정으로 로그인해 앱 구조(내비·폼 필드·버튼·표 헤더)를 스캔, 간결한 한국어 도메인 브리프로 축약해 시트의 **appContext**를 채웁니다. **레포 코드 분석**(`repo-recon`)은 프로젝트의 참고 repo를 확보(로컬 경로 / 캐시 / shallow clone, 선택적 토큰 + 재클론)해 스캔(AGENTS.md·README·라우트·컴포넌트)하고 — **CodeGraph** CLI가 설치돼 있으면 그 exploration도 함께 접어 넣어 — 코드 브리프로 축약해 시트의 **codeContext**를 채웁니다. 둘 다 **작성 시점**에 돌고, 저장 전 사람이 검토하며, 플랜 작성에 주입되므로 결정성에는 영향이 없습니다.
+
 **리뷰 대기.** `needs_review` 케이스가 **스크린샷**·페이지 텍스트·사유(self-heal, 기준 화면 미승인 등) 증거와 함께 뜹니다. 기준 화면을 한 번 승인하면 매치되는 재실행은 같은 케이스 콘텐츠를 공유하는 **모든 시트에서** **통과**하고(reconcile-on-read가 재실행 없이 다른 시트의 stale 리뷰 대기 항목을 정리), 페이지가 바뀌면 다시 표시됩니다. 신뢰 모델의 human-in-the-loop 그대로 — 애매한 소수만 한 번 승인하면 이후 자동이며, 조용한 거짓 통과는 없습니다.
+
+보류된 케이스에는 리뷰에 **Playwright 트레이스**도 임베드됩니다 — 번들 트레이스 뷰어를 **동일 오리진**으로 서빙(공개 뷰어의 Private Network Access 차단 회피)하므로, 실행을 행동 단위로 인라인 스크럽하거나 새 탭에서 열거나 `trace.zip`을 내려받을 수 있습니다. 트레이스는 케이스별로 캡처되며 `needs_review`/`error`에만 보존됩니다(깨끗한 pass는 보존 안 함).
 
 **영속.** 프로젝트 메타데이터는 `~/.test-osterone/studio-projects.json`에 저장됩니다. 프로젝트별 런타임 상태는 이제 `~/.test-osterone/studio-state/<projectId>.json`에 **시트별** 규칙·다듬기 대화·플랜 캐시·승인된 기준 화면으로 저장되며, 여기에 프로젝트 **기본 규칙**과 (시트별 업그레이드 이전 승인을 위한) **레거시 기준 화면 폴백**이 더해집니다. `STATE_VERSION` v2→v3 마이그레이션이 기존 프로젝트 단위 상태를 이 구조로 **손실 없이, 멱등적으로** 끌어올립니다. **시트 CSV 본문은 시트별 파일로 오프로드**되어(`sheet-data/<projectId>/<sheetId>.csv`) 두 파일 모두 시트 개수와 무관하게 작게 유지됩니다 — 그래서 캡이 없습니다. `baselineKey`/`assertionCacheKey` 포맷은 그대로이므로 false-pass=0이 전 구간에서 유지됩니다.
 
@@ -156,7 +162,7 @@ bun run studio     # React UI(Vite) 빌드 후 서빙 — 켠 뒤 http://localho
 
 ## 현재 상태
 
-**구축·검증 완료 (정적·결정적 — 자동화 테스트 89/89):** 입력 → 정규화 → 중복제거 → 규칙 → 선별 → 해석 → assertion 캐시 → 실행 → 판정 → baseline → 증거 → 러너 계약 · 벤치마크 하드 게이트 · 웹 대시보드 · 오케스트레이션(노드/호스트) · 인증(API key + OAuth 프록시) + JUnit.
+**구축·검증 완료 (정적·결정적 — 자동화 테스트 114/114):** 입력 → 정규화 → 중복제거 → 규칙 → 선별 → 해석 → assertion 캐시 → 실행 → 판정 → baseline → 증거 → 러너 계약 · 벤치마크 하드 게이트 · 웹 대시보드 · 오케스트레이션(노드/호스트) · 인증(API key + OAuth 프록시 + **네이티브 OpenAI 디바이스코드 로그인**) + JUnit · **브라우저 Studio** — 시트 1급화 · AI 열매핑 + 대화형 다듬기 · AI 스텝 해석(플랜 author-once) · **계정 풀 + 역할 라우팅** · **다중 시트 run-all** · **헤디드 실행** · **XLSX 다중시트 임포트 + 시트별 TC 자동감지** · **KO/EN 토글 + 경로 기반 라우팅** · **라이브 정찰 → appContext** · **레포 코드 맥락 → codeContext (CodeGraph 옵션)** · **Playwright 트레이스 캡처 + 자체 호스팅 트레이스 뷰어**.
 
 **환경-의존 통합 대기 (구현 완료, 라이브 미검증):** 실제 Chromium + docker fixture 대상 라이브 벤치마크와 실 OAuth 토큰 ChatGPT 호출이 남아 있습니다. 계약과 구현체는 완성되었고, 브라우저·docker·토큰 환경에서 스모크만 남았습니다.
 
@@ -175,7 +181,7 @@ src/
   testing/      fixture 앱 + fixture 모델
   app/studio/   브라우저 UI (Studio)
   cli.ts · index.ts
-test/           유닛 + 스모크 스위트 (89/89)
+test/           유닛 + 스모크 스위트 (114/114)
 examples/demo/  CLI 라이브 실행 예제
 ```
 
