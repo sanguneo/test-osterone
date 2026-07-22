@@ -130,12 +130,23 @@ export interface XlsxSheet {
 	name: string;
 	csv: string;
 	rows: number;
+	isTc?: boolean;
 }
 
 export type RunEvent =
 	| { type: "start"; total: number; baseUrl: string; interpreter: "ai" | "rule" }
 	| { type: "case"; index: number; total: number; result: CaseView }
 	| { type: "done"; view: RunView }
+	| { type: "error"; error: string };
+
+export type RunAllEvent =
+	| { type: "all-start"; totalSheets: number; sheets: { sheetId: string; name: string }[] }
+	| { type: "sheet-start"; sheetId: string; name: string; index: number; totalSheets: number }
+	| { type: "start"; total: number; baseUrl: string; interpreter: "ai" | "rule"; sheetId: string }
+	| { type: "case"; index: number; total: number; result: CaseView; sheetId: string }
+	| { type: "sheet-done"; sheetId: string; view: RunView }
+	| { type: "sheet-error"; sheetId: string; error: string }
+	| { type: "all-done" }
 	| { type: "error"; error: string };
 
 /** A run request payload (project config + ephemeral toggles). */

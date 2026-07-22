@@ -107,7 +107,7 @@ export function ProjectsPanel({ initialProject, onSaved, onClose }: { readonly i
 			const result = await api.xlsxConvert(base64);
 			setXlsxSheets(result.sheets);
 			setXlsxName(file.name);
-			setPick({});
+			setPick(Object.fromEntries(result.sheets.map((sheet, index) => [index, Boolean(sheet.isTc)])));
 			note("");
 		} catch (error) { note(tt.xlsxFail((error as Error).message), true); }
 	}

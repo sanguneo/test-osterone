@@ -5,6 +5,7 @@ import type {
 	RefineResult,
 	ReviewItem,
 	RunEvent,
+	RunAllEvent,
 	RunInput,
 	RunView,
 	Status,
@@ -70,6 +71,26 @@ export const api = {
 			for (const ln of lines) {
 				const s = ln.trim();
 				if (s) onEvent(JSON.parse(s) as RunEvent);
+			}
+		}
+	},
+
+	/** Stream a per-sheet "run all sheets" batch: all-start / sheet-start / start / case / sheet-done / sheet-error / all-done / error. */
+	async runAllStream(cfg: RunInput, onEvent: (ev: RunAllEvent) => void, signal?: AbortSignal): Promise<void> {
+		const res = await fetch("/api/run/all", { ...post(cfg), signal });
+		if (!res.body) throw new Error("no stream");
+		const reader = res.body.getReader();
+		const dec = new TextDecoder();
+		let buf = "";
+		for (;;) {
+			const { value, done } = await reader.read();
+			if (done) break;
+			buf += dec.decode(value, { stream: true });
+			const lines = buf.split("\n");
+			buf = lines.pop() ?? "";
+			for (const ln of lines) {
+				const s = ln.trim();
+				if (s) onEvent(JSON.parse(s) as RunAllEvent);
 			}
 		}
 	},

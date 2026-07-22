@@ -625,6 +625,38 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		res.end();
 		return;
 	}
+	if (req.method === "POST" && url.pathname === "/api/run/all") {
+		const input = JSON.parse((await readBody(req)) || "{}") as RunInput;
+		res.writeHead(200, { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache" });
+		const emit = (ev: Record<string, unknown>) => res.write(`${JSON.stringify(ev)}\n`);
+		const sheets = input.sheets ?? input.sources ?? [];
+		try {
+			emit({
+				type: "all-start",
+				totalSheets: sheets.length,
+				sheets: sheets.map((s) => ({ sheetId: s.id, name: s.name })),
+			});
+			for (let i = 0; i < sheets.length; i++) {
+				const sheet = sheets[i];
+				if (!sheet) continue;
+				emit({ type: "sheet-start", sheetId: sheet.id, name: sheet.name, index: i, totalSheets: sheets.length });
+				try {
+					const view = await runBatch({ ...input, sheets: [sheet], sheetId: sheet.id }, (ev) =>
+						emit({ ...ev, sheetId: sheet.id }),
+					);
+					emit({ type: "sheet-done", sheetId: sheet.id, view });
+				} catch (err) {
+					console.error("run-all sheet failed:", (err as Error).stack ?? err);
+					emit({ type: "sheet-error", sheetId: sheet.id, error: (err as Error).message });
+				}
+			}
+			emit({ type: "all-done" });
+		} catch (err) {
+			emit({ type: "error", error: (err as Error).message });
+		}
+		res.end();
+		return;
+	}
 	if (req.method === "GET" && url.pathname === "/api/status") {
 		return send(
 			res,
@@ -860,7 +892,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			const sheets = wb.SheetNames.map((name) => {
 				const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name]).slice(0, 200000);
 				const rows = csv.split("\n").filter((l) => l.trim()).length;
-				return { name, csv, rows };
+				const map = mapColumns(csvToRawTable(csv).headers);
+				return { name, csv, rows, isTc: Boolean(map.step && map.expected) };
 			}).filter((s) => s.rows > 1);
 			return send(res, 200, JSON.stringify({ sheets }));
 		} catch (err) {

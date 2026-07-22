@@ -16,6 +16,7 @@ const S = {
 		addCsv: "CSV 추가",
 		xlsxPick: (name: string) => `${name} — 담을 시트 선택:`,
 		rows: (n: number) => `${n}행`,
+		nonTc: "비TC?",
 		addPicked: "선택 시트 추가",
 		sheetPrefix: (url: string) => `시트: ${url}`,
 		csvSaved: (name: string) => `CSV[${name}] (저장됨)`,
@@ -44,6 +45,7 @@ const S = {
 		addCsv: "Add CSV",
 		xlsxPick: (name: string) => `${name} — choose sheets to include:`,
 		rows: (n: number) => `${n} row${n === 1 ? "" : "s"}`,
+		nonTc: "non-TC?",
 		addPicked: "Add Selected Sheets",
 		sheetPrefix: (url: string) => `Sheet: ${url}`,
 		csvSaved: (name: string) => `CSV[${name}] (saved)`,
@@ -120,7 +122,7 @@ export function ProjectSourceSection(props: SourceSectionProps) {
 			{props.xlsxSheets && (
 				<div className="xlsx-picker">
 					<p className="detail">{t.xlsxPick(props.xlsxName)}</p>
-					{props.xlsxSheets.map((sheet, index) => <label key={sheet.name}><input type="checkbox" checked={Boolean(props.pick[index])} onChange={(event) => props.onPick(index, event.target.checked)} /> {sheet.name} ({t.rows(sheet.rows)})</label>)}
+					{props.xlsxSheets.map((sheet, index) => <label key={sheet.name}><input type="checkbox" checked={Boolean(props.pick[index])} onChange={(event) => props.onPick(index, event.target.checked)} /> {sheet.name} ({t.rows(sheet.rows)}){sheet.isTc === false ? <span className="muted"> · {t.nonTc}</span> : null}</label>)}
 					<button className="mini" type="button" onClick={props.onAddPicked}>{t.addPicked}</button>
 				</div>
 			)}

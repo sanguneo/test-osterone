@@ -4,6 +4,7 @@ import { getLang, useLang } from "../i18n";
 import type { CaseView, PreviewResult, Project, Verdict } from "../types";
 import { Icon } from "./Icon";
 import { RunResults, type RunViewLike } from "./RunResults";
+import { vLabel } from "./Verdict";
 
 const S = {
 	ko: {
@@ -40,6 +41,14 @@ const S = {
 		error: (msg: string) => `오류: ${msg}`,
 		runningStatus: (n: number, total: number) => `실행 중… ${n}/${total}`,
 		done: "완료",
+		runAll: "전체 시트 실행",
+		runAllTitle: "전체 시트 실행",
+		sheetCol: "시트",
+		statusCol: "상태",
+		stPending: "대기",
+		stRunning: "진행",
+		stDone: "완료",
+		stError: "오류",
 	},
 	en: {
 		noCases: "No cases found. Add test sources to the project and check again.",
@@ -75,8 +84,21 @@ const S = {
 		error: (msg: string) => `Error: ${msg}`,
 		runningStatus: (n: number, total: number) => `Running… ${n}/${total}`,
 		done: "Done",
+		runAll: "Run all sheets",
+		runAllTitle: "All-sheets run",
+		sheetCol: "Sheet",
+		statusCol: "Status",
+		stPending: "Pending",
+		stRunning: "Running",
+		stDone: "Done",
+		stError: "Error",
 	},
 } as const;
+
+type SheetProg = { sheetId: string; name: string; status: "pending" | "running" | "done" | "error"; done: number; total: number; counts: Record<Verdict, number>; error?: string };
+interface RunAllState { order: string[]; prog: Record<string, SheetProg> }
+const VERDICTS: Verdict[] = ["pass", "fail", "needs_review", "error"];
+function emptyCounts(): Record<Verdict, number> { return { pass: 0, fail: 0, needs_review: 0, error: 0 }; }
 
 function PreviewTable({ preview }: { readonly preview: PreviewResult }) {
 	const t = S[useLang()];
@@ -130,6 +152,7 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 	const [total, setTotal] = useState(0);
 	const [runError, setRunError] = useState("");
 	const [done, setDone] = useState(false);
+	const [runAll, setRunAll] = useState<RunAllState | null>(null);
 	const previewController = useRef<AbortController | null>(null);
 	const runController = useRef<AbortController | null>(null);
 	const sheet = useMemo(() => project?.sheets.find((item) => item.id === selSheetId) ?? project?.sheets[0], [project, selSheetId]);
@@ -194,7 +217,42 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 		}
 	}
 
-	const t = S[useLang()];
+	async function startRunAll() {
+		if (!project) return;
+		const sheets = project.sheets;
+		if (sheets.length === 0) return;
+		runController.current?.abort();
+		const controller = new AbortController();
+		runController.current = controller;
+		setRunning(true);
+		setRunError("");
+		setDone(false);
+		setLive(null);
+		const prog: Record<string, SheetProg> = {};
+		for (const s of sheets) prog[s.id] = { sheetId: s.id, name: s.name, status: "pending", done: 0, total: 0, counts: emptyCounts() };
+		const order = sheets.map((s) => s.id);
+		const push = () => setRunAll({ order, prog: { ...prog } });
+		push();
+		try {
+			await api.runAllStream({ sample: false, sheets, aiInterpret: ai, baseUrl: project.baseUrl, env: project.env, username: project.username, password: project.password, referenceRepo: project.referenceRepo, projectId: selId }, (event) => {
+				if (controller.signal.aborted) return;
+				if (event.type === "sheet-start") { const p = prog[event.sheetId]; if (p) p.status = "running"; push(); }
+				else if (event.type === "start") { const p = prog[event.sheetId]; if (p) p.total = event.total; push(); }
+				else if (event.type === "case") { const p = prog[event.sheetId]; if (p) { p.done += 1; p.counts[event.result.verdict] = (p.counts[event.result.verdict] || 0) + 1; } push(); }
+				else if (event.type === "sheet-done") { const p = prog[event.sheetId]; if (p) { p.status = "done"; p.counts = event.view.counts; p.done = event.view.results.length; p.total = event.view.results.length; } push(); }
+				else if (event.type === "sheet-error") { const p = prog[event.sheetId]; if (p) { p.status = "error"; p.error = event.error; } push(); }
+				else if (event.type === "all-done") { setDone(true); onDone(); }
+				else if (event.type === "error") throw new Error(event.error);
+			}, controller.signal);
+		} catch (error) {
+			if (!controller.signal.aborted) setRunError((error as Error).message);
+		} finally {
+			if (runController.current === controller) { runController.current = null; setRunning(false); }
+		}
+	}
+
+	const lang = useLang();
+	const t = S[lang];
 	if (!project) return <section><h2 className="sec">{t.workbench}</h2><div className="muted">{t.noProject}</div></section>;
 
 	return (
@@ -210,13 +268,37 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 						<h3>{t.runReady}</h3>
 						<p className="run-target">{t.target(project.baseUrl || (project.id === "sample" ? t.builtinSample : t.targetUnset))}<br />{t.sheet(sheet?.name ?? t.sheetUnselected)}</p>
 						<label className="run-toggle"><input type="checkbox" checked={ai} onChange={(event) => setAi(event.target.checked)} /><span>{t.aiInterpret}<br /><small className="muted">{t.aiInterpretHint}</small></span></label>
-						<div className="run-actions"><button className="button primary" type="button" disabled={running} onClick={startRun}><Icon name="play" />{running ? t.running : t.start}</button><span className="muted" aria-live="polite">{statusMessage}</span></div>
+						<div className="run-actions"><button className="button primary" type="button" disabled={running} onClick={startRun}><Icon name="play" />{running ? t.running : t.start}</button>{project.sheets.length > 1 && <button className="button secondary" type="button" disabled={running} onClick={startRunAll}>{t.runAll}</button>}<span className="muted" aria-live="polite">{statusMessage}</span></div>
 					</div>
 					{previewError && <div className="card err">{t.previewFail(previewError)} <button className="mini" type="button" onClick={loadPreview}>{t.retry}</button></div>}
 					{!live && previewLoading && <div className="card late">{[0, 1, 2].map((index) => <div className="skel" style={{ height: 18, marginTop: index === 0 ? 0 : 12 }} key={index} />)}</div>}
 					{!live && preview && <PreviewTable preview={preview} />}
 					{runError && <div className="card err" role="alert">{t.error(runError)}</div>}
 					{live && <RunResults view={live} total={done ? undefined : total} />}
+					{runAll && (
+						<div className="preview-surface">
+							<div className="summary"><b>{t.runAllTitle}</b>{VERDICTS.map((v) => <span className="chip" key={v}>{vLabel(v, lang)} <b>{runAll.order.reduce((sum, id) => sum + (runAll.prog[id]?.counts[v] || 0), 0)}</b></span>)}</div>
+							<div className="tscroll">
+								<table>
+									<thead><tr><th>{t.sheetCol}</th><th>{t.statusCol}</th>{VERDICTS.map((v) => <th className="num" key={v}>{vLabel(v, lang)}</th>)}</tr></thead>
+									<tbody>
+										{runAll.order.map((id) => {
+											const p = runAll.prog[id];
+											if (!p) return null;
+											const st = p.status === "running" ? `${t.stRunning} ${p.done}/${p.total || "?"}` : p.status === "done" ? t.stDone : p.status === "error" ? t.stError : t.stPending;
+											return (
+												<tr key={id}>
+													<td>{p.name}</td>
+													<td className="detail">{st}{p.error ? ` — ${p.error}` : ""}</td>
+													{VERDICTS.map((v) => <td className="num" key={v}>{p.counts[v] || 0}</td>)}
+												</tr>
+											);
+										})}
+									</tbody>
+								</table>
+							</div>
+						</div>
+					)}
 				</div>
 			</div>
 		</section>
