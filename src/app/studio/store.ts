@@ -62,6 +62,8 @@ export interface ReviewItem {
 	url: string;
 	text: string;
 	screenshot?: string;
+	/** True when a Playwright trace was captured for this held case (served via /api/trace). */
+	trace?: boolean;
 	ruleVersion: number;
 	env: string;
 	sheetId: string;

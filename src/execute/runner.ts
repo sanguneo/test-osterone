@@ -39,6 +39,8 @@ export interface StructuredResult {
 	attempts: number;
 	env: RunEnv;
 	snapshot?: PageSnapshot;
+	/** Relative path of the captured Playwright trace chunk (only kept for non-pass verdicts). */
+	tracePath?: string;
 }
 
 export interface RunOptions {
@@ -55,6 +57,8 @@ export interface RunOptions {
 	baseline?: BaselineStore;
 	/** Stable env key for baselines (defaults to env.baseUrl, which may be ephemeral). */
 	baselineEnv?: string;
+	/** When set (and the page supports tracing), capture a per-case trace chunk to this path; kept only if not pass. */
+	tracePath?: string;
 }
 
 function round2(n: number): number {
@@ -82,6 +86,8 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		env: opts.env,
 	};
 
+	if (opts.tracePath && opts.page.startTrace) await opts.page.startTrace().catch(() => {});
+	let result: StructuredResult;
 	try {
 		const actions = opts.plan ? opts.plan.actions : tc.steps.map((step) => parseStep(step, opts.rule));
 		const assertions = opts.plan ? opts.plan.assertions : getOrAuthorAssertions(tc, opts.rule, opts.cache).assertions;
@@ -127,7 +133,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			}
 		}
 
-		return {
+		result = {
 			...base,
 			verdict,
 			confidence,
@@ -139,7 +145,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			snapshot: snap,
 		};
 	} catch (err) {
-		return {
+		result = {
 			...base,
 			verdict: "error",
 			errorInfo: (err as Error).message,
@@ -151,6 +157,13 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			attempts: 1,
 		};
 	}
+	if (opts.tracePath && opts.page.stopTrace) {
+		// Keep the trace only when there is something to review (never for a clean pass).
+		const keep = result.verdict !== "pass";
+		await opts.page.stopTrace(keep ? opts.tracePath : undefined).catch(() => {});
+		if (keep) result.tracePath = opts.tracePath;
+	}
+	return result;
 }
 
 /** The deterministic slice of a result used for rerun-determinism checks. */

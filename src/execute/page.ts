@@ -20,6 +20,13 @@ export interface Page {
 	click(target: string): Promise<void>;
 	fill(target: string, value: string): Promise<void>;
 	snapshot(): Promise<PageSnapshot>;
+	/**
+	 * Optional per-case Playwright trace chunk hooks. Only the real `BrowserPage`
+	 * implements them; `FakePage` omits them so unit tests are unaffected.
+	 * `stopTrace(path)` exports the chunk to `path`; `stopTrace()` discards it.
+	 */
+	startTrace?(): Promise<void>;
+	stopTrace?(path?: string): Promise<void>;
 }
 
 export interface FakeAction {

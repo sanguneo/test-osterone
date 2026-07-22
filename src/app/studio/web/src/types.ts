@@ -161,6 +161,7 @@ export interface ReviewItem {
 	url: string;
 	text: string;
 	screenshot?: string;
+	trace?: boolean;
 	ruleVersion: number;
 	env: string;
 	sheetId: string;

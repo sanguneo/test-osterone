@@ -33,6 +33,12 @@ const S = {
 		reviewFootNote: "화면과 판정 사유를 확인한 뒤 기준 화면으로 저장합니다.",
 		saving: "저장 중…",
 		reviewBaseline: "기준 화면 검토",
+		traceTitle: "트레이스",
+		traceHint: "— 행동 단위로 스크럽(죽은 시간 자동 스킵). 스크린샷보다 정밀합니다.",
+		traceOpen: "▶ 트레이스 뷰어 열기",
+		traceClose: "트레이스 뷰어 (아래 ↓)",
+		traceNewTab: "새 탭에서 크게 ↗",
+		traceDownload: "trace.zip 다운로드",
 	},
 	en: {
 		sectionTitle: "Review queue",
@@ -61,6 +67,12 @@ const S = {
 		reviewFootNote: "Review the screen and verdict reason, then save it as the baseline.",
 		saving: "Saving…",
 		reviewBaseline: "Review baseline",
+		traceTitle: "Trace",
+		traceHint: "— scrub action-by-action (dead time auto-skipped). More precise than a screenshot.",
+		traceOpen: "▶ Open trace viewer",
+		traceClose: "Trace viewer (below ↓)",
+		traceNewTab: "Open larger in a new tab ↗",
+		traceDownload: "Download trace.zip",
 	},
 } as const;
 
@@ -87,6 +99,11 @@ export function ReviewPanel({
 	const [confirmId, setConfirmId] = useState("");
 	const [confirmAll, setConfirmAll] = useState(false);
 	const [busyAll, setBusyAll] = useState(false);
+	const [openTraceId, setOpenTraceId] = useState("");
+
+	const traceZipUrl = (it: ReviewItem) =>
+		`/api/trace?projectId=${encodeURIComponent(selId)}&sheetId=${encodeURIComponent(it.sheetId)}&caseId=${encodeURIComponent(it.caseId)}`;
+	const traceViewerUrl = (it: ReviewItem) => `/trace-viewer/index.html?trace=${encodeURIComponent(traceZipUrl(it))}`;
 
 	const load = useCallback(() => {
 		void refreshKey;
@@ -221,6 +238,28 @@ export function ReviewPanel({
 						</figure>
 					) : (
 						<div className="rev-evidence rev-evidence-empty">{t.noScreenshot}</div>
+					)}
+					{it.trace && (
+						<section className="rev-trace">
+							<h3>
+								{t.traceTitle} <span className="muted" style={{ fontWeight: 400 }}>{t.traceHint}</span>
+							</h3>
+							<div className="trace-actions" style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+								<button
+									className="button secondary compact"
+									type="button"
+									disabled={openTraceId === it.caseId}
+									onClick={() => setOpenTraceId(it.caseId)}
+								>
+									{openTraceId === it.caseId ? t.traceClose : t.traceOpen}
+								</button>
+								<a href={traceViewerUrl(it)} target="_blank" rel="noopener" style={{ fontSize: 12 }}>{t.traceNewTab}</a>
+								<a href={traceZipUrl(it)} download style={{ fontSize: 12 }}>{t.traceDownload}</a>
+							</div>
+							{openTraceId === it.caseId && (
+								<iframe title={t.traceTitle} src={traceViewerUrl(it)} className="trace-frame" style={{ width: "100%", height: 620, border: "1px solid var(--hairline, #333)", borderRadius: 8, marginTop: 10 }} />
+							)}
+						</section>
 					)}
 					<footer className="rev-foot">
 						{confirmId === it.caseId ? (

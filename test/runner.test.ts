@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { type FakeAction, FakePage, type PageSnapshot } from "../src/execute/page.ts";
+import { type FakeAction, FakePage, type Page, type PageSnapshot } from "../src/execute/page.ts";
 import { determinismView, type RunEnv, runScenario } from "../src/execute/runner.ts";
 import type { NormalizedTC } from "../src/intake/schema.ts";
 import { MemoryAssertionCache } from "../src/interpret/assertion.ts";
@@ -161,4 +161,63 @@ test("baseline gate: unapproved stays needs_review; approving lifts a matching r
 	const second = await run2(); // approved + same masked snapshot -> pass
 	expect(second.verdict).toBe("pass");
 	expect(second.confidence).toBe(0.9);
+});
+
+/** Page that records trace-chunk calls, delegating page actions to a scripted FakePage. */
+class TracingPage implements Page {
+	readonly calls: string[] = [];
+	private readonly inner = new FakePage({ url: "", text: "", html: "" }, loginReducer);
+	goto(p: string) {
+		return this.inner.goto(p);
+	}
+	click(target: string) {
+		return this.inner.click(target);
+	}
+	fill(target: string, value: string) {
+		return this.inner.fill(target, value);
+	}
+	snapshot() {
+		return this.inner.snapshot();
+	}
+	async startTrace() {
+		this.calls.push("start");
+	}
+	async stopTrace(path?: string) {
+		this.calls.push(`stop:${path ?? "discard"}`);
+	}
+}
+
+test("trace: a passing case starts a chunk then discards it (no trace kept)", async () => {
+	const page = new TracingPage();
+	const r = await runScenario(loginTC(), {
+		page,
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		tracePath: "/tmp/T.zip",
+	});
+	expect(r.verdict).toBe("pass");
+	expect(page.calls).toEqual(["start", "stop:discard"]);
+	expect(r.tracePath).toBeUndefined();
+});
+
+test("trace: a needs_review case exports the chunk to the given path (kept for review)", async () => {
+	const page = new TracingPage();
+	const r = await runScenario(
+		loginTC({ contentHash: "hash-heal2", steps: ["Navigate to /login", 'Click "Nonexistent Button"'] }),
+		{
+			page,
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			tracePath: "/tmp/T.zip",
+		},
+	);
+	expect(r.verdict).toBe("needs_review");
+	expect(page.calls).toEqual(["start", "stop:/tmp/T.zip"]);
+	expect(r.tracePath).toBe("/tmp/T.zip");
 });

@@ -12,7 +12,7 @@
  * on Windows; it reuses the same deterministic engine as the CLI.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
@@ -73,6 +73,9 @@ const MIME: Record<string, string> = {
 	".svg": "image/svg+xml",
 	".ico": "image/x-icon",
 	".woff2": "font/woff2",
+	".ttf": "font/ttf",
+	".wasm": "application/wasm",
+	".webmanifest": "application/manifest+json",
 	".map": "application/json",
 };
 
@@ -96,6 +99,46 @@ function serveStatic(res: ServerResponse, pathname: string): void {
 			send(res, 404, JSON.stringify({ error: "web UI not built — run 'bun run studio:build'" }));
 		}
 	}
+}
+
+// Playwright's bundled trace-viewer PWA. Serving it from our own origin (below) sidesteps the
+// Private Network Access block that stops the public trace.playwright.dev from fetching localhost.
+const traceViewerDir = (() => {
+	for (const c of [
+		join(here, "../../../node_modules/playwright-core/lib/vite/traceViewer"),
+		join(process.cwd(), "node_modules/playwright-core/lib/vite/traceViewer"),
+	]) {
+		if (existsSync(join(c, "index.html"))) return c;
+	}
+	return null;
+})();
+
+/** Serve a file from the bundled Playwright trace viewer (same-origin, so the viewer can fetch our trace.zip). */
+function serveTraceViewer(res: ServerResponse, pathname: string): void {
+	if (!traceViewerDir) {
+		send(res, 404, JSON.stringify({ error: "trace viewer unavailable" }));
+		return;
+	}
+	const sub = pathname.replace(/^\/trace-viewer\/?/, "") || "index.html";
+	const file = join(traceViewerDir, sub);
+	if (!file.startsWith(traceViewerDir)) {
+		send(res, 403, JSON.stringify({ error: "forbidden" }));
+		return;
+	}
+	try {
+		const data = readFileSync(file);
+		res.writeHead(200, { "content-type": MIME[file.slice(file.lastIndexOf("."))] ?? "application/octet-stream" });
+		res.end(data);
+	} catch {
+		send(res, 404, JSON.stringify({ error: "not found" }));
+	}
+}
+
+// Per-case Playwright traces live here, keyed by project/sheet/case (latest run wins). Served via /api/trace.
+const tracesBaseDir = join(homedir(), ".test-osterone", "traces");
+const traceSafe = (s: string): string => s.replace(/[^A-Za-z0-9._-]/g, "_");
+function tracePathFor(projectId: string, sheetId: string, caseId: string): string {
+	return join(tracesBaseDir, traceSafe(projectId), traceSafe(sheetId), `${traceSafe(caseId)}.zip`);
 }
 
 // SheetJS is CJS; load via createRequire so it works under Node without ESM-interop config.
@@ -547,9 +590,12 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 	const caseById = new Map(cases.map((c) => [c.caseId, c]));
 	for (const c of cases) sheetSt.reviewQueue.delete(c.caseId);
 	const cache = new MemoryAssertionCache();
+	const trace = !input.sample; // capture Playwright traces for real runs (sample stays ephemeral)
 	const page = input.headed
-		? await BrowserPage.create({ baseUrl, timeoutMs: 4000, headless: false, slowMo: 300 })
-		: await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser() });
+		? await BrowserPage.create({ baseUrl, timeoutMs: 4000, headless: false, slowMo: 300, trace })
+		: await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser(), trace });
+	if (trace)
+		mkdirSync(join(tracesBaseDir, traceSafe(input.projectId ?? "sample"), traceSafe(sid)), { recursive: true });
 	const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
 	const results: CaseView[] = [];
 	try {
@@ -567,6 +613,7 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 							})
 						).plan
 					: undefined;
+			const tracePath = trace ? tracePathFor(input.projectId ?? "sample", sid, tc.caseId) : undefined;
 			const r = await runScenario(tc, {
 				page,
 				rule: sheetSt.rule,
@@ -575,7 +622,12 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 				plan,
 				baseline: layeredBaseline(st, sid),
 				baselineEnv,
+				tracePath,
 			});
+			// Keep the trace only for cases that land in the review queue; drop pass/fail and any stale file.
+			const keptTrace =
+				(r.verdict === "needs_review" || r.verdict === "error") && !!r.tracePath && existsSync(r.tracePath);
+			if (tracePath && !keptTrace) rmSync(tracePath, { force: true });
 			if (r.verdict === "needs_review" || r.verdict === "error") {
 				const reason = r.healEvents.length
 					? `self-heal: ${r.healEvents[0]?.split(":")[0]}`
@@ -592,6 +644,7 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 					url: r.snapshot?.url ?? "",
 					text: (r.snapshot?.text ?? "").slice(0, 600),
 					screenshot: r.snapshot?.screenshot,
+					trace: keptTrace,
 					ruleVersion: r.ruleVersion,
 					env: baselineEnv,
 					sheetId: sid,
@@ -652,6 +705,20 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
 	const url = new URL(req.url ?? "/", "http://localhost");
+	if (req.method === "GET" && url.pathname.startsWith("/trace-viewer")) {
+		return serveTraceViewer(res, url.pathname);
+	}
+	if (req.method === "GET" && url.pathname === "/api/trace") {
+		const projectId = url.searchParams.get("projectId") || "sample";
+		const sheetId = url.searchParams.get("sheetId");
+		const caseId = url.searchParams.get("caseId");
+		if (!sheetId || !caseId) return send(res, 400, JSON.stringify({ error: "sheetId and caseId are required" }));
+		const file = tracePathFor(projectId, sheetId, caseId);
+		if (!existsSync(file)) return send(res, 404, JSON.stringify({ error: "trace not found" }));
+		res.writeHead(200, { "content-type": "application/zip" });
+		res.end(readFileSync(file));
+		return;
+	}
 	if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
 		return serveStatic(res, url.pathname);
 	}

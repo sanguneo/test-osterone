@@ -21,6 +21,8 @@ export interface BrowserPageOptions {
 	slowMo?: number;
 	/** Reuse a shared browser (a fresh context is created per page); close() then only closes the context. */
 	browser?: Browser;
+	/** Capture a Playwright trace (screenshots+DOM snapshots+sources); per-case chunks via start/stopTrace. */
+	trace?: boolean;
 }
 
 /** Launch a standalone Chromium the caller owns and reuses across runs (avoids per-run cold starts). */
@@ -36,12 +38,15 @@ export class BrowserPage implements Page {
 		private readonly baseUrl: string,
 		private readonly timeoutMs: number,
 		private readonly ownsBrowser: boolean,
+		private readonly tracing: boolean,
 	) {}
 
 	static async create(opts: BrowserPageOptions): Promise<BrowserPage> {
 		const ownsBrowser = !opts.browser;
 		const browser = opts.browser ?? (await chromium.launch({ headless: opts.headless ?? true, slowMo: opts.slowMo }));
 		const context = await browser.newContext({ viewport: opts.viewport ?? { width: 1280, height: 800 } });
+		const tracing = !!opts.trace;
+		if (tracing) await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
 		const pwPage = await context.newPage();
 		return new BrowserPage(
 			browser,
@@ -50,6 +55,7 @@ export class BrowserPage implements Page {
 			opts.baseUrl.replace(/\/$/, ""),
 			opts.timeoutMs ?? 5000,
 			ownsBrowser,
+			tracing,
 		);
 	}
 
@@ -91,7 +97,18 @@ export class BrowserPage implements Page {
 			.first();
 	}
 
+	/** Begin a per-case trace chunk (no-op unless tracing was enabled). */
+	async startTrace(): Promise<void> {
+		if (this.tracing) await this.context.tracing.startChunk();
+	}
+
+	/** End the current chunk: export to `path`, or discard when `path` is omitted. */
+	async stopTrace(path?: string): Promise<void> {
+		if (this.tracing) await this.context.tracing.stopChunk(path ? { path } : {});
+	}
+
 	async close(): Promise<void> {
+		if (this.tracing) await this.context.tracing.stop().catch(() => {});
 		await this.context.close();
 		if (this.ownsBrowser) await this.browser.close();
 	}
