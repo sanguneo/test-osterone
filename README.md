@@ -22,7 +22,7 @@ Spreadsheet-authored test cases → an AI agent reads them, writes the assertion
 
 ## Why
 
-Test automation stalls on two costs: **authoring** (writing cases + selectors) and **maintenance** (selectors rot). test-osterone hands both to an AI agent so a non-developer can drive regression testing from a spreadsheet — while keeping the one thing that must never be a guess: **the verdict**.
+Test automation stalls on two costs: **authoring** (writing the cases, and the *selectors* that point each test step at an on-screen element) and **maintenance** (those selectors rot — one small UI change and the test can no longer find the button it was clicking, so it breaks even though the feature still works). test-osterone hands both to an AI agent so a non-developer can drive regression testing from a spreadsheet — while keeping the one thing that must never be a guess: **the verdict**.
 
 The name is a pun on *testosterone* (`test` + `osterone`). The persona — **"테토" (Teto)** — is decisive: it would rather flag a case for review than emit a silently-wrong pass. **false-pass = 0** is the first-class goal.
 
@@ -30,7 +30,7 @@ The name is a pun on *testosterone* (`test` + `osterone`). The persona — **"�
 
 | Layer | Owner | Human in the loop |
 |---|---|---|
-| Authoring | AI establishes the sheet-reading rule, turns cases into assertions, triages automatability, self-heals selectors | Approve the rule / first baseline **once** (optional) |
+| Authoring | AI establishes the sheet-reading rule, turns cases into assertions (the concrete pass/fail checks), triages automatability, self-heals selectors | Approve the rule / first baseline **once** (optional) |
 | Execution & verdict | Deterministic engine — identical conclusion every run | **None — fully automatic** |
 | Exceptions | Only low-confidence cases become `needs_review` | Review the ambiguous few **once**, then automated |
 
@@ -80,7 +80,7 @@ test-osterone setup
 
 ## Try it — live demo
 
-No project to test yet? A bundled fixture app lets you watch the full pipeline run against a **real headless Chromium** browser:
+No project to test yet? A bundled fixture app lets you watch the full pipeline run against a **real, headless** (no visible window — it runs in the background) Chromium browser:
 
 ```bash
 bun install        # one-time (installs Chromium via postinstall)
@@ -163,13 +163,13 @@ Both run at **author time**, are human-reviewed before saving, and are injected 
 
 ### Review queue
 
-`needs_review` cases surface with their evidence — a **screenshot**, the page text, and the reason (self-heal, missing baseline, …). Approve the baseline — the approved **reference screen** for that case — once, and a matching re-run **passes** across every sheet that shares the same case content (reconcile-on-read clears a stale needs_review elsewhere without re-running); if the page drifts it is re-flagged. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
+`needs_review` cases surface with their evidence — a **screenshot**, the page text, and the reason (self-heal, missing baseline, …). Approve the baseline — the approved **reference screen** for that case — once, and a matching re-run **passes** across every sheet that shares the same case content (a reconcile-on-read — a quick re-check when the queue is opened — clears a stale needs_review elsewhere without re-running); if the page drifts it is re-flagged. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
 
 For held cases the review also embeds a **Playwright trace** — the bundled trace viewer is served **same-origin** (dodging the public viewer's Private Network Access block), so you can scrub the run action-by-action inline, open it in a new tab, or download the `trace.zip`. Traces are captured per case and kept only for `needs_review`/`error` (a clean pass keeps nothing).
 
 ### Persistence
 
-Project metadata lives in `~/.test-osterone/studio-projects.json`. Per-project runtime state lives in `~/.test-osterone/studio-state/<projectId>.json` as **per-sheet** rule, refine chat, plan cache, and approved baselines, plus a project **default rule** (cloned by new sheets) and a **legacy baseline fallback** for approvals made before the per-sheet upgrade — a `STATE_VERSION` v2→v3 migration lifts old project-level state into this shape **losslessly and idempotently**. **Sheet CSV content is offloaded to per-sheet files** (`sheet-data/<projectId>/<sheetId>.csv`) so neither file grows with sheet count — hence no cap. `baselineKey`/`assertionCacheKey` formats are unchanged, so false-pass=0 holds across all of this.
+Project metadata lives in `~/.test-osterone/studio-projects.json`. Per-project runtime state lives in `~/.test-osterone/studio-state/<projectId>.json` as **per-sheet** rule, refine chat, plan cache, and approved baselines, plus a project **default rule** (cloned by new sheets) and a **legacy baseline fallback** for approvals made before the per-sheet upgrade — a `STATE_VERSION` v2→v3 migration lifts old project-level state into this shape **losslessly and idempotently** (running the migration twice changes nothing). **Sheet CSV content is offloaded to per-sheet files** (`sheet-data/<projectId>/<sheetId>.csv`) so neither file grows with sheet count — hence no cap. `baselineKey`/`assertionCacheKey` formats are unchanged, so false-pass=0 holds across all of this.
 
 ## Architecture
 
