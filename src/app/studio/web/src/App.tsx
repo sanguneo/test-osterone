@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { ProjectHome } from "./components/ProjectHome";
 import { DashboardPanel } from "./components/DashboardPanel";
@@ -63,13 +63,34 @@ function modelStatusLabel(auth: NonNullable<Status["auth"]>): string {
 	return parts.join(" · ");
 }
 
+const ROUTE_TABS: StudioTab[] = ["dash", "rules", "run", "review"];
+/** Read the current view (project/sheet/tab) from the URL query string. */
+function readRoute(): { project: string; sheet: string; tab: StudioTab } {
+	const p = new URLSearchParams(window.location.search);
+	const rawTab = p.get("tab") ?? "";
+	return {
+		project: p.get("project") ?? "",
+		sheet: p.get("sheet") ?? "",
+		tab: ((ROUTE_TABS as string[]).includes(rawTab) ? rawTab : "dash") as StudioTab,
+	};
+}
+/** Build the query string for a view; falls back to the bare path when empty. */
+function routeSearch(project: string, sheet: string, tab: StudioTab): string {
+	const p = new URLSearchParams();
+	if (project) p.set("project", project);
+	if (project && sheet) p.set("sheet", sheet);
+	if (project && sheet && tab !== "dash") p.set("tab", tab);
+	const s = p.toString();
+	return s ? `?${s}` : window.location.pathname;
+}
+
 export function App() {
 	const t = S[useLang()];
 	const [projects, setProjects] = useState<Project[]>([]);
-	const [selectedProjectId, setSelectedProjectId] = useState("");
-	const [selectedSheetId, setSelectedSheetId] = useState("");
+	const [selectedProjectId, setSelectedProjectId] = useState(() => readRoute().project);
+	const [selectedSheetId, setSelectedSheetId] = useState(() => readRoute().sheet);
 	const [status, setStatus] = useState<Status | null>(null);
-	const [tab, setTab] = useState<StudioTab>("dash");
+	const [tab, setTab] = useState<StudioTab>(() => readRoute().tab);
 	const [reviewCount, setReviewCount] = useState(0);
 	const [navReviewCount, setNavReviewCount] = useState(0);
 	const [projectError, setProjectError] = useState("");
@@ -116,6 +137,26 @@ export function App() {
 			setSelectedSheetId("");
 		}
 	}, [selectedProject, selectedSheetId]);
+	const routeSynced = useRef(false);
+	useEffect(() => {
+		const search = routeSearch(selectedProjectId, selectedSheetId, tab);
+		const targetSearch = search.startsWith("?") ? search : "";
+		if (targetSearch !== window.location.search) {
+			if (routeSynced.current) window.history.pushState(null, "", search);
+			else window.history.replaceState(null, "", search);
+		}
+		routeSynced.current = true;
+	}, [selectedProjectId, selectedSheetId, tab]);
+	useEffect(() => {
+		const onPop = () => {
+			const route = readRoute();
+			setSelectedProjectId(route.project);
+			setSelectedSheetId(route.sheet);
+			setTab(route.tab);
+		};
+		window.addEventListener("popstate", onPop);
+		return () => window.removeEventListener("popstate", onPop);
+	}, []);
 
 	const persistSheets = useCallback(async (nextSheets: TestSheet[]) => {
 		if (!selectedProject || selectedProject.id === "sample") return;
