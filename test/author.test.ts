@@ -70,3 +70,17 @@ test("getOrAuthorPlan authors once, then serves from cache (no second model call
 	expect(calls).toBe(1);
 	expect(second.plan.actions).toHaveLength(3);
 });
+
+test("authorPlanAI feeds rule appContext + step vocabulary into the prompt (human assist reaches AI authoring)", async () => {
+	const rule = establishRuleFromHeaders([]);
+	rule.appContext = "Banking dashboard; login at /auth";
+	rule.intents.click = ["click", "누르기"];
+	let seen = "";
+	const model = new FakeModelClient((msgs) => {
+		seen = msgs.map((m) => m.content).join("\n");
+		return JSON.stringify({ actions: [], assertions: [] });
+	});
+	await authorPlanAI(tc(), model, {}, rule);
+	expect(seen).toContain("Banking dashboard; login at /auth");
+	expect(seen).toContain("누르기");
+});

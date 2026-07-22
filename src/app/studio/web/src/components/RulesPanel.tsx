@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useLang } from "../i18n";
 import type { Project, Status } from "../types";
@@ -41,6 +41,13 @@ const S = {
 		instructionPlaceholder: "자연어로 규칙을 지시하세요",
 		applying: "반영 중",
 		applyRule: "규칙 반영",
+		appContextTitle: "AI 도메인 컨텍스트",
+		appContextNote: "앱 설명·용어를 적어두면 AI가 이 시트의 스텝을 더 잘 해석합니다(AI 플랜 생성에만 사용).",
+		appContextPlaceholder: "예: 은행 대시보드. '확인'=제출 버튼. 로그인은 /auth. 목록은 표로 렌더.",
+		saveContext: "컨텍스트 저장",
+		savingContext: "저장 중",
+		contextSaved: "저장됨",
+		contextSaveFailed: (msg: string) => `저장 실패: ${msg}`,
 	},
 	en: {
 		sectionTitle: "Rules & Interpretation",
@@ -78,6 +85,13 @@ const S = {
 		instructionPlaceholder: "Describe the rule in natural language",
 		applying: "Applying",
 		applyRule: "Apply rule",
+		appContextTitle: "AI domain context",
+		appContextNote: "Describe the app / terminology so AI interprets this sheet's steps better (used only for AI plan authoring).",
+		appContextPlaceholder: "e.g. Banking dashboard. '확인' = submit button. Login at /auth. Lists render as tables.",
+		saveContext: "Save context",
+		savingContext: "Saving",
+		contextSaved: "Saved",
+		contextSaveFailed: (msg: string) => `Save failed: ${msg}`,
 	},
 } as const;
 
@@ -105,6 +119,9 @@ export function RulesPanel({
 	const [refineErr, setRefineErr] = useState(false);
 	const [analyzeMsg, setAnalyzeMsg] = useState("");
 	const [analyzeErr, setAnalyzeErr] = useState(false);
+	const [appCtx, setAppCtx] = useState(status?.appContext ?? "");
+	const [ctxBusy, setCtxBusy] = useState(false);
+	const [ctxMsg, setCtxMsg] = useState("");
 
 	const chat = status?.chat ?? [];
 	const mapping = status?.mapping ?? {};
@@ -112,6 +129,22 @@ export function RulesPanel({
 	const warnings = status?.warnings ?? [];
 	const ruleVersion = status?.ruleVersion ?? 1;
 	const sheet = project?.sheets.find((item) => item.id === selSheetId) ?? project?.sheets[0];
+
+	useEffect(() => {
+		setAppCtx(status?.appContext ?? "");
+	}, [status?.appContext, selSheetId]);
+
+	async function saveContext() {
+		setCtxBusy(true);
+		try {
+			onStatus(await api.setRuleContext(appCtx, selId, selSheetId));
+			setCtxMsg(t.contextSaved);
+		} catch (e) {
+			setCtxMsg(t.contextSaveFailed((e as Error).message));
+		} finally {
+			setCtxBusy(false);
+		}
+	}
 
 	async function analyze() {
 		if (!sheet) {
@@ -200,6 +233,15 @@ export function RulesPanel({
 						<span>{t.currentRule}</span>
 						<b>v{ruleVersion}</b>
 						<p>{Object.entries(intents).map(([key, value]) => `${key}: ${value.join(", ")}`).join(" · ") || t.defaultDictInUse}</p>
+					</div>
+					<div className="rule-context">
+						<span className="section-label">{t.appContextTitle}</span>
+						<p className="detail">{t.appContextNote}</p>
+						<textarea rows={4} value={appCtx} onChange={(event) => { setAppCtx(event.target.value); setCtxMsg(""); }} placeholder={t.appContextPlaceholder} />
+						<div className="editor-actions" style={{ marginTop: 8 }}>
+							<button className="button secondary compact" type="button" disabled={ctxBusy || appCtx === (status?.appContext ?? "")} onClick={saveContext}>{ctxBusy ? t.savingContext : t.saveContext}</button>
+							{ctxMsg && <span className="muted" style={{ fontSize: 12 }}>{ctxMsg}</span>}
+						</div>
 					</div>
 				</aside>
 

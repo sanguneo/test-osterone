@@ -98,6 +98,7 @@ export async function authorPlanAI(
 	tc: NormalizedTC,
 	model: ModelClient,
 	context: AuthorContext = {},
+	rule?: InterpretationRule,
 ): Promise<AuthoredPlan> {
 	const system =
 		"You convert a web test case's natural-language steps into a deterministic browser execution plan. " +
@@ -105,13 +106,29 @@ export async function authorPlanAI(
 		'{"kind":"goto","path":"/..."} | {"kind":"click","target":"<visible label/text/role name>"} | ' +
 		'{"kind":"fill","target":"<field label>","value":"<text>"}. assertions items are ' +
 		'{"kind":"textIncludes","value":"..."} | {"kind":"urlIncludes","value":"..."} | {"kind":"textNotIncludes","value":"..."}. ' +
-		"Derive assertions from the Expected result and any verify/assert steps. Targets must be user-visible text, never CSS. Keep it minimal.";
+		"Derive assertions ONLY from the Expected result and explicit verify/assert steps; never assert page boilerplate (nav, headings, static button labels) or text that appears regardless of outcome — that risks a false pass. " +
+		"Use textNotIncludes when the expected outcome is that something must NOT appear (e.g. 'must not', 'should not show', or staying on the same page). " +
+		"Prefer one or two specific assertions; if the expected outcome is unclear, author fewer rather than guessing (a missing assertion is safer than a false pass). " +
+		"Targets must be user-visible text, never CSS. Output ONLY the JSON.";
 	const ctx: string[] = [];
 	if (context.referenceRepo) ctx.push(`App reference repo (for domain context): ${context.referenceRepo}`);
 	if (context.username) ctx.push(`Test account username: ${context.username}`);
 	if (context.password) ctx.push(`Test account password: ${context.password}`);
 	const ctxBlock = ctx.length ? `\nContext (use for login/fill steps when relevant):\n${ctx.join("\n")}` : "";
-	const user = `TITLE: ${tc.title}\nSTEPS:\n${tc.steps.map((s) => `- ${s}`).join("\n")}\nEXPECTED: ${tc.expected}${ctxBlock}`;
+	const guide: string[] = [];
+	if (rule?.appContext?.trim()) guide.push(rule.appContext.trim());
+	if (rule) {
+		const vocab = Object.entries(rule.intents)
+			.filter(([, v]) => v.length > 0)
+			.map(([k, v]) => `${k}: ${v.join(", ")}`);
+		if (vocab.length) guide.push(`Team step vocabulary — ${vocab.join(" | ")}`);
+		if (rule.destructiveKeywords.length)
+			guide.push(`Destructive-step markers (be precise, avoid extra clicks): ${rule.destructiveKeywords.join(", ")}`);
+	}
+	const guideBlock = guide.length
+		? `\nApp context & vocabulary (use to interpret the steps):\n${guide.map((g) => `- ${g}`).join("\n")}`
+		: "";
+	const user = `TITLE: ${tc.title}\nSTEPS:\n${tc.steps.map((s) => `- ${s}`).join("\n")}\nEXPECTED: ${tc.expected}${guideBlock}${ctxBlock}`;
 	const obj =
 		extractJsonObject(
 			await model.complete([
@@ -139,7 +156,7 @@ export async function getOrAuthorPlan(
 	const key = assertionCacheKey(tc.caseId, rule.ruleId, rule.ruleVersion, tc.contentHash);
 	const cached = cache.get(key);
 	if (cached) return { plan: cached, cacheHit: true, key };
-	const plan = await authorPlanAI(tc, model, context);
+	const plan = await authorPlanAI(tc, model, context, rule);
 	cache.set(key, plan);
 	return { plan, cacheHit: false, key };
 }

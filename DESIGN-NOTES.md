@@ -96,3 +96,7 @@ Studio UI 재구성 최종 리뷰(2026-07-21, 정리된 `.omo/evidence/*`)에서
 > i18n(전역): UI 크롬 전체를 **KO/EN 토글**로 전환한다 — 상단 바 `header-actions`의 `LangToggle`, 공유 `useLang()`/`setLang()` 스토어(`src/i18n.ts`, `localStorage: to_lang`, 기본 한국어). 번역은 **컴포넌트 인접(co-located) 딕셔너리**(`const S = {ko,en}; const t = S[useLang()]`)로 두어 중앙 카탈로그 없이 유지한다. **엔진 생성 문구**는 구조화 데이터로 로컬라이즈: assertion detail은 `kind`+`value`로 KO 재구성(EN은 엔진 canonical), self-heal 접두어·verdict 라벨(`vLabel`)도 언어별. **비대상**(시트 언어를 따름): 프로젝트/시트 이름, 케이스 제목·스텝·기대결과·따옴표 값, 서버 생성 리뷰 사유. 구(舊) 실행 데이터는 assertion `kind/value`가 없어 EN detail로 폴백.
 
 > 라우팅: SPA에 **경로 기반 history 라우팅**(`/p/{projectId}/{sheetId}/{tab}`, dash는 생략). state↔URL을 `pushState`/`popstate`로 동기해 **새로고침·딥링크·뒤로/앞으로**를 지원한다. Vite `base: "/"`(절대 경로)로 어떤 딥경로에서도 에셋/파비콘이 사이트 루트에서 로드되고, Studio 서버의 기존 정적 SPA fallback(파일 없으면 index.html)이 딥링크를 받는다. 라이브러리 없이 `App.tsx`의 `readRoute()`/`routePath()`로 구현.
+
+> AI 어시스트 컨텍스트(T1+T2, 2026-07-22): 사람이 in-system으로 준 힌트가 AI 플랜 작성에 도달하도록 연결. **T1** — `getOrAuthorPlan`이 rule을 `authorPlanAI`까지 forward해, 사람이 refine으로 가르친 **의도 어휘(intents)·destructiveKeywords**를 플랜 프롬프트의 "step vocabulary" 힌트로 주입(이전엔 AI 켜면 규칙이 무시됐음). **T2** — 시트별 자유서술 **`appContext`**(규칙에 저장, `setRuleContext`가 ruleVersion을 bump → 플랜/assertion 캐시 무효화 → 재작성)를 규칙·해석 뷰에서 편집(`POST /api/rule/context`)하고 `authorPlanAI` 프롬프트에 도메인 컨텍스트로 주입. 목적: 애매한 "천차만별" TC도 외부 AI 없이 in-system 어시스트로 이해도를 높임.
+>
+> **T3(추후 고민)**: 케이스 단위 AI 플랜 교정 루프 — 특정 TC의 플랜이 틀렸을 때 규칙처럼 대화형으로 "이 케이스는 '로그인'을 눌러"라고 고치거나, 시트에 per-case 힌트 열을 두는 것. 데이터모델·UI(케이스별 플랜 표시/편집) 확장이 필요해 규모가 큼. 지금은 T1+T2로 프로젝트/시트 레벨 어시스트까지만 커버.

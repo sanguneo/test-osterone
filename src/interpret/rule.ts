@@ -21,6 +21,8 @@ export interface InterpretationRule {
 	mapping: Partial<Record<TcField, string>>;
 	intents: Record<IntentKind, string[]>;
 	destructiveKeywords: string[];
+	/** Author-provided free-text domain context/instructions fed to AI plan authoring (per sheet). */
+	appContext?: string;
 }
 
 const DEFAULT_INTENTS: Record<IntentKind, string[]> = {
@@ -64,6 +66,7 @@ export function parseRule(text: string): InterpretationRule {
 		mapping: sanitizeMapping((raw as Record<string, unknown>).mapping, {}),
 		intents: sanitizeIntents((raw as Record<string, unknown>).intents, DEFAULT_INTENTS),
 		destructiveKeywords: sanitizeStrings((raw as Record<string, unknown>).destructiveKeywords, DEFAULT_DESTRUCTIVE),
+		appContext: typeof raw.appContext === "string" ? raw.appContext : undefined,
 	};
 }
 
@@ -110,9 +113,17 @@ export async function refineRule(
 		mapping: sanitizeMapping(obj.mapping, rule.mapping),
 		intents: sanitizeIntents(obj.intents, rule.intents),
 		destructiveKeywords: sanitizeStrings(obj.destructiveKeywords, rule.destructiveKeywords),
+		appContext: rule.appContext,
 	};
 	const changed = ruleShapeKey(next) !== ruleShapeKey(rule);
 	return { rule: changed ? bumpRuleVersion(next) : next, message: String(obj.message ?? ""), changed };
+}
+
+/** Set the author-provided AI context; bumps the version so cached plans re-author on the next run. */
+export function setRuleContext(rule: InterpretationRule, appContext: string): InterpretationRule {
+	const next = appContext.trim();
+	if (next === (rule.appContext ?? "").trim()) return rule;
+	return { ...rule, appContext: next || undefined, ruleVersion: rule.ruleVersion + 1 };
 }
 
 /** Human-readable warnings that keep a rule interpretable: ambiguous or empty intents. */

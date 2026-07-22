@@ -41,6 +41,7 @@ export const api = {
 	preview: (cfg: RunInput, signal?: AbortSignal) => j<PreviewResult>("/api/tc/preview", { ...post(cfg), signal }),
 	refine: (instruction: string, projectId: string, sheetId?: string) => j<RefineResult>("/api/refine", post({ instruction, projectId, sheetId })),
 	refineReset: (projectId: string, sheetId?: string) => j<Status>("/api/refine/reset", post({ projectId, sheetId })),
+	setRuleContext: (appContext: string, projectId: string, sheetId?: string) => j<Status>("/api/rule/context", post({ appContext, projectId, sheetId })),
 	analyze: (body: { sheetUrl?: string; csvText?: string; projectId: string; sheetId: string }) =>
 		j<AnalyzeResult>("/api/sheet/analyze", post(body)),
 	reviewQueue: (pid: string, sheetId?: string, all?: boolean) =>

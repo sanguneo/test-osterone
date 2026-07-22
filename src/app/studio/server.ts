@@ -31,7 +31,7 @@ import {
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
 import { getOrAuthorPlan } from "../../interpret/author.ts";
-import { type InterpretationRule, refineRule, ruleLint } from "../../interpret/rule.ts";
+import { type InterpretationRule, refineRule, ruleLint, setRuleContext } from "../../interpret/rule.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
 import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts";
 import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
@@ -311,6 +311,7 @@ function statusPayload(projectId: string, sheetId?: string): Record<string, unkn
 		mapping: ss.rule.mapping,
 		warnings: ruleLint(ss.rule),
 		chat: ss.refineChat,
+		appContext: ss.rule.appContext ?? "",
 	};
 }
 
@@ -676,6 +677,25 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		ss.rule = structuredClone(st.defaultRule);
 		saveState(pid, st);
 		return send(res, 200, JSON.stringify(statusPayload(pid, sid)));
+	}
+	if (req.method === "POST" && url.pathname === "/api/rule/context") {
+		try {
+			const { appContext, projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
+				appContext?: string;
+				projectId?: string;
+				sheetId?: string;
+			};
+			const pid = projectId || "sample";
+			const st = stateFor(pid);
+			const project = allProjects().find((p) => p.id === pid);
+			const sid = resolveSheetId(project, sheetId);
+			const ss = sheetState(st, sid);
+			ss.rule = setRuleContext(ss.rule, String(appContext ?? "").slice(0, 4000));
+			saveState(pid, st);
+			return send(res, 200, JSON.stringify(statusPayload(pid, sid)));
+		} catch (err) {
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
 	}
 	if (req.method === "POST" && url.pathname === "/api/refine") {
 		if (!modelClient) return send(res, 400, JSON.stringify({ error: "Connect a model first." }));

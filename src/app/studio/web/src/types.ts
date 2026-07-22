@@ -67,6 +67,7 @@ export interface AuthState {
 export interface Status {
 	connected: boolean;
 	codexAvailable?: boolean;
+	appContext?: string;
 	auth: AuthState | null;
 	projectId: string;
 	ruleVersion: number;
