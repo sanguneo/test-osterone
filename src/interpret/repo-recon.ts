@@ -18,7 +18,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { type Dirent, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { type Dirent, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, extname, join, relative } from "node:path";
 import type { ModelClient } from "../model/model-client.ts";
 
@@ -275,12 +275,14 @@ export function codegraphExplore(dir: string, query: string): string | null {
 /**
  * Resolve a reference repo to a local directory. A local path is used in place;
  * a non-empty cache dir is reused; otherwise a shallow git clone is performed.
+ * `opts.refresh` drops an existing cache first so the clone re-fetches the latest HEAD
+ * (no effect on a local-path source, which is always read in place).
  * Requires `git` only for the clone branch.
  */
 export function acquireRepo(
 	source: string,
 	cacheDir: string,
-	opts: { token?: string } = {},
+	opts: { token?: string; refresh?: boolean } = {},
 ): { dir: string; mode: AcquireMode } {
 	const src = source.trim();
 	if (src && existsSync(src)) {
@@ -290,6 +292,7 @@ export function acquireRepo(
 			// fall through to clone handling
 		}
 	}
+	if (opts.refresh && existsSync(cacheDir)) rmSync(cacheDir, { recursive: true, force: true });
 	if (existsSync(join(cacheDir, ".git"))) return { dir: cacheDir, mode: "cached" };
 	if (!src) throw new Error("referenceRepo가 비어 있습니다.");
 	mkdirSync(dirname(cacheDir), { recursive: true });

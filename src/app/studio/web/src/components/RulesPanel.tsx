@@ -64,6 +64,8 @@ const S = {
 		repoDone: (files: number, cg: boolean) => `파일 ${files}개 스캔${cg ? " · CodeGraph 사용" : ""} — 검토 후 저장`,
 		repoFailed: (msg: string) => `레포 분석 실패: ${msg} — referenceRepo 경로/권한과 모델 연결을 확인하세요.`,
 		needRepo: "프로젝트에 referenceRepo 설정이 필요합니다",
+		repoTokenPlaceholder: "비공개 레포 토큰(선택) — 저장 안 함, 이번 분석에만 사용",
+		repoRefreshLabel: "새로 클론",
 	},
 	en: {
 		sectionTitle: "Rules & Interpretation",
@@ -124,6 +126,8 @@ const S = {
 		repoDone: (files: number, cg: boolean) => `Scanned ${files} file(s)${cg ? " · CodeGraph used" : ""} — review, then save`,
 		repoFailed: (msg: string) => `Repo analysis failed: ${msg} — check the referenceRepo path/permissions and model connection.`,
 		needRepo: "Set a referenceRepo on the project first",
+		repoTokenPlaceholder: "Private repo token (optional) — not stored, used only for this run",
+		repoRefreshLabel: "Re-clone",
 	},
 } as const;
 
@@ -164,6 +168,8 @@ export function RulesPanel({
 	const [repoBusy, setRepoBusy] = useState(false);
 	const [repoMsg, setRepoMsg] = useState("");
 	const [repoErr, setRepoErr] = useState(false);
+	const [repoToken, setRepoToken] = useState("");
+	const [repoRefresh, setRepoRefresh] = useState(false);
 
 	const chat = status?.chat ?? [];
 	const mapping = status?.mapping ?? {};
@@ -214,7 +220,12 @@ export function RulesPanel({
 		setRepoErr(false);
 		setRepoMsg(t.repoRunning);
 		try {
-			const d = await api.analyzeRepo({ projectId: selId, sheetId: selSheetId });
+			const d = await api.analyzeRepo({
+				projectId: selId,
+				sheetId: selSheetId,
+				token: repoToken.trim() || undefined,
+				refresh: repoRefresh,
+			});
 			if (d.context) {
 				setCodeCtx(d.context);
 				setCodeCtxMsg("");
@@ -367,7 +378,11 @@ export function RulesPanel({
 						</div>
 						<div className="editor-actions" style={{ marginTop: 10, flexWrap: "wrap", gap: 8 }}>
 							<button className="button secondary compact" type="button" disabled={repoBusy || !connected || !project?.referenceRepo?.trim()} title={!connected ? t.needModelConn : !project?.referenceRepo?.trim() ? t.needRepo : undefined} onClick={analyzeRepo}>{repoBusy ? t.repoRunning : t.repoButton}</button>
+							<label className="muted" style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+								<input type="checkbox" checked={repoRefresh} onChange={(event) => setRepoRefresh(event.target.checked)} /> {t.repoRefreshLabel}
+							</label>
 						</div>
+						<input type="password" value={repoToken} onChange={(event) => setRepoToken(event.target.value)} placeholder={t.repoTokenPlaceholder} autoComplete="off" style={{ marginTop: 8, width: "100%" }} />
 						<p className="detail">{t.repoNote}</p>
 						{repoMsg && <div className={`inline-status${repoErr ? " error" : ""}`} role={repoErr ? "alert" : "status"}>{repoMsg}</div>}
 					</div>

@@ -943,6 +943,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				sheetId?: string;
 				query?: string;
 				token?: string;
+				refresh?: boolean;
 			};
 			const pid = body.projectId || "sample";
 			const project = userProjects.find((p) => p.id === pid);
@@ -952,8 +953,16 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				return send(res, 400, JSON.stringify({ error: "프로젝트에 referenceRepo(레포 경로/URL)를 먼저 설정하세요." }));
 			const cacheDir = join(homedir(), ".test-osterone", "repo-cache", pid);
 			const notes: string[] = [];
-			const { dir, mode } = acquireRepo(source, cacheDir, { token: body.token });
-			notes.push(mode === "local" ? "로컬 경로 사용" : mode === "cached" ? "캐시된 클론 재사용" : "shallow clone 완료");
+			const { dir, mode } = acquireRepo(source, cacheDir, { token: body.token, refresh: body.refresh });
+			notes.push(
+				mode === "local"
+					? "로컬 경로 사용"
+					: mode === "cached"
+						? "캐시된 클론 재사용"
+						: body.refresh
+							? "새로 클론(refresh)"
+							: "shallow clone 완료",
+			);
 			const query = body.query?.trim() || project.name;
 			const result: RepoReconResult = await reconRepo(dir, modelClient, { query });
 			return send(

@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acquireRepo, detectCodegraph, digestRepoDir, reconRepo, reduceRepo } from "../src/interpret/repo-recon.ts";
@@ -99,6 +99,26 @@ test("acquireRepo reuses a populated cache dir instead of cloning a URL", () => 
 	tmpDirs.push(cache);
 	mkdirSync(join(cache, ".git"), { recursive: true });
 	expect(acquireRepo("https://example.invalid/nope.git", cache)).toEqual({ dir: cache, mode: "cached" });
+});
+
+test("acquireRepo refresh drops an existing cache before re-cloning", () => {
+	const cache = mkdtempSync(join(tmpdir(), "repo-recon-refresh-"));
+	tmpDirs.push(cache);
+	mkdirSync(join(cache, ".git"), { recursive: true });
+	// no refresh → reuse the cache
+	expect(acquireRepo("", cache)).toEqual({ dir: cache, mode: "cached" });
+	// refresh → cache is removed first; with no source there is nothing to clone, so it throws
+	expect(() => acquireRepo("", cache, { refresh: true })).toThrow();
+	expect(existsSync(cache)).toBe(false);
+});
+
+test("acquireRepo refresh is a no-op for a local-path source (cache untouched)", () => {
+	const repo = makeFixtureRepo();
+	const cache = mkdtempSync(join(tmpdir(), "repo-recon-refresh-local-"));
+	tmpDirs.push(cache);
+	mkdirSync(join(cache, ".git"), { recursive: true });
+	expect(acquireRepo(repo, cache, { refresh: true })).toEqual({ dir: repo, mode: "local" });
+	expect(existsSync(join(cache, ".git"))).toBe(true);
 });
 
 test("reconRepo digests + reduces a local repo; CodeGraph stays optional (absent → file scan only)", async () => {

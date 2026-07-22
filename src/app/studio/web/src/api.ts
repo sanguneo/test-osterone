@@ -50,7 +50,7 @@ export const api = {
 		j<AnalyzeResult>("/api/sheet/analyze", post(body)),
 	analyzeApp: (body: { projectId: string; sheetId: string; deep?: boolean; loginPath?: string; accountId?: string }) =>
 		j<AppReconResult>("/api/app/analyze", post(body)),
-	analyzeRepo: (body: { projectId: string; sheetId?: string; query?: string; token?: string }) =>
+	analyzeRepo: (body: { projectId: string; sheetId?: string; query?: string; token?: string; refresh?: boolean }) =>
 		j<RepoReconResult>("/api/repo/analyze", post(body)),
 	reviewQueue: (pid: string, sheetId?: string, all?: boolean) =>
 		j<ReviewItem[]>(
