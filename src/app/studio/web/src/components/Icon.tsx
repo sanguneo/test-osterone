@@ -6,6 +6,7 @@ export type IconName =
 	| "check"
 	| "close"
 	| "edit"
+	| "import"
 	| "model"
 	| "overview"
 	| "play"
@@ -37,6 +38,14 @@ function iconPath(name: IconName): ReactNode {
 				<>
 					<path d="m14 5 5 5" />
 					<path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4Z" />
+				</>
+			);
+		case "import":
+			return (
+				<>
+					<path d="M12 4v10" />
+					<path d="m8 8 4-4 4 4" />
+					<path d="M5 15v4h14v-4" />
 				</>
 			);
 		case "model":

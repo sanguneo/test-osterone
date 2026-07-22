@@ -19,6 +19,7 @@ const S = {
 		delete: "삭제",
 		addProjectAria: "프로젝트 추가",
 		addSheetAria: "시트 추가",
+		importSheetsAria: "XLSX 가져오기",
 		sampleNoSheetAdd: "샘플 프로젝트에는 시트를 추가할 수 없습니다",
 		noResults: "검색 결과 없음",
 		noSheets: "연결된 시트 없음",
@@ -44,6 +45,7 @@ const S = {
 		delete: "Delete",
 		addProjectAria: "Add project",
 		addSheetAria: "Add sheet",
+		importSheetsAria: "Import XLSX",
 		sampleNoSheetAdd: "Sample project can't add sheets",
 		noResults: "No results",
 		noSheets: "No sheets linked",
@@ -65,6 +67,7 @@ interface StudioChromeProps {
 	readonly navReviewCount: number;
 	readonly onAddProject: () => void;
 	readonly onAddSheet: () => void;
+	readonly onImportSheets: () => void;
 	readonly onDeleteProject: (id: string) => void;
 	readonly onEditProject: (project: Project) => void;
 	readonly onEditSheet: (sheet: TestSheet) => void;
@@ -219,6 +222,16 @@ export function StudioChrome(props: StudioChromeProps) {
 							</span>
 						)) : <span className="context-empty">{sheetQuery ? t.noResults : t.noSheets}</span>}
 					</div>
+					<button
+						className="icon-button context-add"
+						type="button"
+						aria-label={t.importSheetsAria}
+						title={selected?.id === "sample" ? t.sampleNoSheetAdd : t.importSheetsAria}
+						disabled={!selected || selected.id === "sample"}
+						onClick={props.onImportSheets}
+					>
+						<Icon name="import" />
+					</button>
 					<button
 						className="icon-button context-add"
 						type="button"
