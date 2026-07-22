@@ -48,6 +48,12 @@ const S = {
 		savingContext: "저장 중",
 		contextSaved: "저장됨",
 		contextSaveFailed: (msg: string) => `저장 실패: ${msg}`,
+		reconButton: "라이브 앱 분석",
+		reconDeepLabel: "하위 페이지까지",
+		reconRunning: "라이브 앱을 정찰하는 중…",
+		reconNote: "시트 주소(baseUrl)에 접속해 구조(내비·폼·표)를 스캔하고 도메인 컨텍스트 초안을 만듭니다. 계정이 연결돼 있으면 로그인도 시도합니다. 결과는 위 컨텍스트 칸에 채워지며 저장 전에 검토하세요.",
+		reconDone: (n: number, logged: boolean) => `${n}개 페이지 스캔${logged ? " · 로그인됨" : ""} — 검토 후 저장`,
+		reconFailed: (msg: string) => `앱 분석 실패: ${msg} — 주소·계정·모델 연결을 확인한 뒤 다시 시도하세요.`,
 	},
 	en: {
 		sectionTitle: "Rules & Interpretation",
@@ -92,6 +98,12 @@ const S = {
 		savingContext: "Saving",
 		contextSaved: "Saved",
 		contextSaveFailed: (msg: string) => `Save failed: ${msg}`,
+		reconButton: "Analyze live app",
+		reconDeepLabel: "Include sub-pages",
+		reconRunning: "Reconning the live app…",
+		reconNote: "Visits the sheet's baseUrl, scans its structure (nav / forms / tables), and drafts domain context. If an account is linked it also attempts login. The result fills the context box above — review before saving.",
+		reconDone: (n: number, logged: boolean) => `Scanned ${n} page(s)${logged ? " · logged in" : ""} — review, then save`,
+		reconFailed: (msg: string) => `App analysis failed: ${msg} — check the address, account, and model connection, then retry.`,
 	},
 } as const;
 
@@ -122,6 +134,10 @@ export function RulesPanel({
 	const [appCtx, setAppCtx] = useState(status?.appContext ?? "");
 	const [ctxBusy, setCtxBusy] = useState(false);
 	const [ctxMsg, setCtxMsg] = useState("");
+	const [reconBusy, setReconBusy] = useState(false);
+	const [reconDeep, setReconDeep] = useState(false);
+	const [reconMsg, setReconMsg] = useState("");
+	const [reconErr, setReconErr] = useState(false);
 
 	const chat = status?.chat ?? [];
 	const mapping = status?.mapping ?? {};
@@ -143,6 +159,30 @@ export function RulesPanel({
 			setCtxMsg(t.contextSaveFailed((e as Error).message));
 		} finally {
 			setCtxBusy(false);
+		}
+	}
+
+	async function analyzeApp() {
+		if (!sheet) {
+			setReconErr(true);
+			setReconMsg(t.needProjectWithSource);
+			return;
+		}
+		setReconBusy(true);
+		setReconErr(false);
+		setReconMsg(t.reconRunning);
+		try {
+			const d = await api.analyzeApp({ projectId: selId, sheetId: sheet.id, deep: reconDeep });
+			if (d.context) {
+				setAppCtx(d.context);
+				setCtxMsg("");
+			}
+			setReconMsg([t.reconDone(d.pages.length, d.loggedIn), ...d.notes].join(" · "));
+		} catch (e) {
+			setReconErr(true);
+			setReconMsg(t.reconFailed((e as Error).message));
+		} finally {
+			setReconBusy(false);
 		}
 	}
 
@@ -242,6 +282,14 @@ export function RulesPanel({
 							<button className="button secondary compact" type="button" disabled={ctxBusy || appCtx === (status?.appContext ?? "")} onClick={saveContext}>{ctxBusy ? t.savingContext : t.saveContext}</button>
 							{ctxMsg && <span className="muted" style={{ fontSize: 12 }}>{ctxMsg}</span>}
 						</div>
+						<div className="editor-actions" style={{ marginTop: 10, flexWrap: "wrap", gap: 8 }}>
+							<button className="button secondary compact" type="button" disabled={reconBusy || !connected} title={connected ? undefined : t.needModelConn} onClick={analyzeApp}>{reconBusy ? t.reconRunning : t.reconButton}</button>
+							<label className="muted" style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+								<input type="checkbox" checked={reconDeep} onChange={(event) => setReconDeep(event.target.checked)} /> {t.reconDeepLabel}
+							</label>
+						</div>
+						<p className="detail">{t.reconNote}</p>
+						{reconMsg && <div className={`inline-status${reconErr ? " error" : ""}`} role={reconErr ? "alert" : "status"}>{reconMsg}</div>}
 					</div>
 				</aside>
 

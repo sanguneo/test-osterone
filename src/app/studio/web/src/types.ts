@@ -105,6 +105,23 @@ export interface AnalyzeResult {
 	chat: ChatMsg[];
 }
 
+export interface AppReconPage {
+	url: string;
+	title: string;
+	navLabels: string[];
+	formFields: string[];
+	buttons: string[];
+	tableHeaders: string[];
+}
+
+export interface AppReconResult {
+	/** Model-reduced Korean domain brief (empty when the model returned nothing). */
+	context: string;
+	loggedIn: boolean;
+	notes: string[];
+	pages: AppReconPage[];
+}
+
 export interface PreviewCase {
 	caseId: string;
 	title: string;

@@ -31,6 +31,7 @@ import {
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
 import { getOrAuthorPlan } from "../../interpret/author.ts";
+import { type ReconResult, reconApp } from "../../interpret/recon.ts";
 import { type InterpretationRule, refineRule, ruleLint, setRuleContext } from "../../interpret/rule.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
 import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts";
@@ -869,6 +870,58 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			);
 		} catch (err) {
 			console.error("analyze failed:", (err as Error).stack ?? err);
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
+	if (req.method === "POST" && url.pathname === "/api/app/analyze") {
+		if (!modelClient) return send(res, 400, JSON.stringify({ error: "Connect a model first." }));
+		try {
+			const body = JSON.parse((await readBody(req)) || "{}") as {
+				projectId?: string;
+				sheetId?: string;
+				deep?: boolean;
+				loginPath?: string;
+				accountId?: string;
+			};
+			const pid = body.projectId || "sample";
+			const project = userProjects.find((p) => p.id === pid);
+			const sheet = project?.sheets.find((s) => s.id === body.sheetId) ?? project?.sheets[0];
+			if (!project || !sheet)
+				return send(res, 400, JSON.stringify({ error: "앱 분석에는 저장된 프로젝트 시트가 필요합니다." }));
+			const baseUrl = (sheet.baseUrl || project.baseUrl || "").trim();
+			if (!baseUrl)
+				return send(res, 400, JSON.stringify({ error: "프로젝트나 시트에 baseUrl(주소)을 먼저 설정하세요." }));
+			const account = project.accounts.find((a) => a.id === (body.accountId || sheet.accountId)) ?? project.accounts[0];
+			const page = await BrowserPage.create({ baseUrl, timeoutMs: 8000, browser: await sharedBrowser() });
+			let result: ReconResult;
+			try {
+				result = await reconApp(page, modelClient, {
+					loginPath: body.loginPath?.trim() || undefined,
+					deep: !!body.deep,
+					account: account ? { username: account.username, password: account.password } : undefined,
+				});
+			} finally {
+				await page.close();
+			}
+			return send(
+				res,
+				200,
+				JSON.stringify({
+					context: result.context,
+					loggedIn: result.loggedIn,
+					notes: result.notes,
+					pages: result.pages.map((p) => ({
+						url: p.url,
+						title: p.title,
+						navLabels: p.links.map((l) => l.label).slice(0, 25),
+						formFields: p.formFields,
+						buttons: p.buttons,
+						tableHeaders: p.tableHeaders,
+					})),
+				}),
+			);
+		} catch (err) {
+			console.error("app analyze failed:", (err as Error).stack ?? err);
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
 	}
