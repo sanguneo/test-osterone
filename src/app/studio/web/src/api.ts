@@ -9,6 +9,7 @@ import type {
 	RunAllEvent,
 	RunInput,
 	RunView,
+	RepoReconResult,
 	Status,
 	XlsxSheet,
 } from "./types";
@@ -44,10 +45,13 @@ export const api = {
 	refine: (instruction: string, projectId: string, sheetId?: string) => j<RefineResult>("/api/refine", post({ instruction, projectId, sheetId })),
 	refineReset: (projectId: string, sheetId?: string) => j<Status>("/api/refine/reset", post({ projectId, sheetId })),
 	setRuleContext: (appContext: string, projectId: string, sheetId?: string) => j<Status>("/api/rule/context", post({ appContext, projectId, sheetId })),
+	setRuleCodeContext: (codeContext: string, projectId: string, sheetId?: string) => j<Status>("/api/rule/context", post({ codeContext, projectId, sheetId })),
 	analyze: (body: { sheetUrl?: string; csvText?: string; projectId: string; sheetId: string }) =>
 		j<AnalyzeResult>("/api/sheet/analyze", post(body)),
 	analyzeApp: (body: { projectId: string; sheetId: string; deep?: boolean; loginPath?: string; accountId?: string }) =>
 		j<AppReconResult>("/api/app/analyze", post(body)),
+	analyzeRepo: (body: { projectId: string; sheetId?: string; query?: string; token?: string }) =>
+		j<RepoReconResult>("/api/repo/analyze", post(body)),
 	reviewQueue: (pid: string, sheetId?: string, all?: boolean) =>
 		j<ReviewItem[]>(
 			`/api/review/queue?${q(pid)}${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ""}${all ? "&all=1" : ""}`,

@@ -117,6 +117,7 @@ export async function authorPlanAI(
 	const ctxBlock = ctx.length ? `\nContext (use for login/fill steps when relevant):\n${ctx.join("\n")}` : "";
 	const guide: string[] = [];
 	if (rule?.appContext?.trim()) guide.push(rule.appContext.trim());
+	if (rule?.codeContext?.trim()) guide.push(`App code context (from the reference repo) — ${rule.codeContext.trim()}`);
 	if (rule) {
 		const vocab = Object.entries(rule.intents)
 			.filter(([, v]) => v.length > 0)

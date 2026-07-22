@@ -32,7 +32,14 @@ import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
 import { getOrAuthorPlan } from "../../interpret/author.ts";
 import { type ReconResult, reconApp } from "../../interpret/recon.ts";
-import { type InterpretationRule, refineRule, ruleLint, setRuleContext } from "../../interpret/rule.ts";
+import { acquireRepo, type RepoReconResult, reconRepo } from "../../interpret/repo-recon.ts";
+import {
+	type InterpretationRule,
+	refineRule,
+	ruleLint,
+	setRuleCodeContext,
+	setRuleContext,
+} from "../../interpret/rule.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
 import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts";
 import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
@@ -348,6 +355,7 @@ function statusPayload(projectId: string, sheetId?: string): Record<string, unkn
 		warnings: ruleLint(ss.rule),
 		chat: ss.refineChat,
 		appContext: ss.rule.appContext ?? "",
+		codeContext: ss.rule.codeContext ?? "",
 	};
 }
 
@@ -755,8 +763,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 	}
 	if (req.method === "POST" && url.pathname === "/api/rule/context") {
 		try {
-			const { appContext, projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
+			const { appContext, codeContext, projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
 				appContext?: string;
+				codeContext?: string;
 				projectId?: string;
 				sheetId?: string;
 			};
@@ -765,7 +774,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			const project = allProjects().find((p) => p.id === pid);
 			const sid = resolveSheetId(project, sheetId);
 			const ss = sheetState(st, sid);
-			ss.rule = setRuleContext(ss.rule, String(appContext ?? "").slice(0, 4000));
+			if (appContext !== undefined) ss.rule = setRuleContext(ss.rule, String(appContext).slice(0, 4000));
+			if (codeContext !== undefined) ss.rule = setRuleCodeContext(ss.rule, String(codeContext).slice(0, 8000));
 			saveState(pid, st);
 			return send(res, 200, JSON.stringify(statusPayload(pid, sid)));
 		} catch (err) {
@@ -922,6 +932,48 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			);
 		} catch (err) {
 			console.error("app analyze failed:", (err as Error).stack ?? err);
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
+	if (req.method === "POST" && url.pathname === "/api/repo/analyze") {
+		if (!modelClient) return send(res, 400, JSON.stringify({ error: "Connect a model first." }));
+		try {
+			const body = JSON.parse((await readBody(req)) || "{}") as {
+				projectId?: string;
+				sheetId?: string;
+				query?: string;
+				token?: string;
+			};
+			const pid = body.projectId || "sample";
+			const project = userProjects.find((p) => p.id === pid);
+			if (!project) return send(res, 400, JSON.stringify({ error: "레포 분석에는 저장된 프로젝트가 필요합니다." }));
+			const source = (project.referenceRepo || "").trim();
+			if (!source)
+				return send(res, 400, JSON.stringify({ error: "프로젝트에 referenceRepo(레포 경로/URL)를 먼저 설정하세요." }));
+			const cacheDir = join(homedir(), ".test-osterone", "repo-cache", pid);
+			const notes: string[] = [];
+			const { dir, mode } = acquireRepo(source, cacheDir, { token: body.token });
+			notes.push(mode === "local" ? "로컬 경로 사용" : mode === "cached" ? "캐시된 클론 재사용" : "shallow clone 완료");
+			const query = body.query?.trim() || project.name;
+			const result: RepoReconResult = await reconRepo(dir, modelClient, { query });
+			return send(
+				res,
+				200,
+				JSON.stringify({
+					context: result.context,
+					codegraph: result.codegraph,
+					notes: [...notes, ...result.notes],
+					digest: {
+						name: result.digest.name,
+						scripts: result.digest.scripts,
+						routes: result.digest.routes,
+						components: result.digest.components,
+						fileCount: result.digest.files.length,
+					},
+				}),
+			);
+		} catch (err) {
+			console.error("repo analyze failed:", (err as Error).stack ?? err);
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
 	}

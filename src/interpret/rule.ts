@@ -23,6 +23,8 @@ export interface InterpretationRule {
 	destructiveKeywords: string[];
 	/** Author-provided free-text domain context/instructions fed to AI plan authoring (per sheet). */
 	appContext?: string;
+	/** Author-provided free-text code/repo context fed to AI plan authoring (per sheet). */
+	codeContext?: string;
 }
 
 const DEFAULT_INTENTS: Record<IntentKind, string[]> = {
@@ -67,6 +69,7 @@ export function parseRule(text: string): InterpretationRule {
 		intents: sanitizeIntents((raw as Record<string, unknown>).intents, DEFAULT_INTENTS),
 		destructiveKeywords: sanitizeStrings((raw as Record<string, unknown>).destructiveKeywords, DEFAULT_DESTRUCTIVE),
 		appContext: typeof raw.appContext === "string" ? raw.appContext : undefined,
+		codeContext: typeof raw.codeContext === "string" ? raw.codeContext : undefined,
 	};
 }
 
@@ -114,6 +117,7 @@ export async function refineRule(
 		intents: sanitizeIntents(obj.intents, rule.intents),
 		destructiveKeywords: sanitizeStrings(obj.destructiveKeywords, rule.destructiveKeywords),
 		appContext: rule.appContext,
+		codeContext: rule.codeContext,
 	};
 	const changed = ruleShapeKey(next) !== ruleShapeKey(rule);
 	return { rule: changed ? bumpRuleVersion(next) : next, message: String(obj.message ?? ""), changed };
@@ -124,6 +128,13 @@ export function setRuleContext(rule: InterpretationRule, appContext: string): In
 	const next = appContext.trim();
 	if (next === (rule.appContext ?? "").trim()) return rule;
 	return { ...rule, appContext: next || undefined, ruleVersion: rule.ruleVersion + 1 };
+}
+
+/** Set the author-provided code/repo context; bumps the version so cached plans re-author on the next run. */
+export function setRuleCodeContext(rule: InterpretationRule, codeContext: string): InterpretationRule {
+	const next = codeContext.trim();
+	if (next === (rule.codeContext ?? "").trim()) return rule;
+	return { ...rule, codeContext: next || undefined, ruleVersion: rule.ruleVersion + 1 };
 }
 
 /** Human-readable warnings that keep a rule interpretable: ambiguous or empty intents. */

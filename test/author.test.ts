@@ -84,3 +84,16 @@ test("authorPlanAI feeds rule appContext + step vocabulary into the prompt (huma
 	expect(seen).toContain("Banking dashboard; login at /auth");
 	expect(seen).toContain("누르기");
 });
+
+test("authorPlanAI feeds rule codeContext into the prompt (repo code assist reaches AI authoring)", async () => {
+	const rule = establishRuleFromHeaders([]);
+	rule.codeContext = "React SPA; routes /orders /settings; login at /auth/login";
+	let seen = "";
+	const model = new FakeModelClient((msgs) => {
+		seen = msgs.map((m) => m.content).join("\n");
+		return JSON.stringify({ actions: [], assertions: [] });
+	});
+	await authorPlanAI(tc(), model, {}, rule);
+	expect(seen).toContain("App code context");
+	expect(seen).toContain("/auth/login");
+});

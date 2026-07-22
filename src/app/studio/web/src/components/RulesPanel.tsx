@@ -54,6 +54,16 @@ const S = {
 		reconNote: "시트 주소(baseUrl)에 접속해 구조(내비·폼·표)를 스캔하고 도메인 컨텍스트 초안을 만듭니다. 계정이 연결돼 있으면 로그인도 시도합니다. 결과는 위 컨텍스트 칸에 채워지며 저장 전에 검토하세요.",
 		reconDone: (n: number, logged: boolean) => `${n}개 페이지 스캔${logged ? " · 로그인됨" : ""} — 검토 후 저장`,
 		reconFailed: (msg: string) => `앱 분석 실패: ${msg} — 주소·계정·모델 연결을 확인한 뒤 다시 시도하세요.`,
+		codeContextTitle: "AI 코드 컨텍스트",
+		codeContextNote: "프로젝트 referenceRepo(레포 경로/URL)를 스캔해 앱 구조·라우트·화면을 파악하고, AI가 스텝을 더 정확히 해석하도록 코드 맥락을 만듭니다(AI 플랜 생성에만 사용).",
+		codeContextPlaceholder: "예: React SPA. 라우트 /orders, /settings. 로그인은 /auth/login. 목록은 <OrdersTable>로 렌더.",
+		saveCodeContext: "코드 컨텍스트 저장",
+		repoButton: "레포 코드 분석",
+		repoRunning: "레포를 분석하는 중…",
+		repoNote: "referenceRepo를 얕게 클론(또는 로컬 경로 사용)해 AGENTS.md·README·스크립트·라우트·컴포넌트를 스캔합니다. CodeGraph가 설치돼 있으면 자동으로 함께 사용하고, 없으면 파일 스캔만 씁니다(옵션). 결과는 위 코드 컨텍스트 칸에 채워지며 저장 전에 검토하세요.",
+		repoDone: (files: number, cg: boolean) => `파일 ${files}개 스캔${cg ? " · CodeGraph 사용" : ""} — 검토 후 저장`,
+		repoFailed: (msg: string) => `레포 분석 실패: ${msg} — referenceRepo 경로/권한과 모델 연결을 확인하세요.`,
+		needRepo: "프로젝트에 referenceRepo 설정이 필요합니다",
 	},
 	en: {
 		sectionTitle: "Rules & Interpretation",
@@ -104,6 +114,16 @@ const S = {
 		reconNote: "Visits the sheet's baseUrl, scans its structure (nav / forms / tables), and drafts domain context. If an account is linked it also attempts login. The result fills the context box above — review before saving.",
 		reconDone: (n: number, logged: boolean) => `Scanned ${n} page(s)${logged ? " · logged in" : ""} — review, then save`,
 		reconFailed: (msg: string) => `App analysis failed: ${msg} — check the address, account, and model connection, then retry.`,
+		codeContextTitle: "AI code context",
+		codeContextNote: "Scans the project's referenceRepo (path/URL) to learn app structure, routes, and screens, giving AI code context so it interprets steps more accurately (used only for AI plan authoring).",
+		codeContextPlaceholder: "e.g. React SPA. Routes /orders, /settings. Login at /auth/login. Lists render via <OrdersTable>.",
+		saveCodeContext: "Save code context",
+		repoButton: "Analyze repo",
+		repoRunning: "Analyzing the repo…",
+		repoNote: "Shallow-clones the referenceRepo (or uses a local path) and scans AGENTS.md / README / scripts / routes / components. If CodeGraph is installed it is used automatically; otherwise the file scan stands alone (optional). The result fills the code-context box above — review before saving.",
+		repoDone: (files: number, cg: boolean) => `Scanned ${files} file(s)${cg ? " · CodeGraph used" : ""} — review, then save`,
+		repoFailed: (msg: string) => `Repo analysis failed: ${msg} — check the referenceRepo path/permissions and model connection.`,
+		needRepo: "Set a referenceRepo on the project first",
 	},
 } as const;
 
@@ -138,6 +158,12 @@ export function RulesPanel({
 	const [reconDeep, setReconDeep] = useState(false);
 	const [reconMsg, setReconMsg] = useState("");
 	const [reconErr, setReconErr] = useState(false);
+	const [codeCtx, setCodeCtx] = useState(status?.codeContext ?? "");
+	const [codeCtxBusy, setCodeCtxBusy] = useState(false);
+	const [codeCtxMsg, setCodeCtxMsg] = useState("");
+	const [repoBusy, setRepoBusy] = useState(false);
+	const [repoMsg, setRepoMsg] = useState("");
+	const [repoErr, setRepoErr] = useState(false);
 
 	const chat = status?.chat ?? [];
 	const mapping = status?.mapping ?? {};
@@ -150,6 +176,10 @@ export function RulesPanel({
 		setAppCtx(status?.appContext ?? "");
 	}, [status?.appContext, selSheetId]);
 
+	useEffect(() => {
+		setCodeCtx(status?.codeContext ?? "");
+	}, [status?.codeContext, selSheetId]);
+
 	async function saveContext() {
 		setCtxBusy(true);
 		try {
@@ -159,6 +189,42 @@ export function RulesPanel({
 			setCtxMsg(t.contextSaveFailed((e as Error).message));
 		} finally {
 			setCtxBusy(false);
+		}
+	}
+
+	async function saveCodeContext() {
+		setCodeCtxBusy(true);
+		try {
+			onStatus(await api.setRuleCodeContext(codeCtx, selId, selSheetId));
+			setCodeCtxMsg(t.contextSaved);
+		} catch (e) {
+			setCodeCtxMsg(t.contextSaveFailed((e as Error).message));
+		} finally {
+			setCodeCtxBusy(false);
+		}
+	}
+
+	async function analyzeRepo() {
+		if (!project?.referenceRepo?.trim()) {
+			setRepoErr(true);
+			setRepoMsg(t.needRepo);
+			return;
+		}
+		setRepoBusy(true);
+		setRepoErr(false);
+		setRepoMsg(t.repoRunning);
+		try {
+			const d = await api.analyzeRepo({ projectId: selId, sheetId: selSheetId });
+			if (d.context) {
+				setCodeCtx(d.context);
+				setCodeCtxMsg("");
+			}
+			setRepoMsg([t.repoDone(d.digest.fileCount, d.codegraph), ...d.notes].join(" · "));
+		} catch (e) {
+			setRepoErr(true);
+			setRepoMsg(t.repoFailed((e as Error).message));
+		} finally {
+			setRepoBusy(false);
 		}
 	}
 
@@ -290,6 +356,20 @@ export function RulesPanel({
 						</div>
 						<p className="detail">{t.reconNote}</p>
 						{reconMsg && <div className={`inline-status${reconErr ? " error" : ""}`} role={reconErr ? "alert" : "status"}>{reconMsg}</div>}
+					</div>
+					<div className="rule-context">
+						<span className="section-label">{t.codeContextTitle}</span>
+						<p className="detail">{t.codeContextNote}</p>
+						<textarea rows={4} value={codeCtx} onChange={(event) => { setCodeCtx(event.target.value); setCodeCtxMsg(""); }} placeholder={t.codeContextPlaceholder} />
+						<div className="editor-actions" style={{ marginTop: 8 }}>
+							<button className="button secondary compact" type="button" disabled={codeCtxBusy || codeCtx === (status?.codeContext ?? "")} onClick={saveCodeContext}>{codeCtxBusy ? t.savingContext : t.saveCodeContext}</button>
+							{codeCtxMsg && <span className="muted" style={{ fontSize: 12 }}>{codeCtxMsg}</span>}
+						</div>
+						<div className="editor-actions" style={{ marginTop: 10, flexWrap: "wrap", gap: 8 }}>
+							<button className="button secondary compact" type="button" disabled={repoBusy || !connected || !project?.referenceRepo?.trim()} title={!connected ? t.needModelConn : !project?.referenceRepo?.trim() ? t.needRepo : undefined} onClick={analyzeRepo}>{repoBusy ? t.repoRunning : t.repoButton}</button>
+						</div>
+						<p className="detail">{t.repoNote}</p>
+						{repoMsg && <div className={`inline-status${repoErr ? " error" : ""}`} role={repoErr ? "alert" : "status"}>{repoMsg}</div>}
 					</div>
 				</aside>
 

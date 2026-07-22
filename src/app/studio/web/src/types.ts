@@ -76,6 +76,7 @@ export interface Status {
 	connected: boolean;
 	codexAvailable?: boolean;
 	appContext?: string;
+	codeContext?: string;
 	auth: AuthState | null;
 	projectId: string;
 	ruleVersion: number;
@@ -120,6 +121,20 @@ export interface AppReconResult {
 	loggedIn: boolean;
 	notes: string[];
 	pages: AppReconPage[];
+}
+
+export interface RepoReconResult {
+	/** Model-reduced Korean code-context brief (empty when the model returned nothing). */
+	context: string;
+	codegraph: boolean;
+	notes: string[];
+	digest: {
+		name: string;
+		scripts: string[];
+		routes: string[];
+		components: string[];
+		fileCount: number;
+	};
 }
 
 export interface PreviewCase {
