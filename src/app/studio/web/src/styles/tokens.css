@@ -77,12 +77,17 @@ button,
 a { -webkit-tap-highlight-color: transparent; }
 
 button:focus-visible,
-a:focus-visible,
+a:focus-visible {
+	outline: 2px solid var(--lime);
+	outline-offset: 2px;
+}
+
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
 	outline: 2px solid var(--lime);
-	outline-offset: 2px;
+	outline-offset: 0;
+	border-color: var(--lime);
 }
 
 button:disabled { cursor: not-allowed; opacity: 0.42; }
