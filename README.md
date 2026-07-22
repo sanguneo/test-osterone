@@ -24,7 +24,7 @@ Spreadsheet-authored test cases → an AI agent reads them, writes the assertion
 
 Test automation stalls on two costs: **authoring** (writing cases + selectors) and **maintenance** (selectors rot). test-osterone hands both to an AI agent so a non-developer can drive regression testing from a spreadsheet — while keeping the one thing that must never be a guess: **the verdict**.
 
-The name is a pun on *testosterone* (`test` + `osterone`). The persona — **"테토"** — is decisive: it would rather flag a case for review than emit a silently-wrong pass. **false-pass = 0** is the first-class goal.
+The name is a pun on *testosterone* (`test` + `osterone`). The persona — **"테토" (Teto)** — is decisive: it would rather flag a case for review than emit a silently-wrong pass. **false-pass = 0** is the first-class goal.
 
 ## The core split — an agent that *writes*, an engine that *judges*
 
@@ -38,9 +38,9 @@ The name is a pun on *testosterone* (`test` + `osterone`). The persona — **"�
 
 ### How determinism is guaranteed
 
-- Assertions are authored **once and cached** by `(caseId + ruleId + ruleVersion + caseHash)`. Re-runs only *evaluate* the cache, so the conclusion is identical. Change the rule or the case and the key changes → re-authoring (cache invalidation).
-- **Self-heal gate:** if a selector self-heals, the run may **not** auto-pass → `needs_review`.
-- **Baseline:** visual / ambiguous cases are diffed against a human-approved golden baseline with dynamic-region masking. Unapproved or drifted → `needs_review`.
+- **Author once, cache forever.** Assertions are authored once and cached by `(caseId + ruleId + ruleVersion + caseHash)`. Re-runs only *evaluate* the cache, so the conclusion is identical. Change the rule or the case and the key changes → re-authoring (cache invalidation).
+- **Self-heal gate.** If a selector self-heals, the run may **not** auto-pass → `needs_review`.
+- **Baseline.** Visual / ambiguous cases are diffed against a human-approved golden baseline with dynamic-region masking. Unapproved or drifted → `needs_review`.
 - **Principle:** *rather than emit a false pass, route to needs_review.*
 
 ## Pipeline
@@ -118,29 +118,58 @@ A point-and-click front door. Start it once; after that everything happens in th
 bun run studio     # builds the React UI (Vite) then serves it — open http://localhost:8686
 ```
 
-Model connection is **global**, in the top bar — a login-style control (● status + model name) that opens a modal with three modes: **ChatGPT login** (native OpenAI **device-code** OAuth in the browser — **no `codex` CLI required**; also auto-detects a local `codex` session if present), **paste a token** (+ optional model override), or **API Key / endpoint** — connect *any* OpenAI-compatible endpoint (Azure OpenAI, OpenRouter, Together, local vLLM/Ollama) via model + Base URL. An optional **reasoning level** (minimal/low/medium/high/xhigh/max) applies to reasoning models. The model is only ever used at **author time**; it never judges.
+The deterministic engine runs each case against real headless Chromium and renders verdict badges, per-assertion detail, self-heal events, and the needs_review queue — no CSV escaping, no terminal after launch.
 
-The top header shows the brand mark, product name, the global model-connection status, and a **KO/EN language toggle**; clicking the brand returns you to the Welcome screen. Below it, a horizontal **Project | Sheet** context strip lets you pick or switch the active project and sheet, with **inline add/edit/delete** for both (a project editor modal and a sheet editor modal — no separate "manage" screen). Once a sheet is selected, a **left vertical view-rail** (a bottom dock on mobile) exposes the four sheet-scoped views — **Dashboard, Rules, Run & Results, Review** — beside the content, each with its own title and `project · sheet` context line. Navigation is an explicit drill-down: with no project selected you land on a **Welcome** screen (with a forged-logo brand hero on the left) to pick or create one; with a project but no sheet selected you land on a **Project home** listing that project's sheets as a selectable grid (or an add-first-sheet prompt if it has none); selecting a sheet opens its four views. Deleting the active project returns you to Welcome. A **Project** holds one or more first-class **Test Sheets** (Google Sheet URL / pasted CSV / uploaded `.xlsx`), plus shared defaults (target URL, environment, test account, reference repo, AI toggle). Each **Test Sheet** can **override** the target URL, environment, and column mapping independently. There is **no cap on sheet count** — a search/filter appears once the sheet list exceeds ~8 items, the active item auto-scrolls into view, the context strip goes responsive on narrow screens, and long names get tooltips.
+### Model connection (global, in the top bar)
 
-- **Per-sheet runtime** — every sheet has its **own run history and review queue**, and now its **own interpretation rule, refine chat, and approved baselines** (the project keeps a **default rule** that new sheets clone, plus a **legacy baseline fallback** for pre-upgrade approvals). The Dashboard view shows the selected sheet's data plus a compact **project roll-up** (aggregate pass rate across sheets), and the review nav badge shows a project-level roll-up. Running a sheet ingests only that sheet, with per-sheet dedupe.
-- **AI sheet interpretation & rule refine** — adding a sheet runs a **3-step onboarding wizard**: pick the **source** (Google Sheet URL / CSV / `.xlsx`) → the model proposes an **interpretation** (column mapping `id/title/step/expected/priority/…` → your header names, plus a case preview) → a **conversational refine** step where you adjust it in natural language ("use 중분류 as the title, not 소분류"). The resulting rule is stored **per sheet** (new sheets clone the project's default rule as a starting point) and is applied at ingestion for that sheet; you can keep refining a sheet's rule later from its Rules view.
-- **Run** — pick a project and sheet, optionally tick **AI 스텝 해석**, and **실행 (Run)**. Results **stream in per case** (NDJSON) — verdicts and a running pass/fail/needs_review tally appear live as each case finishes.
+A login-style control (● status + model name) opens a modal with three modes:
+
+- **ChatGPT login** — native OpenAI **device-code** OAuth in the browser. **No `codex` CLI required**; a local `codex` session is auto-detected if present.
+- **Paste a token** — plus an optional model override.
+- **API Key / endpoint** — connect *any* OpenAI-compatible endpoint (Azure OpenAI, OpenRouter, Together, local vLLM/Ollama) via model + Base URL.
+
+An optional **reasoning level** (minimal/low/medium/high/xhigh/max) applies to reasoning models. The model is only ever used at **author time**; it never judges.
+
+### Navigation & layout
+
+- **Top bar** — brand mark, product name, global model-connection status, and a **KO/EN language toggle**. Clicking the brand returns you to the Welcome screen.
+- **Context strip** — a horizontal **Project | Sheet** strip to pick or switch the active project and sheet, with **inline add/edit/delete** for both (a project editor modal and a sheet editor modal — no separate "manage" screen).
+- **View rail** — once a sheet is selected, a left vertical rail (a bottom dock on mobile) exposes the four sheet-scoped views — **Dashboard, Rules, Run & Results, Review** — each with its own title and `project · sheet` context line.
+- **Explicit drill-down** — no project selected → a **Welcome** screen (with a forged-logo brand hero) to pick or create one. Project but no sheet → a **Project home** listing that project's sheets as a selectable grid (or an add-first-sheet prompt). Selecting a sheet opens its four views; deleting the active project returns you to Welcome.
+- **Data model** — a **Project** holds one or more first-class **Test Sheets** (Google Sheet URL / pasted CSV / uploaded `.xlsx`) plus shared defaults (target URL, environment, **account pool**, reference repo, AI toggle). Each **Test Sheet** can **override** the target URL, environment, column mapping, and default account independently.
+- **No cap on sheet count** — a search/filter appears once the list exceeds ~8 items, the active item auto-scrolls into view, the context strip goes responsive on narrow screens, and long names get tooltips.
+
+### Working with sheets
+
+- **Per-sheet runtime** — every sheet has its **own run history and review queue**, plus its **own interpretation rule, refine chat, and approved baselines** (the project keeps a **default rule** that new sheets clone, and a **legacy baseline fallback** for pre-upgrade approvals). The Dashboard shows the selected sheet's data plus a compact **project roll-up** (aggregate pass rate across sheets); the review nav badge rolls up project-wide. Running a sheet ingests only that sheet, with per-sheet dedupe.
+- **AI sheet interpretation** — adding a sheet runs a **3-step onboarding wizard**: pick the **source** (Google Sheet URL / CSV / `.xlsx`) → the model proposes an **interpretation** (column mapping `id/title/step/expected/priority/…` → your header names, plus a case preview) → a **conversational refine** step where you adjust it in natural language ("use 중분류 as the title, not 소분류"). The resulting rule is stored **per sheet** and applied at ingestion; you can keep refining it later from the Rules view.
+- **Conversational rule refine** — once connected, **AI 규칙 다듬기** refines the selected sheet's rule in natural language (e.g. "recognize 누르기 as a click"). Each turn builds on the last (e.g. "undo that"), and after every turn the UI shows an **intent diff** and flags **ambiguous or empty intents**, so the rule converges to an optimal, interpretable form. Changes bump that sheet's rule version; **초기화** resets the conversation.
+
+### Running
+
+- **Run** — pick a project and sheet, optionally tick **AI 스텝 해석**, and hit **실행 (Run)**. Results **stream in per case** (NDJSON) — verdicts and a running pass/fail/needs_review tally appear live as each case finishes.
+- **AI step interpretation** — with **AI 스텝 해석** on, the connected model turns free natural-language steps (no quotes, no DSL) into a deterministic plan (actions + assertions). The plan is **authored once and cached**, then replayed deterministically — identical `pass` / `fail` / `needs_review` semantics, false-pass still 0. The bundled sample ships a quote-free variant to demonstrate it.
 - **Account pool + role routing** — a project holds an **account pool**; each sheet links a default account and each case routes by its `role` to the matching account (legacy username/password migrates to a single account).
 - **Run modes** — run a single sheet or **all sheets at once** (`run-all`: per-sheet stream + aggregate verdicts), and toggle **headed** mode to watch a visible Chromium (slowMo).
 
-The deterministic engine runs each case against real headless Chromium and renders verdict badges, per-assertion detail, self-heal events, and the needs_review queue — no CSV escaping, no terminal after launch.
+### Live recon & repo context (accuracy levers)
 
-**Conversational rule refine.** Once connected, **AI 규칙 다듬기** refines the **selected sheet's** interpretation rule in natural language (e.g. "recognize 누르기 as a click"). It is **conversational** — each turn builds on the last (e.g. "undo that") — and after every turn the UI shows an **intent diff** and flags **ambiguous or empty intents**, so the rule converges to an optimal, interpretable form. Changes bump that sheet's rule version; **초기화** resets the conversation.
+From the Rules view:
 
-**AI step interpretation.** Tick **AI 스텝 해석** on a run to let the connected model turn free natural-language steps (no quotes, no DSL) into a deterministic plan (actions + assertions). The plan is **authored once and cached**, then the engine replays it deterministically — identical `pass` / `fail` / `needs_review` semantics, false-pass still 0. The bundled sample ships a quote-free variant to demonstrate it.
+- **Analyze live app** (`reconApp`) — logs in with the sheet's account and scans the app's structure (nav, form fields, buttons, table headers) into a concise Korean domain brief → the sheet's **appContext**.
+- **Analyze repo** (`repo-recon`) — resolves the project's reference repo (local path / cache / shallow clone, with optional token + re-clone), scans it (AGENTS.md, README, routes, components) — folding in a **CodeGraph** exploration when that CLI is installed — into a code brief → the sheet's **codeContext**.
 
-**Live recon & repo context (accuracy levers).** From the Rules view, **Analyze live app** (`reconApp`) logs in with the sheet's account and scans the app's structure (nav, form fields, buttons, table headers) into a concise Korean domain brief → the sheet's **appContext**. **Analyze repo** (`repo-recon`) resolves the project's reference repo (local path / cache / shallow clone, with optional token + re-clone), scans it (AGENTS.md, README, routes, components) — and folds in a **CodeGraph** exploration when that CLI is installed — into a code brief → the sheet's **codeContext**. Both run at **author time**, are human-reviewed before saving, and are injected into plan authoring, so determinism is unaffected.
+Both run at **author time**, are human-reviewed before saving, and are injected into plan authoring, so determinism is unaffected.
 
-**Review queue.** `needs_review` cases surface with their evidence — a **screenshot**, the page text, and the reason (self-heal, missing baseline, …). Approve the baseline — the approved **reference screen** for that case — once and a matching re-run **passes**, across every sheet that shares the same case content (reconcile-on-read clears a stale needs_review elsewhere without re-running); if the page drifts it is re-flagged. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
+### Review queue
+
+`needs_review` cases surface with their evidence — a **screenshot**, the page text, and the reason (self-heal, missing baseline, …). Approve the baseline — the approved **reference screen** for that case — once, and a matching re-run **passes** across every sheet that shares the same case content (reconcile-on-read clears a stale needs_review elsewhere without re-running); if the page drifts it is re-flagged. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
 
 For held cases the review also embeds a **Playwright trace** — the bundled trace viewer is served **same-origin** (dodging the public viewer's Private Network Access block), so you can scrub the run action-by-action inline, open it in a new tab, or download the `trace.zip`. Traces are captured per case and kept only for `needs_review`/`error` (a clean pass keeps nothing).
 
-**Persistence.** Project metadata lives in `~/.test-osterone/studio-projects.json`; per-project runtime state now lives in `~/.test-osterone/studio-state/<projectId>.json` as **per-sheet** rule, refine chat, plan cache, and approved baselines, plus a project **default rule** (cloned by new sheets) and a **legacy baseline fallback** for approvals made before the per-sheet upgrade — a `STATE_VERSION` v2→v3 migration lifts old project-level state into this shape **losslessly and idempotently**. **Sheet CSV content is offloaded to per-sheet files** (`sheet-data/<projectId>/<sheetId>.csv`) so neither file grows with sheet count — hence no cap. `baselineKey`/`assertionCacheKey` formats are unchanged, so false-pass=0 holds across all of this.
+### Persistence
+
+Project metadata lives in `~/.test-osterone/studio-projects.json`. Per-project runtime state lives in `~/.test-osterone/studio-state/<projectId>.json` as **per-sheet** rule, refine chat, plan cache, and approved baselines, plus a project **default rule** (cloned by new sheets) and a **legacy baseline fallback** for approvals made before the per-sheet upgrade — a `STATE_VERSION` v2→v3 migration lifts old project-level state into this shape **losslessly and idempotently**. **Sheet CSV content is offloaded to per-sheet files** (`sheet-data/<projectId>/<sheetId>.csv`) so neither file grows with sheet count — hence no cap. `baselineKey`/`assertionCacheKey` formats are unchanged, so false-pass=0 holds across all of this.
 
 ## Architecture
 
@@ -157,21 +186,26 @@ For held cases the review also embeds a **Playwright trace** — the bundled tra
 ## Model auth
 
 Two interchangeable clients behind one interface:
+
 1. **API key.**
 2. **OAuth proxy** — reuse a ChatGPT/Codex login token against the Responses backend.
 
 ## Status
 
-**Built & verified (static, deterministic — 114/114 automated tests):** ingest → normalize → dedupe → rule → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract · benchmark hard gate · web dashboard · orchestration (node/host) · auth (API key + OAuth proxy + **native OpenAI device-code login**) + JUnit · **browser Studio** — per-sheet first-class · AI column mapping + conversational refine · AI step interpretation (author-once plan) · **account pool + role routing** · **multi-sheet run-all** · **headed runs** · **XLSX multi-sheet import + per-sheet TC auto-detect** · **KO/EN toggle + path-based routing** · **live recon → appContext** · **repo code-context → codeContext (CodeGraph optional)** · **Playwright trace capture + self-hosted trace viewer**.
+**Built & verified** (static, deterministic — 114/114 automated tests):
 
-**Pending environment-dependent integration (implemented, not yet live-verified):** live benchmark against real Chromium + docker fixtures / real OAuth-token ChatGPT calls — contracts and implementations are complete; only a smoke pass in a browser/docker/token environment remains.
+- **Core pipeline** — ingest → normalize → dedupe → rule → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract, plus the benchmark hard gate.
+- **Platform** — web dashboard · orchestration (node/host) · auth (API key + OAuth proxy + **native OpenAI device-code login**) · JUnit output.
+- **Studio** — per-sheet first-class runtime · AI column mapping + conversational refine · AI step interpretation (author-once plan) · account pool + role routing · multi-sheet run-all · headed runs · XLSX multi-sheet import + per-sheet TC auto-detect · KO/EN toggle + path-based routing · live recon → appContext · repo code-context → codeContext (CodeGraph optional) · Playwright trace capture + self-hosted trace viewer.
+
+**Pending environment-dependent integration** (implemented, not yet live-verified): live benchmark against real Chromium + docker fixtures, and real OAuth-token ChatGPT calls — contracts and implementations are complete; only a smoke pass in a browser/docker/token environment remains.
 
 ## Project layout
 
 ```
 src/
   intake/       spreadsheet ingest + schema
-  interpret/    rule · assertions · triage
+  interpret/    rule · assertions · triage · author · recon · repo-recon
   execute/      page · headless browser · runner
   judge/        golden baseline
   evidence/     sqlite execution store
