@@ -1,5 +1,13 @@
 export type Verdict = "pass" | "fail" | "needs_review" | "error";
 
+export interface Account {
+	id: string;
+	label: string;
+	role: string;
+	username: string;
+	password: string;
+}
+
 export interface TestSheet {
 	id: string;
 	name: string;
@@ -9,8 +17,7 @@ export interface TestSheet {
 	baseUrl?: string;
 	env?: string;
 	mapping?: Record<string, string>;
-	username?: string;
-	password?: string;
+	accountId?: string;
 	origin?: "sheet" | "csv" | "xlsx";
 }
 
@@ -20,8 +27,7 @@ export interface Project {
 	sheets: TestSheet[];
 	baseUrl: string;
 	env: string;
-	username: string;
-	password: string;
+	accounts: Account[];
 	referenceRepo: string;
 	aiInterpret: boolean;
 }
@@ -159,8 +165,7 @@ export interface RunInput {
 	sheetId?: string;
 	baseUrl?: string;
 	env?: string;
-	username?: string;
-	password?: string;
+	accounts?: Account[];
 	referenceRepo?: string;
 	aiInterpret?: boolean;
 	projectId?: string;

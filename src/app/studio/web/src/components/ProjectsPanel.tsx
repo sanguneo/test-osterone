@@ -34,7 +34,7 @@ const S = {
 } as const;
 
 function blankDraft(): ProjectDraft {
-	return { id: "", name: "", sheets: [], baseUrl: "", env: "", username: "", password: "", referenceRepo: "", aiInterpret: false };
+	return { id: "", name: "", sheets: [], baseUrl: "", env: "", accounts: [], referenceRepo: "", aiInterpret: false };
 }
 
 function editorFromProject(project: Project | null): ProjectDraft {
@@ -45,8 +45,7 @@ function editorFromProject(project: Project | null): ProjectDraft {
 		sheets: project.sheets.map((sheet) => ({ ...sheet })),
 		baseUrl: project.baseUrl,
 		env: project.env,
-		username: project.username,
-		password: project.password,
+		accounts: project.accounts ?? [],
 		referenceRepo: project.referenceRepo,
 		aiInterpret: project.aiInterpret,
 	};
@@ -86,8 +85,7 @@ export function ProjectsPanel({ initialProject, onSaved, onClose }: { readonly i
 			sheets: draft.sheets,
 			baseUrl: draft.baseUrl.trim(),
 			env: draft.env.trim(),
-			username: draft.username.trim(),
-			password: draft.password,
+			accounts: draft.accounts,
 			referenceRepo: draft.referenceRepo.trim(),
 			aiInterpret: draft.aiInterpret,
 		};

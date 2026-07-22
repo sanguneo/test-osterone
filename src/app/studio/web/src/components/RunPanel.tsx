@@ -197,7 +197,7 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 		const results: CaseView[] = [];
 		setLive({ baseUrl: project.baseUrl, interpreter: ai ? "ai" : "rule", counts: { ...counts }, results: [] });
 		try {
-			await api.runStream({ sample: project.id === "sample", sheets: sheet ? [sheet] : [], sheetId: sheet?.id, aiInterpret: ai, headed, baseUrl: project.baseUrl, env: project.env, username: project.username, password: project.password, referenceRepo: project.referenceRepo, projectId: selId }, (event) => {
+			await api.runStream({ sample: project.id === "sample", sheets: sheet ? [sheet] : [], sheetId: sheet?.id, aiInterpret: ai, headed, baseUrl: project.baseUrl, env: project.env, accounts: project.accounts, referenceRepo: project.referenceRepo, projectId: selId }, (event) => {
 				if (controller.signal.aborted) return;
 				const t2 = S[getLang()];
 				if (event.type === "start") { setTotal(event.total); setStatusMessage(t2.runningStatus(0, event.total)); }
@@ -239,7 +239,7 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 		const push = () => setRunAll({ order, prog: { ...prog } });
 		push();
 		try {
-			await api.runAllStream({ sample: false, sheets, aiInterpret: ai, headed, baseUrl: project.baseUrl, env: project.env, username: project.username, password: project.password, referenceRepo: project.referenceRepo, projectId: selId }, (event) => {
+			await api.runAllStream({ sample: false, sheets, aiInterpret: ai, headed, baseUrl: project.baseUrl, env: project.env, accounts: project.accounts, referenceRepo: project.referenceRepo, projectId: selId }, (event) => {
 				if (controller.signal.aborted) return;
 				if (event.type === "sheet-start") { const p = prog[event.sheetId]; if (p) p.status = "running"; push(); }
 				else if (event.type === "start") { const p = prog[event.sheetId]; if (p) p.total = event.total; push(); }

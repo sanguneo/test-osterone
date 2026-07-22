@@ -177,8 +177,7 @@ export function App() {
 				sheets: nextSheets,
 				baseUrl: selectedProject.baseUrl,
 				env: selectedProject.env,
-				username: selectedProject.username,
-				password: selectedProject.password,
+				accounts: selectedProject.accounts,
 				referenceRepo: selectedProject.referenceRepo,
 				aiInterpret: selectedProject.aiInterpret,
 			});
@@ -287,6 +286,7 @@ export function App() {
 				<SheetEditorModal
 					editSheet={editingSheet}
 					projectId={selectedProject.id}
+					accounts={selectedProject.accounts}
 					onClose={() => setSheetModalOpen(false)}
 					onSave={(sheet) => {
 						const nextSheets = editingSheet ? selectedProject.sheets.map((item) => item.id === editingSheet.id ? sheet : item) : [...selectedProject.sheets, sheet];

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { getLang, useLang } from "../i18n";
-import type { AnalyzeResult, ChatMsg, PreviewResult, TestSheet, XlsxSheet } from "../types";
+import type { Account, AnalyzeResult, ChatMsg, PreviewResult, TestSheet, XlsxSheet } from "../types";
 import { Icon } from "./Icon";
 import { ModalShell } from "./ModalShell";
 
@@ -48,10 +48,8 @@ const S = {
 		csvPlaceholder: "Test ID,Title,Steps,Expected&#10;…",
 		baseUrlLabel: "대상 URL 오버라이드 (선택)",
 		envLabel: "환경 오버라이드 (선택)",
-		usernameLabel: "테스트 계정 아이디 (선택)",
-		passwordLabel: "테스트 계정 비밀번호 (선택)",
-		usernamePlaceholder: "아이디",
-		passwordPlaceholder: "비밀번호",
+		accountLabel: "기본 테스트 계정 (선택)",
+		accountNone: "프로젝트 기본 계정",
 		xlsxSource: "XLSX",
 		chooseFile: "XLSX 파일 선택",
 		xlsxConvFail: (m: string) => `변환 실패: ${m} — 파일 형식을 확인하세요.`,
@@ -106,10 +104,8 @@ const S = {
 		csvPlaceholder: "Test ID,Title,Steps,Expected&#10;…",
 		baseUrlLabel: "Target URL override (optional)",
 		envLabel: "Env override (optional)",
-		usernameLabel: "Test account username (optional)",
-		passwordLabel: "Test account password (optional)",
-		usernamePlaceholder: "Username",
-		passwordPlaceholder: "Password",
+		accountLabel: "Default test account (optional)",
+		accountNone: "Project default account",
 		xlsxSource: "XLSX",
 		chooseFile: "Choose XLSX file",
 		xlsxConvFail: (m: string) => `Conversion failed: ${m} — check the file format.`,
@@ -202,6 +198,7 @@ export function SheetEditorModal({
 	onPersist,
 	onClose,
 	onImportSheets,
+	accounts,
 }: {
 	editSheet: TestSheet | null;
 	projectId: string;
@@ -209,6 +206,7 @@ export function SheetEditorModal({
 	onPersist: (sheet: TestSheet) => Promise<void>;
 	onClose: () => void;
 	onImportSheets: (sheets: TestSheet[]) => void;
+	accounts: Account[];
 }) {
 	const lang = useLang();
 	const t = S[lang];
@@ -219,8 +217,7 @@ export function SheetEditorModal({
 	const [csvText, setCsvText] = useState(editSheet?.csvText ?? "");
 	const [baseUrl, setBaseUrl] = useState(editSheet?.baseUrl ?? "");
 	const [env, setEnv] = useState(editSheet?.env ?? "");
-	const [username, setUsername] = useState(editSheet?.username ?? "");
-	const [password, setPassword] = useState(editSheet?.password ?? "");
+	const [accountId, setAccountId] = useState(editSheet?.accountId ?? "");
 	const [loadingCsv, setLoadingCsv] = useState(false);
 	const [loadError, setLoadError] = useState("");
 	const [mode, setMode] = useState<"sheet" | "csv" | "xlsx">(editSheet?.kind ?? "sheet");
@@ -262,8 +259,7 @@ export function SheetEditorModal({
 			csvText,
 			baseUrl: baseUrl || undefined,
 			env: env || undefined,
-			username: username || undefined,
-			password: password || undefined,
+			accountId: accountId || undefined,
 		};
 		onSave(sheet);
 	}
@@ -295,10 +291,9 @@ export function SheetEditorModal({
 			csvText,
 			baseUrl: baseUrl || undefined,
 			env: env || undefined,
-			username: username || undefined,
-			password: password || undefined,
+			accountId: accountId || undefined,
 		}),
-		[sheetId, name, kind, sheetUrl, csvText, baseUrl, env, username, password],
+		[sheetId, name, kind, sheetUrl, csvText, baseUrl, env, accountId],
 	);
 
 	const loadInterpretation = useCallback(() => {
@@ -428,11 +423,11 @@ export function SheetEditorModal({
 					<label htmlFor="sheet-env" style={{ marginTop: 10 }}>{t.envLabel}</label>
 					<input id="sheet-env" type="text" value={env} onChange={(e) => setEnv(e.target.value)} placeholder="staging" />
 
-					<label htmlFor="sheet-username" style={{ marginTop: 10 }}>{t.usernameLabel}</label>
-					<input id="sheet-username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t.usernamePlaceholder} autoComplete="off" />
-
-					<label htmlFor="sheet-password" style={{ marginTop: 10 }}>{t.passwordLabel}</label>
-					<input id="sheet-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t.passwordPlaceholder} autoComplete="off" />
+					<label htmlFor="sheet-account" style={{ marginTop: 10 }}>{t.accountLabel}</label>
+					<select id="sheet-account" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+						<option value="">{t.accountNone}</option>
+						{accounts.map((a) => <option key={a.id} value={a.id}>{a.label || a.username}{a.role ? ` (${a.role})` : ""}</option>)}
+					</select>
 
 					<div className="editor-actions" style={{ marginTop: 14 }}>
 						<button className="run" style={{ marginTop: 0 }} type="button" disabled={loadingCsv || Boolean(loadError)} onClick={save}>
@@ -504,11 +499,11 @@ export function SheetEditorModal({
 							<label htmlFor="sheet-env" style={{ marginTop: 10 }}>{t.envLabel}</label>
 							<input id="sheet-env" type="text" value={env} onChange={(e) => setEnv(e.target.value)} placeholder="staging" />
 
-							<label htmlFor="sheet-username" style={{ marginTop: 10 }}>{t.usernameLabel}</label>
-							<input id="sheet-username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t.usernamePlaceholder} autoComplete="off" />
-
-							<label htmlFor="sheet-password" style={{ marginTop: 10 }}>{t.passwordLabel}</label>
-							<input id="sheet-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t.passwordPlaceholder} autoComplete="off" />
+							<label htmlFor="sheet-account" style={{ marginTop: 10 }}>{t.accountLabel}</label>
+							<select id="sheet-account" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+								<option value="">{t.accountNone}</option>
+								{accounts.map((a) => <option key={a.id} value={a.id}>{a.label || a.username}{a.role ? ` (${a.role})` : ""}</option>)}
+							</select>
 
 							{persistError && <p className="err" role="alert">{persistError}</p>}
 

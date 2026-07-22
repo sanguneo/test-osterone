@@ -99,6 +99,13 @@ const XLSX = createRequire(import.meta.url)("xlsx") as {
 	utils: { sheet_to_csv: (ws: unknown) => string };
 };
 
+export interface Account {
+	id: string;
+	label: string;
+	role: string;
+	username: string;
+	password: string;
+}
 export interface TestSheet {
 	id: string;
 	name: string;
@@ -108,8 +115,7 @@ export interface TestSheet {
 	baseUrl?: string;
 	env?: string;
 	mapping?: InterpretationRule["mapping"];
-	username?: string;
-	password?: string;
+	accountId?: string;
 	origin?: "sheet" | "csv" | "xlsx";
 }
 export interface RunInput {
@@ -120,8 +126,7 @@ export interface RunInput {
 	sheetId?: string;
 	baseUrl?: string;
 	env?: string;
-	username?: string;
-	password?: string;
+	accounts?: Account[];
 	referenceRepo?: string;
 	aiInterpret?: boolean;
 	projectId?: string;
@@ -193,8 +198,7 @@ interface Project {
 	sheets: TestSheet[];
 	baseUrl: string;
 	env: string;
-	username: string;
-	password: string;
+	accounts: Account[];
 	referenceRepo: string;
 	aiInterpret: boolean;
 }
@@ -205,8 +209,7 @@ const SAMPLE_PROJECT: Project = {
 	sheets: [{ id: "sample-sheet", name: "샘플 케이스", kind: "csv", sheetUrl: "", csvText: "" }],
 	baseUrl: "",
 	env: "sample",
-	username: "",
-	password: "",
+	accounts: [],
 	referenceRepo: "",
 	aiInterpret: false,
 };
@@ -251,16 +254,42 @@ function sanitizeSheet(raw: unknown): TestSheet {
 		.slice(0, 60)
 		.trim();
 	if (env) sheet.env = env;
-	const username = String(o.username ?? "")
-		.slice(0, 200)
-		.trim();
-	if (username) sheet.username = username;
-	const password = String(o.password ?? "").slice(0, 200);
-	if (password) sheet.password = password;
+	if (typeof o.accountId === "string" && o.accountId) sheet.accountId = o.accountId;
 	if (o.origin === "sheet" || o.origin === "csv" || o.origin === "xlsx") sheet.origin = o.origin;
 	const mapping = sanitizeSheetMapping(o.mapping);
 	if (Object.keys(mapping).length) sheet.mapping = mapping;
 	return sheet;
+}
+function sanitizeAccounts(raw: unknown, legacyUser?: unknown, legacyPass?: unknown): Account[] {
+	const out: Account[] = [];
+	if (Array.isArray(raw)) {
+		for (const item of raw) {
+			const o = (item ?? {}) as Record<string, unknown>;
+			const username = String(o.username ?? "")
+				.slice(0, 200)
+				.trim();
+			const password = String(o.password ?? "").slice(0, 200);
+			const label = String(o.label ?? "")
+				.slice(0, 60)
+				.trim();
+			if (!username && !password && !label) continue;
+			out.push({
+				id: typeof o.id === "string" && o.id ? o.id : `acct_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+				label: label || username || "account",
+				role: String(o.role ?? "")
+					.slice(0, 60)
+					.trim(),
+				username,
+				password,
+			});
+		}
+	}
+	if (out.length === 0) {
+		const u = String(legacyUser ?? "").trim();
+		const p = String(legacyPass ?? "");
+		if (u || p) out.push({ id: `acct_${Date.now()}_mig`, label: u || "account", role: "", username: u, password: p });
+	}
+	return out;
 }
 function sanitizeProject(raw: unknown): Project {
 	const o = (raw ?? {}) as Record<string, unknown>;
@@ -283,8 +312,7 @@ function sanitizeProject(raw: unknown): Project {
 		sheets,
 		baseUrl: String(o.baseUrl ?? "").slice(0, 300),
 		env: String(o.env ?? "").slice(0, 60),
-		username: String(o.username ?? "").slice(0, 120),
-		password: String(o.password ?? "").slice(0, 200),
+		accounts: sanitizeAccounts(o.accounts, o.username, o.password),
 		referenceRepo: String(o.referenceRepo ?? "").slice(0, 300),
 		aiInterpret: !!o.aiInterpret,
 	};
@@ -503,6 +531,8 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 	if (ai && !modelClient) throw new Error("Connect a model first to use AI step interpretation.");
 	const project = allProjects().find((p) => p.id === (input.projectId ?? "sample"));
 	const sheet = input.sheets?.[0];
+	const accounts = input.accounts ?? [];
+	const defaultAccount = accounts.find((a) => a.id === sheet?.accountId) ?? accounts[0];
 	const sid = input.sheetId ?? resolveSheetId(project, input.sheetId) ?? "__default__";
 	const sheetSt = sheetState(st, sid);
 	const effMapping = { ...sheetSt.rule.mapping, ...(sheet?.mapping ?? {}) };
@@ -520,13 +550,16 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 	const results: CaseView[] = [];
 	try {
 		for (const tc of cases) {
+			const account =
+				accounts.find((a) => a.role && tc.role && a.role.trim().toLowerCase() === tc.role.trim().toLowerCase()) ??
+				defaultAccount;
 			const plan =
 				ai && modelClient
 					? (
 							await getOrAuthorPlan(tc, sheetSt.rule, sheetSt.planCache, modelClient, {
 								referenceRepo: input.referenceRepo,
-								username: sheet?.username ?? input.username,
-								password: sheet?.password ?? input.password,
+								username: account?.username,
+								password: account?.password,
 							})
 						).plan
 					: undefined;
