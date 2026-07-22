@@ -1,5 +1,6 @@
 import type { Account, TestSheet } from "../types";
 import { useLang } from "../i18n";
+import { Icon } from "./Icon";
 
 const S = {
 	ko: {
@@ -65,18 +66,27 @@ export function ProjectEnvironmentSection({ draft, onUpdate }: { readonly draft:
 			</div>
 
 			<span className="field-label" style={{ marginTop: 10 }}>{t.accountsLabel} <span className="muted">{t.accountsHint}</span></span>
-			<div className="accounts-editor">
-				{draft.accounts.length === 0 && <p className="detail">{t.noAccounts}</p>}
-				{draft.accounts.map((account, index) => (
-					<div className="account-row" key={account.id}>
-						<input aria-label={t.acctRole} type="text" value={account.role} onChange={(event) => patchAccount(index, { role: event.target.value })} placeholder={t.acctRole} />
-						<input aria-label={t.acctUser} type="text" value={account.username} onChange={(event) => patchAccount(index, { username: event.target.value })} placeholder={t.acctUser} autoComplete="off" />
-						<input aria-label={t.acctPass} type="password" value={account.password} onChange={(event) => patchAccount(index, { password: event.target.value })} placeholder={t.acctPass} autoComplete="off" />
-						<button className="button secondary compact acct-remove" type="button" onClick={() => removeAccount(index)}>{t.remove}</button>
+			{draft.accounts.length === 0 ? (
+				<p className="detail" style={{ marginTop: 6 }}>{t.noAccounts}</p>
+			) : (
+				<div className="accounts-table">
+					<div className="accounts-row accounts-head">
+						<span>{t.acctRole}</span>
+						<span>{t.acctUser}</span>
+						<span>{t.acctPass}</span>
+						<span aria-hidden="true" />
 					</div>
-				))}
-				<button className="button secondary compact" type="button" onClick={addAccount}>{t.addAccount}</button>
-			</div>
+					{draft.accounts.map((account, index) => (
+						<div className="accounts-row" key={account.id}>
+							<input aria-label={t.acctRole} type="text" value={account.role} onChange={(event) => patchAccount(index, { role: event.target.value })} placeholder={t.acctRole} />
+							<input aria-label={t.acctUser} type="text" value={account.username} onChange={(event) => patchAccount(index, { username: event.target.value })} placeholder={t.acctUser} autoComplete="off" />
+							<input aria-label={t.acctPass} type="password" value={account.password} onChange={(event) => patchAccount(index, { password: event.target.value })} placeholder={t.acctPass} autoComplete="off" />
+							<button className="icon-button quiet danger" type="button" aria-label={t.remove} onClick={() => removeAccount(index)}><Icon name="trash" size={15} /></button>
+						</div>
+					))}
+				</div>
+			)}
+			<button className="button secondary compact" type="button" onClick={addAccount} style={{ marginTop: 8 }}>{t.addAccount}</button>
 
 			<label htmlFor="project-reference-repo" style={{ marginTop: 10 }}>{t.referenceRepo} <span className="muted">{t.referenceRepoHint}</span></label>
 			<input id="project-reference-repo" type="text" value={draft.referenceRepo} onChange={(event) => onUpdate({ referenceRepo: event.target.value })} placeholder="https://github.com/org/app" />

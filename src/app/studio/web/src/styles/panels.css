@@ -174,8 +174,12 @@
 .xlsx-sheets { display: grid; gap: 6px; max-height: 216px; overflow-y: auto; overflow-x: hidden; }
 .xlsx-sheets label { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .xlsx-sheets label span { flex: 0 0 auto; }
-.accounts-editor { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
-.account-row { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: var(--space-2); align-items: center; padding: var(--space-2) var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--inset); }
+.accounts-table { margin-top: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
+.accounts-row { display: grid; grid-template-columns: 1fr 1fr 1fr 40px; gap: var(--space-2); align-items: center; padding: var(--space-2); }
+.accounts-row + .accounts-row { border-top: 1px solid var(--line); }
+.accounts-head { background: var(--surface-muted); }
+.accounts-head span { font-size: 12px; color: var(--dim); }
+.accounts-head + .accounts-row { border-top: 1px solid var(--line); }
 .field-row { margin-top: var(--space-2); }
 .check-label { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1); cursor: pointer; }
 .editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-1); }
