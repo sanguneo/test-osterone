@@ -175,11 +175,14 @@
 .xlsx-sheets label { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .xlsx-sheets label span { flex: 0 0 auto; }
 .accounts-table { margin-top: var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
-.accounts-row { display: grid; grid-template-columns: 1fr 1fr 1fr 40px; gap: var(--space-2); align-items: center; padding: var(--space-2); }
+.accounts-row { display: grid; grid-template-columns: 1fr 1fr 1fr 40px; align-items: stretch; }
 .accounts-row + .accounts-row { border-top: 1px solid var(--line); }
+.accounts-row > * + * { border-left: 1px solid var(--line); }
 .accounts-head { background: var(--surface-muted); }
-.accounts-head span { font-size: 12px; color: var(--dim); }
-.accounts-head + .accounts-row { border-top: 1px solid var(--line); }
+.accounts-head span { font-size: 12px; color: var(--dim); padding: 7px 10px; }
+.accounts-row input { width: 100%; border: 0; border-radius: 0; background: transparent; min-height: 40px; padding: 0 10px; }
+.accounts-row input:focus { background: var(--surface-active); }
+.accounts-row .icon-button { align-self: center; justify-self: center; }
 .field-row { margin-top: var(--space-2); }
 .check-label { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1); cursor: pointer; }
 .editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-1); }
