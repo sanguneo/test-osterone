@@ -122,6 +122,8 @@ export interface RunInput {
 	referenceRepo?: string;
 	aiInterpret?: boolean;
 	projectId?: string;
+	/** Launch a visible (headed) browser window with slowMo so a human can watch the run. */
+	headed?: boolean;
 }
 const DEFAULT_OAUTH_MODEL = "gpt-5.6-sol";
 const DEFAULT_APIKEY_MODEL = "gpt-4o-mini";
@@ -501,7 +503,9 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 	const caseById = new Map(cases.map((c) => [c.caseId, c]));
 	for (const c of cases) sheetSt.reviewQueue.delete(c.caseId);
 	const cache = new MemoryAssertionCache();
-	const page = await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser() });
+	const page = input.headed
+		? await BrowserPage.create({ baseUrl, timeoutMs: 4000, headless: false, slowMo: 300 })
+		: await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser() });
 	const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
 	const results: CaseView[] = [];
 	try {

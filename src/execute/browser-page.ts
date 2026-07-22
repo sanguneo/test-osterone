@@ -18,6 +18,7 @@ export interface BrowserPageOptions {
 	headless?: boolean;
 	viewport?: { width: number; height: number };
 	timeoutMs?: number;
+	slowMo?: number;
 	/** Reuse a shared browser (a fresh context is created per page); close() then only closes the context. */
 	browser?: Browser;
 }
@@ -39,7 +40,7 @@ export class BrowserPage implements Page {
 
 	static async create(opts: BrowserPageOptions): Promise<BrowserPage> {
 		const ownsBrowser = !opts.browser;
-		const browser = opts.browser ?? (await chromium.launch({ headless: opts.headless ?? true }));
+		const browser = opts.browser ?? (await chromium.launch({ headless: opts.headless ?? true, slowMo: opts.slowMo }));
 		const context = await browser.newContext({ viewport: opts.viewport ?? { width: 1280, height: 800 } });
 		const pwPage = await context.newPage();
 		return new BrowserPage(

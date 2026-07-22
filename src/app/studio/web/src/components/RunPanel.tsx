@@ -34,6 +34,8 @@ const S = {
 		sheetUnselected: "선택 안됨",
 		aiInterpret: "AI 스텝 해석",
 		aiInterpretHint: "자연어 스텝에만 사용하며 모델 연결이 필요합니다.",
+		showBrowser: "브라우저 표시",
+		showBrowserHint: "실행 과정을 볼 수 있게 창을 띄웁니다(느려짐).",
 		start: "실행 시작",
 		running: "실행 중",
 		previewFail: (msg: string) => `케이스 미리보기 실패: ${msg}`,
@@ -77,6 +79,8 @@ const S = {
 		sheetUnselected: "Not selected",
 		aiInterpret: "AI step interpretation",
 		aiInterpretHint: "Only used for natural-language steps; requires a connected model.",
+		showBrowser: "Show browser",
+		showBrowserHint: "Opens a visible window so you can watch (slower).",
 		start: "Start run",
 		running: "Running",
 		previewFail: (msg: string) => `Case preview failed: ${msg}`,
@@ -143,6 +147,7 @@ function RunRail({ done, live, running }: { readonly done: boolean; readonly liv
 }
 export function RunPanel({ project, selId, selSheetId, onDone }: { readonly project?: Project; readonly selId: string; readonly selSheetId: string; readonly onDone: () => void }) {
 	const [ai, setAi] = useState(false);
+	const [headed, setHeaded] = useState(false);
 	const [preview, setPreview] = useState<PreviewResult | null>(null);
 	const [previewError, setPreviewError] = useState("");
 	const [previewLoading, setPreviewLoading] = useState(false);
@@ -192,7 +197,7 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 		const results: CaseView[] = [];
 		setLive({ baseUrl: project.baseUrl, interpreter: ai ? "ai" : "rule", counts: { ...counts }, results: [] });
 		try {
-			await api.runStream({ sample: project.id === "sample", sheets: sheet ? [sheet] : [], sheetId: sheet?.id, aiInterpret: ai, baseUrl: project.baseUrl, env: project.env, username: project.username, password: project.password, referenceRepo: project.referenceRepo, projectId: selId }, (event) => {
+			await api.runStream({ sample: project.id === "sample", sheets: sheet ? [sheet] : [], sheetId: sheet?.id, aiInterpret: ai, headed, baseUrl: project.baseUrl, env: project.env, username: project.username, password: project.password, referenceRepo: project.referenceRepo, projectId: selId }, (event) => {
 				if (controller.signal.aborted) return;
 				const t2 = S[getLang()];
 				if (event.type === "start") { setTotal(event.total); setStatusMessage(t2.runningStatus(0, event.total)); }
@@ -234,7 +239,7 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 		const push = () => setRunAll({ order, prog: { ...prog } });
 		push();
 		try {
-			await api.runAllStream({ sample: false, sheets, aiInterpret: ai, baseUrl: project.baseUrl, env: project.env, username: project.username, password: project.password, referenceRepo: project.referenceRepo, projectId: selId }, (event) => {
+			await api.runAllStream({ sample: false, sheets, aiInterpret: ai, headed, baseUrl: project.baseUrl, env: project.env, username: project.username, password: project.password, referenceRepo: project.referenceRepo, projectId: selId }, (event) => {
 				if (controller.signal.aborted) return;
 				if (event.type === "sheet-start") { const p = prog[event.sheetId]; if (p) p.status = "running"; push(); }
 				else if (event.type === "start") { const p = prog[event.sheetId]; if (p) p.total = event.total; push(); }
@@ -268,6 +273,7 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 						<h3>{t.runReady}</h3>
 						<p className="run-target">{t.target(project.baseUrl || (project.id === "sample" ? t.builtinSample : t.targetUnset))}<br />{t.sheet(sheet?.name ?? t.sheetUnselected)}</p>
 						<label className="run-toggle"><input type="checkbox" checked={ai} onChange={(event) => setAi(event.target.checked)} /><span>{t.aiInterpret}<br /><small className="muted">{t.aiInterpretHint}</small></span></label>
+						<label className="run-toggle"><input type="checkbox" checked={headed} onChange={(event) => setHeaded(event.target.checked)} /><span>{t.showBrowser}<br /><small className="muted">{t.showBrowserHint}</small></span></label>
 						<div className="run-actions"><button className="button primary" type="button" disabled={running} onClick={startRun}><Icon name="play" />{running ? t.running : t.start}</button>{project.sheets.length > 1 && <button className="button secondary" type="button" disabled={running} onClick={startRunAll}>{t.runAll}</button>}<span className="muted" aria-live="polite">{statusMessage}</span></div>
 					</div>
 					{previewError && <div className="card err">{t.previewFail(previewError)} <button className="mini" type="button" onClick={loadPreview}>{t.retry}</button></div>}

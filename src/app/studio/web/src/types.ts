@@ -161,4 +161,5 @@ export interface RunInput {
 	referenceRepo?: string;
 	aiInterpret?: boolean;
 	projectId?: string;
+	headed?: boolean;
 }
