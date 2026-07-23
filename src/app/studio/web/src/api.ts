@@ -9,6 +9,7 @@ import type {
 	RunAllEvent,
 	RunInput,
 	RunView,
+	ActiveRunView,
 	RepoReconResult,
 	Status,
 	XlsxSheet,
@@ -33,6 +34,8 @@ export const api = {
 	status: (pid: string, sheetId?: string) => j<Status>(`/api/status?${q(pid)}${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ""}`),
 	history: (pid: string, sheetId?: string) =>
 		j<RunView[]>(`/api/history?${q(pid)}${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ""}`),
+	activeRun: (pid: string) => j<ActiveRunView | null>(`/api/run/active?${q(pid)}`),
+	cancelRun: (pid: string) => j<{ ok: boolean }>("/api/run/cancel", post({ projectId: pid })),
 	connect: (body: { mode: string; token?: string; apiKey?: string; model?: string; baseUrl?: string; reasoning?: string; projectId: string }) =>
 		j<Status>("/api/auth", post(body)),
 	deviceStart: (body: { model?: string; reasoning?: string }) => j<{ userCode: string; url: string }>("/api/auth/device/start", post(body)),

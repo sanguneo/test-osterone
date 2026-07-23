@@ -38,6 +38,8 @@ const S = {
 		showBrowserHint: "실행 과정을 볼 수 있게 창을 띄웁니다(느려짐).",
 		start: "실행 시작",
 		running: "실행 중",
+		stop: "중지",
+		cancelled: "중지됨",
 		previewFail: (msg: string) => `케이스 미리보기 실패: ${msg}`,
 		retry: "다시 시도",
 		error: (msg: string) => `오류: ${msg}`,
@@ -83,6 +85,8 @@ const S = {
 		showBrowserHint: "Opens a visible window so you can watch (slower).",
 		start: "Start run",
 		running: "Running",
+		stop: "Stop",
+		cancelled: "Stopped",
 		previewFail: (msg: string) => `Case preview failed: ${msg}`,
 		retry: "Retry",
 		error: (msg: string) => `Error: ${msg}`,
@@ -122,7 +126,7 @@ function PreviewTable({ preview }: { readonly preview: PreviewResult }) {
 					<tbody>
 						{preview.unique.slice(0, 30).map((testCase) => (
 							<tr key={testCase.caseId}>
-								<td>{testCase.title || testCase.caseId}</td>
+								<td>{testCase.category && <span className="cat-tag">{testCase.category}</span>}{testCase.title || testCase.caseId}</td>
 								<td className="detail">{testCase.steps.join(" · ")}</td>
 								<td className="detail">{testCase.expected}</td>
 							</tr>
@@ -156,13 +160,17 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 	const [live, setLive] = useState<RunViewLike | null>(null);
 	const [total, setTotal] = useState(0);
 	const [runError, setRunError] = useState("");
+	const [runNotice, setRunNotice] = useState("");
 	const [done, setDone] = useState(false);
 	const [runAll, setRunAll] = useState<RunAllState | null>(null);
 	const previewController = useRef<AbortController | null>(null);
 	const runController = useRef<AbortController | null>(null);
+	const reconnectGen = useRef(0);
+	const onDoneRef = useRef(onDone);
+	onDoneRef.current = onDone;
 	const sheet = useMemo(() => project?.sheets.find((item) => item.id === selSheetId) ?? project?.sheets[0], [project, selSheetId]);
 
-	useEffect(() => setAi(Boolean(project?.aiInterpret)), [project]);
+	useEffect(() => setAi(true), [project]); // AI step interpretation is always on (natural-language steps need it)
 	const loadPreview = useCallback(() => {
 		if (!project) return;
 		previewController.current?.abort();
@@ -184,6 +192,42 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 		previewController.current?.abort();
 		runController.current?.abort();
 	}, []);
+	// Reconnect: rejoin a run still in progress server-side (e.g. after a page refresh).
+	useEffect(() => {
+		if (runController.current) return; // this tab is already the live streamer
+		const gen = ++reconnectGen.current;
+		let timer: number | null = null;
+		let sawRunning = false;
+		const tick = async () => {
+			if (reconnectGen.current !== gen) return;
+			let run: Awaited<ReturnType<typeof api.activeRun>> = null;
+			try {
+				run = await api.activeRun(selId);
+			} catch {
+				return;
+			}
+			if (reconnectGen.current !== gen) return;
+			if (run && run.status === "running") {
+				sawRunning = true;
+				setRunning(true);
+				setTotal(run.total);
+				if (run.kind === "single" && (!run.sheetId || run.sheetId === selSheetId)) {
+					setLive({ baseUrl: run.baseUrl ?? "", interpreter: run.interpreter ?? "rule", counts: run.counts, results: run.results });
+				}
+				setStatusMessage(S[getLang()].runningStatus(run.done, run.total));
+				timer = window.setTimeout(tick, 1200);
+			} else if (sawRunning) {
+				setRunning(false);
+				setDone(true);
+				setStatusMessage(S[getLang()].done);
+				onDoneRef.current();
+			}
+		};
+		void tick();
+		return () => {
+			if (timer !== null) window.clearTimeout(timer);
+		};
+	}, [selId, selSheetId]);
 
 	async function startRun() {
 		if (!project) return;
@@ -192,6 +236,7 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 		runController.current = controller;
 		setRunning(true);
 		setRunError("");
+		setRunNotice("");
 		setDone(false);
 		const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
 		const results: CaseView[] = [];
@@ -206,7 +251,9 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 					counts[event.result.verdict] = (counts[event.result.verdict] || 0) + 1;
 					setStatusMessage(t2.runningStatus(results.length, event.total));
 					setLive({ baseUrl: project.baseUrl, interpreter: ai ? "ai" : "rule", counts: { ...counts }, results: [...results] });
+					if (event.result.verdict === "needs_review") onDone(); // refresh the nav review-queue count live
 				} else if (event.type === "done") { setStatusMessage(t2.done); setDone(true); setLive(event.view); onDone(); }
+				else if (event.type === "notice") setRunNotice(event.message);
 				else if (event.type === "error") throw new Error(event.error);
 			}, controller.signal);
 		} catch (error) {
@@ -231,6 +278,7 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 		runController.current = controller;
 		setRunning(true);
 		setRunError("");
+		setRunNotice("");
 		setDone(false);
 		setLive(null);
 		const prog: Record<string, SheetProg> = {};
@@ -247,6 +295,7 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 				else if (event.type === "sheet-done") { const p = prog[event.sheetId]; if (p) { p.status = "done"; p.counts = event.view.counts; p.done = event.view.results.length; p.total = event.view.results.length; } push(); }
 				else if (event.type === "sheet-error") { const p = prog[event.sheetId]; if (p) { p.status = "error"; p.error = event.error; } push(); }
 				else if (event.type === "all-done") { setDone(true); onDone(); }
+				else if (event.type === "notice") setRunNotice(event.message);
 				else if (event.type === "error") throw new Error(event.error);
 			}, controller.signal);
 		} catch (error) {
@@ -254,6 +303,13 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 		} finally {
 			if (runController.current === controller) { runController.current = null; setRunning(false); }
 		}
+	}
+	function stopRun() {
+		reconnectGen.current++; // invalidate any in-flight reconnect poll
+		void api.cancelRun(selId).catch(() => {});
+		runController.current?.abort();
+		setRunning(false);
+		setStatusMessage(S[getLang()].cancelled);
 	}
 
 	const lang = useLang();
@@ -276,12 +332,13 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 							<label className="run-toggle"><input type="checkbox" checked={ai} onChange={(event) => setAi(event.target.checked)} /><span>{t.aiInterpret}<br /><small className="muted">{t.aiInterpretHint}</small></span></label>
 							<label className="run-toggle"><input type="checkbox" checked={headed} onChange={(event) => setHeaded(event.target.checked)} /><span>{t.showBrowser}<br /><small className="muted">{t.showBrowserHint}</small></span></label>
 						</div>
-						<div className="run-actions"><button className="button primary" type="button" disabled={running} onClick={startRun}><Icon name="play" />{running ? t.running : t.start}</button>{project.sheets.length > 1 && <button className="button secondary" type="button" disabled={running} onClick={startRunAll}>{t.runAll}</button>}<span className="muted" aria-live="polite">{statusMessage}</span></div>
+						<div className="run-actions"><button className="button primary" type="button" disabled={running} onClick={startRun}><Icon name="play" />{running ? t.running : t.start}</button>{running && <button className="button destructive" type="button" onClick={stopRun}><Icon name="x" />{t.stop}</button>}{project.sheets.length > 1 && <button className="button secondary" type="button" disabled={running} onClick={startRunAll}>{t.runAll}</button>}<span className="muted" aria-live="polite">{statusMessage}</span></div>
 					</div>
 					{previewError && <div className="card err">{t.previewFail(previewError)} <button className="mini" type="button" onClick={loadPreview}>{t.retry}</button></div>}
 					{!live && previewLoading && <div className="card late">{[0, 1, 2].map((index) => <div className="skel" style={{ height: 18, marginTop: index === 0 ? 0 : 12 }} key={index} />)}</div>}
 					{!live && preview && <PreviewTable preview={preview} />}
 					{runError && <div className="card err" role="alert">{t.error(runError)}</div>}
+					{runNotice && <div className="card muted" role="status">{runNotice}</div>}
 					{live && <RunResults view={live} total={done ? undefined : total} />}
 					{runAll && (
 						<div className="preview-surface">

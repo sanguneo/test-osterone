@@ -5,7 +5,9 @@ export type IconName =
 	| "arrow"
 	| "check"
 	| "close"
+	| "download"
 	| "edit"
+	| "external"
 	| "import"
 	| "model"
 	| "overview"
@@ -33,11 +35,27 @@ function iconPath(name: IconName): ReactNode {
 			return <path d="m5 12 4 4L19 6" />;
 		case "close":
 			return <path d="m6 6 12 12M18 6 6 18" />;
+		case "download":
+			return (
+				<>
+					<path d="M12 4v10" />
+					<path d="m8 12 4 4 4-4" />
+					<path d="M5 20h14" />
+				</>
+			);
 		case "edit":
 			return (
 				<>
 					<path d="m14 5 5 5" />
 					<path d="M4 20h4l11-11a2.8 2.8 0 0 0-4-4L4 16v4Z" />
+				</>
+			);
+		case "external":
+			return (
+				<>
+					<path d="M14 5h5v5" />
+					<path d="m19 5-8 8" />
+					<path d="M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4" />
 				</>
 			);
 		case "import":

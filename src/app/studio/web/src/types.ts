@@ -41,6 +41,7 @@ export interface AssertionView {
 export interface CaseView {
 	caseId: string;
 	title: string;
+	category: string | null;
 	verdict: Verdict;
 	confidence: number;
 	passed: number;
@@ -140,6 +141,7 @@ export interface RepoReconResult {
 export interface PreviewCase {
 	caseId: string;
 	title: string;
+	category: string | null;
 	steps: string[];
 	expected: string;
 	priority: string | null;
@@ -156,6 +158,7 @@ export interface PreviewResult {
 export interface ReviewItem {
 	caseId: string;
 	title: string;
+	category: string | null;
 	verdict: Verdict;
 	reason: string;
 	url: string;
@@ -178,6 +181,7 @@ export type RunEvent =
 	| { type: "start"; total: number; baseUrl: string; interpreter: "ai" | "rule" }
 	| { type: "case"; index: number; total: number; result: CaseView }
 	| { type: "done"; view: RunView }
+	| { type: "notice"; message: string }
 	| { type: "error"; error: string };
 
 export type RunAllEvent =
@@ -186,6 +190,7 @@ export type RunAllEvent =
 	| { type: "start"; total: number; baseUrl: string; interpreter: "ai" | "rule"; sheetId: string }
 	| { type: "case"; index: number; total: number; result: CaseView; sheetId: string }
 	| { type: "sheet-done"; sheetId: string; view: RunView }
+	| { type: "notice"; message: string; sheetId: string }
 	| { type: "sheet-error"; sheetId: string; error: string }
 	| { type: "all-done" }
 	| { type: "error"; error: string };
@@ -202,4 +207,20 @@ export interface RunInput {
 	aiInterpret?: boolean;
 	projectId?: string;
 	headed?: boolean;
+}
+
+/** A run currently tracked by the server registry — used to reconnect after a refresh. */
+export interface ActiveRunView {
+	projectId: string;
+	sheetId?: string;
+	kind: "single" | "all";
+	status: "running" | "done" | "error" | "cancelled";
+	startedAt: number;
+	interpreter?: "ai" | "rule";
+	baseUrl?: string;
+	total: number;
+	done: number;
+	results: CaseView[];
+	counts: Record<Verdict, number>;
+	error?: string;
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { type FakeAction, FakePage, type PageSnapshot } from "../src/execute/page.ts";
-import { extractStructure, reconApp, reduceRecon } from "../src/interpret/recon.ts";
+import { attemptLogin, extractStructure, reconApp, reduceRecon } from "../src/interpret/recon.ts";
 import { FakeModelClient, type ModelMessage } from "../src/model/model-client.ts";
 
 const LOGIN_HTML = `<!doctype html><html><head><title>xperp 로그인</title></head><body>
@@ -168,4 +168,28 @@ test("reconApp notes when the model returns no context", async () => {
 	const res = await reconApp(page, new FakeModelClient(() => "   "), { account: CREDS });
 	expect(res.context).toBe("");
 	expect(res.notes.some((n) => n.includes("모델이 컨텍스트를 반환하지 않음"))).toBe(true);
+});
+
+test("attemptLogin fills creds, submits, and confirms it left the login form → ok", async () => {
+	const page = new FakePage({ url: "", text: "", html: "" }, reconReducer);
+	const res = await attemptLogin(page, CREDS);
+	expect(res.ok).toBe(true);
+});
+
+test("attemptLogin fails when credentials are rejected (still on the login form)", async () => {
+	const page = new FakePage({ url: "", text: "", html: "" }, reconReducer);
+	const res = await attemptLogin(page, { username: "wrong", password: "nope" }, { settleTimeoutMs: 1200 });
+	expect(res.ok).toBe(false);
+	expect(res.note).toContain("로그인 화면");
+});
+
+test("attemptLogin fails when no login fields are found on the page", async () => {
+	const publicOnly = (action: FakeAction): PageSnapshot => {
+		if (action.kind === "goto") return { url: "/", text: "공개", html: "<title>공개</title><h1>환영</h1>" };
+		throw new Error(`unmatchable "${action.target}"`);
+	};
+	const page = new FakePage({ url: "", text: "", html: "" }, publicOnly);
+	const res = await attemptLogin(page, { username: "x", password: "y" });
+	expect(res.ok).toBe(false);
+	expect(res.note).toContain("입력 필드");
 });

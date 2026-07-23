@@ -14,6 +14,7 @@ function tc(over: Partial<NormalizedTC>): NormalizedTC {
 		priority: null,
 		role: null,
 		env: null,
+		category: null,
 		contentHash: "x",
 		...over,
 	};

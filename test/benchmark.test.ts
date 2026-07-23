@@ -18,6 +18,7 @@ function mkTC(caseId: string, steps: string[], expected: string, contentHash: st
 		priority: null,
 		role: null,
 		env: "staging",
+		category: null,
 		contentHash,
 	};
 }

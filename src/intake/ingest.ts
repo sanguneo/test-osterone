@@ -95,6 +95,7 @@ const FIELD_ALIASES: Record<TcField, string[]> = {
 	priority: ["priority", "prio", "severity", "중요도", "우선순위"],
 	role: ["role", "persona", "account", "user", "담당자"],
 	env: ["environment", "env", "stage", "환경"],
+	category: ["category", "분류", "카테고리", "구분", "그룹", "group", "대분류", "중분류", "메뉴", "menu"],
 };
 
 /** Deterministic header→field mapping: exact alias match first, then substring. */
@@ -139,7 +140,17 @@ export function normalizeTable(
 		return header ? (row[header] ?? "") : "";
 	};
 	return table.rows.map((row) => {
-		const title = normText(cell(row, "title"));
+		const rawTitle = normText(cell(row, "title"));
+		let title = rawTitle;
+		let category = normText(cell(row, "category")) || null;
+		if (!category) {
+			// Fall back to a `[말머리]` title prefix as the category, stripping it from the title.
+			const m = rawTitle.match(/^\[\s*([^\]]+?)\s*\]\s*(.+)$/);
+			if (m?.[1] && m[2]) {
+				category = m[1];
+				title = m[2];
+			}
+		}
 		const steps = splitSteps(cell(row, "step"));
 		const expected = normText(cell(row, "expected"));
 		const role = normText(cell(row, "role")) || null;
@@ -147,7 +158,7 @@ export function normalizeTable(
 		const priority = normText(cell(row, "priority")) || null;
 		const sourceId = normText(cell(row, "id")) || null;
 		const hash = contentHash([title, steps, expected, role, env]);
-		return { caseId: `TC-${hash}`, sourceId, title, steps, expected, priority, role, env, contentHash: hash };
+		return { caseId: `TC-${hash}`, sourceId, title, steps, expected, priority, role, env, category, contentHash: hash };
 	});
 }
 

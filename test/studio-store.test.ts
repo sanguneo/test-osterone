@@ -40,6 +40,7 @@ function seed() {
 	const review: ReviewItem = {
 		caseId: "c2",
 		title: "Case 2",
+		category: null,
 		verdict: "needs_review",
 		reason: "baseline pending approval",
 		url: "/x",

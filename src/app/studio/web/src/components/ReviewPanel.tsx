@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import { useLang } from "../i18n";
+import { type Lang, useLang } from "../i18n";
 import type { ReviewItem } from "../types";
 import { Icon } from "./Icon";
-import { VerdictMark } from "./Verdict";
+import { stripAnsi, VerdictMark } from "./Verdict";
 
 const S = {
 	ko: {
@@ -22,6 +22,11 @@ const S = {
 		approveAllFailed: (msg: string) => `전체 승인 실패: ${msg} — 다시 시도하세요.`,
 		approveFailed: (msg: string) => `승인 실패: ${msg} — 다시 시도하거나 서버 로그를 확인하세요.`,
 		reasonLabel: "확인이 필요한 이유",
+		reasonSelfHeal: (op: string) => `요소를 정확히 찾지 못해 유사 후보로 '${op}' 동작을 대신 수행했습니다. 의도한 요소에 실행됐는지 화면으로 확인하세요.`,
+		reasonNoAssertions: "이 케이스에 기대 결과(검증 항목)가 없어 통과/실패를 자동으로 판정할 수 없습니다. 화면을 보고 직접 판단하세요.",
+		reasonBaselinePending: "비교 기준(baseline) 화면이 아직 승인되지 않았습니다. 현재 화면이 올바르면 기준으로 승인하세요.",
+		reasonErrorInfo: (info: string) => `실행 중 오류가 발생해 판정을 보류했습니다: ${info} — 화면과 트레이스로 원인을 확인하세요.`,
+		reasonErrorGeneric: "실행 중 오류가 발생해 판정을 보류했습니다. 화면과 트레이스로 원인을 확인하세요.",
 		screenTextLabel: "화면 텍스트",
 		emptyPage: "(빈 페이지)",
 		screenAlt: (title: string) => `${title} 화면`,
@@ -35,8 +40,6 @@ const S = {
 		reviewBaseline: "기준 화면 검토",
 		traceTitle: "트레이스",
 		traceHint: "— 행동 단위로 스크럽(죽은 시간 자동 스킵). 스크린샷보다 정밀합니다.",
-		traceOpen: "▶ 트레이스 뷰어 열기",
-		traceClose: "트레이스 뷰어 (아래 ↓)",
 		traceNewTab: "새 탭에서 크게 ↗",
 		traceDownload: "trace.zip 다운로드",
 		markFail: "실패로 처리",
@@ -59,6 +62,11 @@ const S = {
 		approveAllFailed: (msg: string) => `Approve all failed: ${msg} — try again.`,
 		approveFailed: (msg: string) => `Approve failed: ${msg} — try again or check the server logs.`,
 		reasonLabel: "Reason for review",
+		reasonSelfHeal: (op: string) => `The exact element wasn't found, so a similar candidate was used to perform '${op}'. Check the screen to confirm it acted on the intended element.`,
+		reasonNoAssertions: "This case has no expected result (assertions), so pass/fail can't be judged automatically. Review the screen and decide.",
+		reasonBaselinePending: "The comparison baseline hasn't been approved yet. If the current screen is correct, approve it as the baseline.",
+		reasonErrorInfo: (info: string) => `The run errored, so the verdict was held: ${info} — use the screen and trace to find the cause.`,
+		reasonErrorGeneric: "The run errored, so the verdict was held. Use the screen and trace to find the cause.",
 		screenTextLabel: "Screen text",
 		emptyPage: "(empty page)",
 		screenAlt: (title: string) => `${title} screenshot`,
@@ -72,8 +80,6 @@ const S = {
 		reviewBaseline: "Review baseline",
 		traceTitle: "Trace",
 		traceHint: "— scrub action-by-action (dead time auto-skipped). More precise than a screenshot.",
-		traceOpen: "▶ Open trace viewer",
-		traceClose: "Trace viewer (below ↓)",
 		traceNewTab: "Open larger in a new tab ↗",
 		traceDownload: "Download trace.zip",
 		markFail: "Mark as fail",
@@ -81,6 +87,25 @@ const S = {
 		rejectFailed: (msg: string) => `Mark-as-fail failed: ${msg} — try again.`,
 	},
 } as const;
+
+type ReviewStrings = (typeof S)[Lang];
+
+const OP_LABEL: Record<Lang, Record<string, string>> = {
+	ko: { fill: "입력", click: "클릭", press: "키 입력", select: "선택", check: "체크", uncheck: "체크 해제", hover: "마우스 오버", goto: "페이지 이동", navigate: "페이지 이동" },
+	en: {},
+};
+
+/** Turn a terse engine reason code into a friendly, human-readable "why review" explanation. */
+function explainReason(reason: string, t: ReviewStrings, lang: Lang): string {
+	if (reason.startsWith("self-heal:")) {
+		const raw = reason.slice("self-heal:".length).trim();
+		return t.reasonSelfHeal(OP_LABEL[lang][raw] ?? raw);
+	}
+	if (reason === "no assertions authored") return t.reasonNoAssertions;
+	if (reason === "baseline pending approval") return t.reasonBaselinePending;
+	if (reason === "error" || reason.trim() === "") return t.reasonErrorGeneric;
+	return t.reasonErrorInfo(stripAnsi(reason));
+}
 
 export function ReviewPanel({
 	selId,
@@ -97,7 +122,8 @@ export function ReviewPanel({
 	onRun: () => void;
 	refreshKey?: number;
 }) {
-	const t = S[useLang()];
+	const lang = useLang();
+	const t = S[lang];
 	const [items, setItems] = useState<ReviewItem[] | null>(null);
 	const [loadErr, setLoadErr] = useState("");
 	const [approveErr, setApproveErr] = useState("");
@@ -235,17 +261,20 @@ export function ReviewPanel({
 				<article className="rev-item" key={it.caseId}>
 					<div className="rev-body">
 						<header className="rev-top">
-							<span className="rev-title">
-								<VerdictMark verdict={it.verdict} /> <b>{it.title}</b>
-							</span>
-							<span className="rev-meta">
-								{it.caseId}
-								{it.env ? ` · ${it.env}` : ""}
-							</span>
+							<div className="rev-badge-row">
+								<VerdictMark verdict={it.verdict} />
+								{it.category && <span className="cat-tag">{it.category}</span>}
+								<span className="rev-meta">
+									{it.caseId}
+									{it.env ? ` · ${it.env}` : ""}
+								</span>
+							</div>
+							<b className="rev-title">{it.title}</b>
 						</header>
 						<div className="rev-reason">
 							<span className="lbl">{t.reasonLabel}</span>
-							{it.reason}
+							<p className="rev-reason-text">{explainReason(it.reason, t, lang)}</p>
+							<code className="rev-reason-code">{it.reason}</code>
 						</div>
 						<div className="rev-txt-wrap">
 							<span className="lbl">{t.screenTextLabel}</span>
@@ -262,23 +291,24 @@ export function ReviewPanel({
 					)}
 					{it.trace && (
 						<section className="rev-trace">
-							<h3>
-								{t.traceTitle} <span className="muted" style={{ fontWeight: 400 }}>{t.traceHint}</span>
-							</h3>
-							<div className="trace-actions" style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-								<button
-									className="button secondary compact"
-									type="button"
-									disabled={openTraceId === it.caseId}
-									onClick={() => setOpenTraceId(it.caseId)}
-								>
-									{openTraceId === it.caseId ? t.traceClose : t.traceOpen}
-								</button>
-								<a href={traceViewerUrl(it)} target="_blank" rel="noopener" style={{ fontSize: 12 }}>{t.traceNewTab}</a>
-								<a href={traceZipUrl(it)} download style={{ fontSize: 12 }}>{t.traceDownload}</a>
-							</div>
+							<button
+								type="button"
+								className="trace-toggle"
+								aria-expanded={openTraceId === it.caseId}
+								onClick={() => setOpenTraceId(openTraceId === it.caseId ? "" : it.caseId)}
+							>
+								<span className="trace-chevron"><Icon name="arrow" size={13} /></span>
+								<span className="trace-toggle-title">{t.traceTitle}</span>
+								<span className="muted trace-toggle-hint">{t.traceHint}</span>
+							</button>
 							{openTraceId === it.caseId && (
-								<iframe title={t.traceTitle} src={traceViewerUrl(it)} className="trace-frame" style={{ width: "100%", height: 620, border: "1px solid var(--hairline, #333)", borderRadius: 8, marginTop: 10 }} />
+								<div className="trace-frame-wrap">
+									<div className="trace-float">
+										<a className="icon-button" href={traceViewerUrl(it)} target="_blank" rel="noopener" aria-label={t.traceNewTab} title={t.traceNewTab}><Icon name="external" size={18} /></a>
+										<a className="icon-button" href={traceZipUrl(it)} download aria-label={t.traceDownload} title={t.traceDownload}><Icon name="download" size={18} /></a>
+									</div>
+									<iframe title={t.traceTitle} src={traceViewerUrl(it)} className="trace-frame" />
+								</div>
 							)}
 						</section>
 					)}

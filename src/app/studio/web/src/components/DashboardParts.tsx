@@ -55,7 +55,7 @@ export function DashboardQueueRow({ result, onKey, goReview }: { readonly result
 	const lang = useLang();
 	return (
 		<tr tabIndex={0} onKeyDown={onKey}>
-			<td className="ttl">{result.title || result.caseId}</td><td><VerdictMark verdict={result.verdict} /></td><td className="num">{result.passed}/{result.total}</td><td className="num">{result.confidence.toFixed(2)}</td>
+			<td className="ttl">{result.category && <span className="cat-tag">{result.category}</span>}{result.title || result.caseId}</td><td><VerdictMark verdict={result.verdict} /></td><td className="num">{result.passed}/{result.total}</td><td className="num">{result.confidence.toFixed(2)}</td>
 			<td>{firstFail && <div className="detail">{stripAnsi(formatAssertion(firstFail, lang))}</div>}<SelfHealNote heal={result.heal} />{result.verdict === "needs_review" && <button className="linkbtn" type="button" onClick={goReview}>{S[lang].review}</button>}</td>
 		</tr>
 	);

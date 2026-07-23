@@ -287,3 +287,53 @@ export async function reconApp(page: Page, model: ModelClient, opts: ReconOption
 	if (!context) notes.push("모델이 컨텍스트를 반환하지 않음 — 모델 연결/쿼터를 확인하세요.");
 	return { pages, context, notes, loggedIn };
 }
+
+export interface LoginResult {
+	ok: boolean;
+	/** Human-readable outcome for logs and the run error message. */
+	note: string;
+}
+
+/**
+ * Auto-login precondition. Navigates to the login entry, fills the account
+ * credentials via the same field-hint ranking recon uses, submits, and verifies
+ * we left the login form. Unlike reconApp's best-effort login, this reports a
+ * definite ok/!ok so the runner can abort a batch when auth was required but
+ * did not take (rather than letting every case fail into the review queue).
+ */
+export async function attemptLogin(
+	page: Page,
+	account: ReconAccount,
+	opts: {
+		loginPath?: string;
+		usernameHints?: string[];
+		passwordHints?: string[];
+		loginHints?: string[];
+		/** Max time to wait for the login form to disappear after submit (default 6000ms). */
+		settleTimeoutMs?: number;
+	} = {},
+): Promise<LoginResult> {
+	if (!account.username && !account.password) return { ok: false, note: "계정 자격증명이 비어 있습니다" };
+	await page.goto(opts.loginPath ?? "/");
+	const filledUser = account.username
+		? await tryFill(page, opts.usernameHints ?? DEFAULT_USER_HINTS, account.username)
+		: true;
+	const filledPass = account.password
+		? await tryFill(page, opts.passwordHints ?? DEFAULT_PASS_HINTS, account.password)
+		: true;
+	if (!filledUser || !filledPass) return { ok: false, note: "로그인 입력 필드(아이디/비밀번호)를 찾지 못했습니다" };
+	const clicked = await tryClick(page, opts.loginHints ?? DEFAULT_LOGIN_HINTS);
+	if (!clicked) return { ok: false, note: "로그인/제출 버튼을 찾지 못했습니다" };
+	// Wait for the login form to disappear (server auth + redirect / SPA transition can take a few seconds).
+	// Poll rather than a fixed delay so a fast login returns immediately and a slow one isn't a false failure.
+	const passHints = (opts.passwordHints ?? DEFAULT_PASS_HINTS).map((h) => h.toLowerCase());
+	const stillOnLoginForm = (html: string, url: string): boolean =>
+		extractStructure(html, url).formFields.some((f) => passHints.some((h) => f.toLowerCase().includes(h)));
+	const budgetMs = opts.settleTimeoutMs ?? 6000;
+	for (let waited = 0; waited < budgetMs; waited += 500) {
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		const snap = await page.snapshot();
+		if (!stillOnLoginForm(snap.html, snap.url)) return { ok: true, note: "로그인 완료" };
+	}
+	return { ok: false, note: "제출 후에도 로그인 화면에 머무름(자격증명 거부 또는 로그인 지연)" };
+}

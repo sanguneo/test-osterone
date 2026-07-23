@@ -19,6 +19,7 @@ function tc(caseId: string, steps: string[], expected: string, h: string): Norma
 		priority: null,
 		role: null,
 		env: "staging",
+		category: null,
 		contentHash: h,
 	};
 }

@@ -7,7 +7,7 @@ export interface RawTable {
 }
 
 /** Canonical test-case fields the raw sheet is mapped onto. */
-export type TcField = "id" | "title" | "step" | "expected" | "priority" | "role" | "env";
+export type TcField = "id" | "title" | "step" | "expected" | "priority" | "role" | "env" | "category";
 
 /** A normalized, deduplicated test case with a deterministic content-derived id. */
 export interface NormalizedTC {
@@ -21,6 +21,8 @@ export interface NormalizedTC {
 	priority: string | null;
 	role: string | null;
 	env: string | null;
+	/** In-sheet grouping (from a 분류/category column, or a `[말머리]` title prefix). Null when uncategorized. */
+	category: string | null;
 	/** sha256 prefix over normalized (title, steps, expected, role, env). Drives caseId + assertion-cache invalidation. */
 	contentHash: string;
 }

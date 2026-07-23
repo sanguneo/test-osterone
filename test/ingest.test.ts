@@ -126,3 +126,19 @@ test("ingestCsv applies a mapping override (AI-refined rule.mapping) over auto-d
 	expect(over?.steps).toEqual(["do the thing"]);
 	expect(over?.expected).toBe("it works");
 });
+
+test("ingestCsv derives category from a 분류 column", () => {
+	const csv = "Title,분류,Steps,Expected Result\n로그인 성공,로그인,go,ok\n결재 상신,전자결재,go,ok\n";
+	const cases = ingestCsv(csv).unique;
+	expect(cases.map((c) => c.category)).toEqual(["로그인", "전자결재"]);
+	expect(cases[0]?.title).toBe("로그인 성공");
+});
+
+test("ingestCsv falls back to a [말머리] title prefix as category and strips it from the title", () => {
+	const csv = "Title,Steps,Expected Result\n[로그인] 잘못된 비밀번호,go,ok\n일반 케이스,go,ok\n";
+	const cases = ingestCsv(csv).unique;
+	expect(cases[0]?.category).toBe("로그인");
+	expect(cases[0]?.title).toBe("잘못된 비밀번호");
+	expect(cases[1]?.category).toBe(null);
+	expect(cases[1]?.title).toBe("일반 케이스");
+});

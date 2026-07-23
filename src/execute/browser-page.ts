@@ -48,6 +48,8 @@ export class BrowserPage implements Page {
 		const tracing = !!opts.trace;
 		if (tracing) await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
 		const pwPage = await context.newPage();
+		// Auto-dismiss native alert/confirm/beforeunload popups so they never block a test run.
+		pwPage.on("dialog", (d) => void d.dismiss().catch(() => {}));
 		return new BrowserPage(
 			browser,
 			context,

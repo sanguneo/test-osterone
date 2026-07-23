@@ -31,7 +31,7 @@ import {
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
 import { getOrAuthorPlan } from "../../interpret/author.ts";
-import { type ReconResult, reconApp } from "../../interpret/recon.ts";
+import { attemptLogin, type ReconResult, reconApp } from "../../interpret/recon.ts";
 import { acquireRepo, type RepoReconResult, reconRepo } from "../../interpret/repo-recon.ts";
 import {
 	type InterpretationRule,
@@ -579,10 +579,16 @@ async function ingestGoogleSheetText(sheetUrl: string): Promise<string> {
 }
 
 /** Ingest → rule → run each case against a real headless browser. Pure engine reuse. */
-export async function runBatch(input: RunInput, onProgress?: (ev: Record<string, unknown>) => void): Promise<RunView> {
+export async function runBatch(
+	input: RunInput,
+	onProgress?: (ev: Record<string, unknown>) => void,
+	signal?: AbortSignal,
+): Promise<RunView> {
 	const st = stateFor(input.projectId ?? "sample");
-	const ai = !!input.aiInterpret;
-	if (ai && !modelClient) throw new Error("Connect a model first to use AI step interpretation.");
+	let ai = !!input.aiInterpret;
+	// No model connected → don't hard-fail; fall back to rule interpretation and tell the client.
+	const aiUnavailable = ai && !modelClient;
+	if (aiUnavailable) ai = false;
 	const project = allProjects().find((p) => p.id === (input.projectId ?? "sample"));
 	const sheet = input.sheets?.[0];
 	const accounts = input.accounts ?? [];
@@ -590,9 +596,11 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 	const sid = input.sheetId ?? resolveSheetId(project, input.sheetId) ?? "__default__";
 	const sheetSt = sheetState(st, sid);
 	const effMapping = { ...sheetSt.rule.mapping, ...(sheet?.mapping ?? {}) };
-	const runInput: RunInput = { ...input, baseUrl: sheet?.baseUrl || input.baseUrl };
+	const runInput: RunInput = { ...input, aiInterpret: ai, baseUrl: sheet?.baseUrl || input.baseUrl };
 	const { cases, baseUrl, stop } = await loadCases(runInput, effMapping);
 	onProgress?.({ type: "start", total: cases.length, baseUrl, interpreter: ai ? "ai" : "rule" });
+	if (aiUnavailable)
+		onProgress?.({ type: "notice", message: "모델 미연결 — AI 스텝 해석 대신 규칙 해석으로 실행합니다." });
 	const baselineEnv = (sheet?.env || input.env)?.trim() || (input.sample ? "sample" : baseUrl);
 	const caseById = new Map(cases.map((c) => [c.caseId, c]));
 	for (const c of cases) sheetSt.reviewQueue.delete(c.caseId);
@@ -603,10 +611,31 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 		: await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser(), trace });
 	if (trace)
 		mkdirSync(join(tracesBaseDir, traceSafe(input.projectId ?? "sample"), traceSafe(sid)), { recursive: true });
+	// Cancellation: closing the page interrupts any in-flight Playwright action so the run stops promptly.
+	signal?.addEventListener(
+		"abort",
+		() => {
+			void page.close().catch(() => {});
+		},
+		{ once: true },
+	);
 	const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
 	const results: CaseView[] = [];
 	try {
+		// Login-feature tests must run logged-out (they drive their own login), so a pure login
+		// sheet skips the auto-login precondition. Detected by category, falling back to the title.
+		const loginRe = /로그인|login|log\s?in|sign\s?in|인증|auth/i;
+		const isLoginSheet = cases.length > 0 && cases.every((c) => loginRe.test(c.category ?? c.title ?? ""));
+		// Auto-login precondition: non-login runs authenticate once, then every case shares the session.
+		if (!input.sample && !isLoginSheet && defaultAccount && (defaultAccount.username || defaultAccount.password)) {
+			const login = await attemptLogin(page, {
+				username: defaultAccount.username,
+				password: defaultAccount.password,
+			});
+			if (!login.ok) throw new Error(`로그인 precondition 실패로 실행을 중단했습니다 — ${login.note}`);
+		}
 		for (const tc of cases) {
+			if (signal?.aborted) break;
 			const account =
 				accounts.find((a) => a.role && tc.role && a.role.trim().toLowerCase() === tc.role.trim().toLowerCase()) ??
 				defaultAccount;
@@ -646,6 +675,7 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 				sheetSt.reviewQueue.set(r.caseId, {
 					caseId: r.caseId,
 					title: caseById.get(r.caseId)?.title || r.caseId,
+					category: caseById.get(r.caseId)?.category ?? null,
 					verdict: r.verdict,
 					reason,
 					url: r.snapshot?.url ?? "",
@@ -661,6 +691,7 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 			const view: CaseView = {
 				caseId: r.caseId,
 				title: tc.title || r.caseId,
+				category: tc.category,
 				verdict: r.verdict,
 				confidence: r.confidence,
 				passed: r.assertions.filter((a) => a.passed).length,
@@ -677,7 +708,7 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 			onProgress?.({ type: "case", index: results.length - 1, total: cases.length, result: view });
 		}
 	} finally {
-		await page.close();
+		await page.close().catch(() => {});
 		stop();
 	}
 	const view: RunView = {
@@ -689,10 +720,51 @@ export async function runBatch(input: RunInput, onProgress?: (ev: Record<string,
 		results,
 		sheetId: sid,
 	};
-	sheetSt.history.unshift(view);
-	if (sheetSt.history.length > 20) sheetSt.history.length = 20;
-	saveState(input.projectId ?? "sample", st);
+	if (!signal?.aborted) {
+		sheetSt.history.unshift(view);
+		if (sheetSt.history.length > 20) sheetSt.history.length = 20;
+		saveState(input.projectId ?? "sample", st);
+	}
 	return view;
+}
+
+// --- Run registry: keeps a run alive across a client refresh, and enables reconnect + explicit cancel. ---
+interface ActiveRun {
+	projectId: string;
+	sheetId?: string;
+	kind: "single" | "all";
+	status: "running" | "done" | "error" | "cancelled";
+	startedAt: number;
+	interpreter?: "ai" | "rule";
+	baseUrl?: string;
+	total: number;
+	results: CaseView[];
+	counts: Record<Verdict, number>;
+	error?: string;
+	controller: AbortController;
+}
+const activeRuns = new Map<string, ActiveRun>();
+
+function emptyVerdictCounts(): Record<Verdict, number> {
+	return { pass: 0, fail: 0, needs_review: 0, error: 0 };
+}
+
+/** Serialize an active run for the reconnect API (drops the live AbortController). */
+function activeRunView(r: ActiveRun) {
+	return {
+		projectId: r.projectId,
+		sheetId: r.sheetId,
+		kind: r.kind,
+		status: r.status,
+		startedAt: r.startedAt,
+		interpreter: r.interpreter,
+		baseUrl: r.baseUrl,
+		total: r.total,
+		done: r.results.length,
+		results: r.results,
+		counts: r.counts,
+		error: r.error,
+	};
 }
 
 function send(res: ServerResponse, status: number, body: string, type = "application/json"): void {
@@ -738,49 +810,135 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 	}
 	if (req.method === "POST" && url.pathname === "/api/run") {
 		const input = JSON.parse((await readBody(req)) || "{}") as RunInput;
+		const projectId = input.projectId ?? "sample";
+		if (activeRuns.get(projectId)?.status === "running") {
+			return send(res, 409, JSON.stringify({ error: "이미 실행 중인 런이 있습니다. 먼저 중지하세요." }));
+		}
 		res.writeHead(200, { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache" });
-		const emit = (ev: Record<string, unknown>) => res.write(`${JSON.stringify(ev)}\n`);
+		const run: ActiveRun = {
+			projectId,
+			sheetId: input.sheetId,
+			kind: "single",
+			status: "running",
+			startedAt: Date.now(),
+			total: 0,
+			results: [],
+			counts: emptyVerdictCounts(),
+			controller: new AbortController(),
+		};
+		activeRuns.set(projectId, run);
+		// The run lives in the registry, decoupled from this request — a client refresh no longer kills it.
+		const write = (ev: Record<string, unknown>) => {
+			if (res.writableEnded) return;
+			try {
+				res.write(`${JSON.stringify(ev)}\n`);
+			} catch {
+				/* client disconnected — the run keeps going in the registry */
+			}
+		};
+		const emit = (ev: Record<string, unknown>) => {
+			if (ev.type === "start") {
+				run.total = Number(ev.total) || 0;
+				run.interpreter = ev.interpreter as "ai" | "rule";
+				run.baseUrl = String(ev.baseUrl ?? "");
+			} else if (ev.type === "case") {
+				const result = ev.result as CaseView;
+				run.results.push(result);
+				run.counts[result.verdict] = (run.counts[result.verdict] ?? 0) + 1;
+			}
+			write(ev);
+		};
 		try {
-			const view = await runBatch(input, emit);
-			emit({ type: "done", view });
+			const view = await runBatch(input, emit, run.controller.signal);
+			run.results = view.results;
+			run.counts = view.counts;
+			run.status = run.controller.signal.aborted ? "cancelled" : "done";
+			write({ type: run.controller.signal.aborted ? "cancelled" : "done", view });
 		} catch (err) {
-			console.error("run failed:", (err as Error).stack ?? err);
-			emit({ type: "error", error: (err as Error).message });
+			if (run.controller.signal.aborted) {
+				run.status = "cancelled";
+				write({ type: "cancelled" });
+			} else {
+				run.status = "error";
+				run.error = (err as Error).message;
+				console.error("run failed:", (err as Error).stack ?? err);
+				write({ type: "error", error: run.error });
+			}
 		}
 		res.end();
 		return;
 	}
 	if (req.method === "POST" && url.pathname === "/api/run/all") {
 		const input = JSON.parse((await readBody(req)) || "{}") as RunInput;
+		const projectId = input.projectId ?? "sample";
+		if (activeRuns.get(projectId)?.status === "running") {
+			return send(res, 409, JSON.stringify({ error: "이미 실행 중인 런이 있습니다. 먼저 중지하세요." }));
+		}
 		res.writeHead(200, { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache" });
-		const emit = (ev: Record<string, unknown>) => res.write(`${JSON.stringify(ev)}\n`);
+		const run: ActiveRun = {
+			projectId,
+			kind: "all",
+			status: "running",
+			startedAt: Date.now(),
+			total: 0,
+			results: [],
+			counts: emptyVerdictCounts(),
+			controller: new AbortController(),
+		};
+		activeRuns.set(projectId, run);
+		const write = (ev: Record<string, unknown>) => {
+			if (res.writableEnded) return;
+			try {
+				res.write(`${JSON.stringify(ev)}\n`);
+			} catch {
+				/* client disconnected — the run keeps going in the registry */
+			}
+		};
 		const sheets = input.sheets ?? input.sources ?? [];
 		try {
-			emit({
+			write({
 				type: "all-start",
 				totalSheets: sheets.length,
 				sheets: sheets.map((s) => ({ sheetId: s.id, name: s.name })),
 			});
 			for (let i = 0; i < sheets.length; i++) {
+				if (run.controller.signal.aborted) break;
 				const sheet = sheets[i];
 				if (!sheet) continue;
-				emit({ type: "sheet-start", sheetId: sheet.id, name: sheet.name, index: i, totalSheets: sheets.length });
+				write({ type: "sheet-start", sheetId: sheet.id, name: sheet.name, index: i, totalSheets: sheets.length });
 				try {
-					const view = await runBatch({ ...input, sheets: [sheet], sheetId: sheet.id }, (ev) =>
-						emit({ ...ev, sheetId: sheet.id }),
+					const view = await runBatch(
+						{ ...input, sheets: [sheet], sheetId: sheet.id },
+						(ev) => write({ ...ev, sheetId: sheet.id }),
+						run.controller.signal,
 					);
-					emit({ type: "sheet-done", sheetId: sheet.id, view });
+					write({ type: "sheet-done", sheetId: sheet.id, view });
 				} catch (err) {
+					if (run.controller.signal.aborted) break;
 					console.error("run-all sheet failed:", (err as Error).stack ?? err);
-					emit({ type: "sheet-error", sheetId: sheet.id, error: (err as Error).message });
+					write({ type: "sheet-error", sheetId: sheet.id, error: (err as Error).message });
 				}
 			}
-			emit({ type: "all-done" });
+			run.status = run.controller.signal.aborted ? "cancelled" : "done";
+			if (!run.controller.signal.aborted) write({ type: "all-done" });
 		} catch (err) {
-			emit({ type: "error", error: (err as Error).message });
+			run.status = "error";
+			run.error = (err as Error).message;
+			write({ type: "error", error: run.error });
 		}
 		res.end();
 		return;
+	}
+	if (req.method === "GET" && url.pathname === "/api/run/active") {
+		const projectId = url.searchParams.get("projectId") || "sample";
+		const run = activeRuns.get(projectId);
+		return send(res, 200, JSON.stringify(run && run.status === "running" ? activeRunView(run) : null));
+	}
+	if (req.method === "POST" && url.pathname === "/api/run/cancel") {
+		const { projectId } = JSON.parse((await readBody(req)) || "{}") as { projectId?: string };
+		const run = activeRuns.get(projectId || "sample");
+		if (run && run.status === "running") run.controller.abort();
+		return send(res, 200, JSON.stringify({ ok: true }));
 	}
 	if (req.method === "GET" && url.pathname === "/api/status") {
 		return send(
@@ -1121,6 +1279,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 						steps: c.steps,
 						expected: c.expected,
 						priority: c.priority,
+						category: c.category,
 					})),
 					duplicates: duplicates.map((d) => ({
 						title: all[d.index]?.title ?? "",
@@ -1377,6 +1536,15 @@ async function main(): Promise<number> {
 	};
 	for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, shutdown);
 	process.on("exit", restoreTerminal);
+	// Auto-restore a Codex model connection on startup so a server restart never silently drops to rule mode.
+	if (!modelClient && readCodexLogin()) {
+		try {
+			auth = connect({ mode: "codex" });
+			console.log(`model: restored Codex connection (${auth.model})`);
+		} catch (err) {
+			console.warn("model: could not auto-restore Codex connection:", (err as Error).message);
+		}
+	}
 	const port = Number(process.env.PORT ?? 8686);
 	createServer((req, res) => {
 		handle(req, res).catch((err) => send(res, 500, JSON.stringify({ error: String(err) })));

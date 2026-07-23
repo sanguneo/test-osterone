@@ -54,7 +54,7 @@ export function RunResults({ view, total }: { readonly view: RunViewLike; readon
 					<tbody>
 						{view.results.map((result) => (
 							<tr key={result.caseId}>
-								<td>{result.title}</td>
+								<td>{result.category && <span className="cat-tag">{result.category}</span>}{result.title}</td>
 								<td><VerdictMark verdict={result.verdict} /></td>
 								<td className="num">{result.confidence.toFixed(2)}</td>
 								<td className="num">{result.passed}/{result.total}</td>

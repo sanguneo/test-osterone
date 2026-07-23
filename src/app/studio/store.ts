@@ -36,6 +36,7 @@ import type { ModelMessage } from "../../model/model-client.ts";
 export interface CaseView {
 	caseId: string;
 	title: string;
+	category: string | null;
 	verdict: Verdict;
 	confidence: number;
 	passed: number;
@@ -57,6 +58,7 @@ export interface RunView {
 export interface ReviewItem {
 	caseId: string;
 	title: string;
+	category: string | null;
 	verdict: Verdict;
 	reason: string;
 	url: string;

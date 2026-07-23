@@ -42,6 +42,7 @@ function loginTC(over: Partial<NormalizedTC> = {}): NormalizedTC {
 		priority: null,
 		role: "viewer",
 		env: "staging",
+		category: null,
 		contentHash: "hash-login",
 		...over,
 	};
