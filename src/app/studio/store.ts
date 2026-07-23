@@ -125,6 +125,15 @@ export function sheetState(st: ProjectState, sheetId: string): SheetState {
 	return s;
 }
 
+/** Clear a sheet's run residue — execution history + review queue. Baselines and plan cache are kept. */
+export function clearSheetRuns(st: ProjectState, sheetId: string): boolean {
+	const s = st.sheets.get(sheetId);
+	if (!s) return false;
+	s.history = [];
+	s.reviewQueue = new Map();
+	return true;
+}
+
 export class LayeredBaselineStore implements BaselineStore {
 	constructor(
 		private readonly sheet: MemoryBaselineStore,

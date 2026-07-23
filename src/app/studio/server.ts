@@ -47,6 +47,7 @@ import { startFixture } from "../../testing/fixture-app.ts";
 import { deleteProjectSheets, deleteSheetContent, readSheetContent, writeSheetContent } from "./sheet-store.ts";
 import {
 	type CaseView,
+	clearSheetRuns,
 	deleteProjectState,
 	layeredBaseline,
 	loadProjectState,
@@ -139,6 +140,12 @@ const tracesBaseDir = join(homedir(), ".test-osterone", "traces");
 const traceSafe = (s: string): string => s.replace(/[^A-Za-z0-9._-]/g, "_");
 function tracePathFor(projectId: string, sheetId: string, caseId: string): string {
 	return join(tracesBaseDir, traceSafe(projectId), traceSafe(sheetId), `${traceSafe(caseId)}.zip`);
+}
+/** Directory holding a project's (or a single sheet's) trace zips. */
+function traceDirFor(projectId: string, sheetId?: string): string {
+	return sheetId
+		? join(tracesBaseDir, traceSafe(projectId), traceSafe(sheetId))
+		: join(tracesBaseDir, traceSafe(projectId));
 }
 
 // SheetJS is CJS; load via createRequire so it works under Node without ESM-interop config.
@@ -828,6 +835,24 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		saveState(pid, st);
 		return send(res, 200, JSON.stringify(statusPayload(pid, sid)));
 	}
+	if (req.method === "POST" && url.pathname === "/api/sheet/clear") {
+		try {
+			const { projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
+				projectId?: string;
+				sheetId?: string;
+			};
+			const pid = projectId || "sample";
+			const st = stateFor(pid);
+			const project = allProjects().find((p) => p.id === pid);
+			const sid = resolveSheetId(project, sheetId);
+			clearSheetRuns(st, sid);
+			rmSync(traceDirFor(pid, sid), { recursive: true, force: true }); // drop leftover trace zips
+			saveState(pid, st);
+			return send(res, 200, JSON.stringify({ cleared: true }));
+		} catch (err) {
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
 	if (req.method === "POST" && url.pathname === "/api/rule/context") {
 		try {
 			const { appContext, codeContext, projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
@@ -1251,6 +1276,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			projectStates.delete(id);
 			deleteProjectState(id);
 			deleteProjectSheets(id);
+			rmSync(traceDirFor(id), { recursive: true, force: true }); // drop the project's trace zips
 		}
 		return send(res, 200, JSON.stringify({ projects: allProjects() }));
 	}

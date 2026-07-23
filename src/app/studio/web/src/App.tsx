@@ -261,7 +261,7 @@ export function App() {
 				) : (
 					<>
 						<div hidden={tab !== "dash"}>
-							<DashboardPanel selId={selectedProjectId} project={selectedProject} selSheetId={selectedSheetId} reviewCount={navReviewCount} goTo={setTab} refreshKey={runSequence} />
+							<DashboardPanel selId={selectedProjectId} project={selectedProject} selSheetId={selectedSheetId} reviewCount={navReviewCount} goTo={setTab} refreshKey={runSequence} onRefresh={() => setRunSequence((value) => value + 1)} />
 						</div>
 						<div hidden={tab !== "rules"}>
 							<RulesPanel status={status} selId={selectedProjectId} project={selectedProject} selSheetId={selectedSheetId} connected={connected} onStatus={setStatus} goToModel={() => setModelOpen(true)} />

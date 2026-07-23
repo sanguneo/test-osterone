@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+	clearSheetRuns,
 	deleteProjectState,
 	layeredBaseline,
 	loadProjectState,
@@ -248,4 +249,19 @@ test("legacy approved baseline still matches for a sheet with no own baseline; m
 	expect(layered.gate("c9", 5, "prod", "unseen").status).toBe("no_baseline");
 	expect(sheetState(st, "sheetX").baseline.get("c9", 5, "prod")).toBeDefined();
 	expect(st.legacyBaseline.get("c9", 5, "prod")).toBeUndefined();
+});
+
+test("clearSheetRuns empties history + review queue but keeps baselines and plan cache", () => {
+	const st = seed();
+	const s = sheetState(st, DEFAULT_SHEET);
+	expect(s.history).toHaveLength(1);
+	expect(s.reviewQueue.size).toBe(1);
+	expect(clearSheetRuns(st, DEFAULT_SHEET)).toBe(true);
+	expect(s.history).toHaveLength(0);
+	expect(s.reviewQueue.size).toBe(0);
+	// baselines + plan cache are approved/authored assets — kept
+	expect(s.baseline.entries().length).toBeGreaterThan(0);
+	expect(s.planCache.get("k1")).toBeDefined();
+	// unknown sheet -> no-op false
+	expect(clearSheetRuns(st, "no-such-sheet")).toBe(false);
 });

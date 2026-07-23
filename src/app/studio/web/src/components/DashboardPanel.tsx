@@ -12,6 +12,12 @@ const S = {
 		dashTitle: "실행 현황",
 		lastRun: (rel: string) => ` · 마지막 실행 ${rel}`,
 		newRun: "새 실행 →",
+		clearRuns: "실행 기록 지우기",
+		clearConfirmQ: "실행 기록·리뷰·트레이스 삭제? (기준 화면은 유지)",
+		clearYes: "지우기",
+		clearing: "지우는 중…",
+		clearCancel: "취소",
+		clearFailed: (msg: string) => `지우기 실패: ${msg}`,
 		historyFail: (msg: string) => `실행 기록을 불러오지 못했습니다: ${msg}`,
 		retry: "다시 시도",
 		firstRunTitle: "첫 실행 전",
@@ -46,6 +52,12 @@ const S = {
 		dashTitle: "Run overview",
 		lastRun: (rel: string) => ` · Last run ${rel}`,
 		newRun: "New run →",
+		clearRuns: "Clear runs",
+		clearConfirmQ: "Delete runs · review · traces? (baselines kept)",
+		clearYes: "Clear",
+		clearing: "Clearing…",
+		clearCancel: "Cancel",
+		clearFailed: (msg: string) => `Clear failed: ${msg}`,
 		historyFail: (msg: string) => `Failed to load run history: ${msg}`,
 		retry: "Retry",
 		firstRunTitle: "Before the first run",
@@ -109,6 +121,7 @@ export function DashboardPanel({
 	reviewCount,
 	goTo,
 	refreshKey = 0,
+	onRefresh,
 }: {
 	selId: string;
 	project?: Project;
@@ -116,6 +129,7 @@ export function DashboardPanel({
 	reviewCount: number;
 	goTo: (t: Tab) => void;
 	refreshKey?: number;
+	onRefresh?: () => void;
 }) {
 	const lang = useLang();
 	const t = S[lang];
@@ -123,6 +137,9 @@ export function DashboardPanel({
 	const [loadErr, setLoadErr] = useState("");
 	const [runIdx, setRunIdx] = useState(0);
 	const [filter, setFilter] = useState<Filter>("all");
+	const [confirmClear, setConfirmClear] = useState(false);
+	const [clearing, setClearing] = useState(false);
+	const [clearErr, setClearErr] = useState("");
 	const tbodyRef = useRef<HTMLTableSectionElement>(null);
 	const loadRequest = useRef(0);
 
@@ -133,6 +150,8 @@ export function DashboardPanel({
 		setLoadErr("");
 		setRunIdx(0);
 		setFilter("all");
+		setConfirmClear(false);
+		setClearErr("");
 		if (!selSheetId) {
 			setHistory([]);
 			return;
@@ -148,6 +167,21 @@ export function DashboardPanel({
 		// refreshKey bumps when a run finishes elsewhere — the panel stays mounted, so re-fetch explicitly.
 	}, [selId, selSheetId, refreshKey]);
 	useEffect(load, [load]);
+
+	async function clearRuns() {
+		setConfirmClear(false);
+		setClearing(true);
+		setClearErr("");
+		try {
+			await api.clearSheet(selId, selSheetId);
+			onRefresh?.();
+			load();
+		} catch (e) {
+			setClearErr(t.clearFailed((e as Error).message));
+		} finally {
+			setClearing(false);
+		}
+	}
 
 	const sheetRuns = history ?? [];
 
@@ -202,11 +236,29 @@ export function DashboardPanel({
 					{run ? t.lastRun(fmtAgo(run.at, lang)) : ""}
 				</span>
 				{history && sheetRuns.length > 0 && (
-					<button className="mini" type="button" onClick={() => goTo("run")}>
-						{t.newRun}
-					</button>
+					<>
+						<button className="mini" type="button" onClick={() => goTo("run")}>
+							{t.newRun}
+						</button>
+						{!confirmClear ? (
+							<button className="mini" type="button" disabled={clearing} onClick={() => setConfirmClear(true)}>
+								{clearing ? t.clearing : t.clearRuns}
+							</button>
+						) : (
+							<>
+								<span className="muted" style={{ fontSize: 12 }}>{t.clearConfirmQ}</span>
+								<button className="mini" type="button" style={{ color: "var(--error-500, #ff5a52)" }} onClick={clearRuns}>
+									{t.clearYes}
+								</button>
+								<button className="mini" type="button" onClick={() => setConfirmClear(false)}>
+									{t.clearCancel}
+								</button>
+							</>
+						)}
+					</>
 				)}
 			</div>
+			{clearErr && <div className="card err">{clearErr}</div>}
 
 			{loadErr && (
 				<div className="card err">
