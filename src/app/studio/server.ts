@@ -1232,7 +1232,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 							: "shallow clone 완료",
 			);
 			const query = body.query?.trim() || project.name;
-			const result: RepoReconResult = await reconRepo(dir, modelClient, { query });
+			const result: RepoReconResult = await reconRepo(dir, modelClient, { query, repoMode: mode });
 			return send(
 				res,
 				200,

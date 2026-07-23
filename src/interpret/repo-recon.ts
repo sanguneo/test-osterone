@@ -46,6 +46,8 @@ export interface RepoReconOptions extends RepoDigestOptions {
 	query?: string;
 	/** Override the optional CodeGraph layer (testing / disabling); return null to skip. Defaults to auto-detection. */
 	explore?: (dir: string, query: string) => string | null;
+	/** How the repo dir was acquired — gates whether we may build a CodeGraph index in it. */
+	repoMode?: AcquireMode;
 }
 
 export interface RepoReconResult {
@@ -272,6 +274,25 @@ export function codegraphExplore(dir: string, query: string): string | null {
 	}
 }
 
+/** Ensure a CodeGraph index exists in `dir` so `explore` can run: init a fresh clone, sync an
+ * existing index, and never create one inside a user's local repo. Best-effort, bounded. */
+export function codegraphIndex(dir: string, mode: AcquireMode): boolean {
+	try {
+		const hasIndex = existsSync(join(dir, ".codegraph"));
+		if (mode === "local" && !hasIndex) return false; // don't pollute the user's working copy
+		const r = spawnSync("codegraph", [hasIndex ? "sync" : "init"], {
+			cwd: dir,
+			encoding: "utf8",
+			timeout: 180000,
+			shell: true,
+			maxBuffer: 8 * 1024 * 1024,
+		});
+		return r.status === 0 || existsSync(join(dir, ".codegraph"));
+	} catch {
+		return false;
+	}
+}
+
 /**
  * Resolve a reference repo to a local directory. A local path is used in place;
  * a non-empty cache dir is reused; otherwise a shallow git clone is performed.
@@ -313,18 +334,32 @@ export async function reconRepo(
 	const digest = digestRepoDir(dir, opts);
 	let codegraph = false;
 	if (opts.query) {
-		const explorer = opts.explore ?? (detectCodegraph() ? codegraphExplore : undefined);
-		if (!explorer) {
-			notes.push("codegraph 미설치 — 경량 파일 스캔만 사용(옵션)");
-		} else {
-			const explore = explorer(dir, opts.query);
+		if (opts.explore) {
+			// Injected explorer (tests / custom / disable) — used as-is, no indexing.
+			const explore = opts.explore(dir, opts.query);
 			if (explore) {
 				digest.codegraphExplore = explore;
 				codegraph = true;
-				notes.push("codegraph explore 사용(옵션 도구 감지됨)");
+				notes.push("codegraph explore 사용(주입)");
 			} else {
-				notes.push("codegraph 감지됐으나 explore 결과 없음 — 파일 스캔만 사용");
+				notes.push("codegraph explore 결과 없음 — 파일 스캔만 사용");
 			}
+		} else if (detectCodegraph()) {
+			// Real CodeGraph: ensure an index exists (init a clone, sync a cache), then explore.
+			if (codegraphIndex(dir, opts.repoMode ?? "cloned")) {
+				const explore = codegraphExplore(dir, opts.query);
+				if (explore) {
+					digest.codegraphExplore = explore;
+					codegraph = true;
+					notes.push("codegraph 인덱스+explore 사용");
+				} else {
+					notes.push("codegraph explore 결과 없음 — 파일 스캔만 사용");
+				}
+			} else {
+				notes.push("codegraph 인덱스를 만들지 못함 — 파일 스캔만 사용");
+			}
+		} else {
+			notes.push("codegraph 미설치 — 경량 파일 스캔만 사용(옵션)");
 		}
 	}
 	if (digestIsEmpty(digest)) notes.push("레포에서 소스/문서를 찾지 못함 — 경로를 확인하세요.");
