@@ -67,7 +67,19 @@ export class BrowserPage implements Page {
 	}
 
 	async click(target: string): Promise<void> {
-		const locator = this.locate(target);
+		// Prefer an interactive element (button/link/menuitem/tab/checkbox/label/placeholder) over a
+		// plain text match — otherwise a heading that shares the label (e.g. an <h1>로그인</h1> above a
+		// 로그인 button) wins by DOM order and the click hits dead text.
+		const clickable = this.pwPage
+			.getByRole("button", { name: target })
+			.or(this.pwPage.getByRole("link", { name: target }))
+			.or(this.pwPage.getByRole("menuitem", { name: target }))
+			.or(this.pwPage.getByRole("tab", { name: target }))
+			.or(this.pwPage.getByRole("checkbox", { name: target }))
+			.or(this.pwPage.getByLabel(target))
+			.or(this.pwPage.getByPlaceholder(target))
+			.first();
+		const locator = (await clickable.count().catch(() => 0)) > 0 ? clickable : this.locate(target);
 		try {
 			await locator.click({ timeout: this.timeoutMs });
 			return;

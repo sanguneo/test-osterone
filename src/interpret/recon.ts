@@ -143,7 +143,10 @@ function extractLinks(html: string): ReconLink[] {
 }
 
 /** Pure structural extraction from a page's HTML — the unit-tested core of recon. */
-export function extractStructure(html: string, url = ""): ReconPage {
+export function extractStructure(rawHtml: string, url = ""): ReconPage {
+	// Strip <script>/<style> bodies first so template strings inside them (e.g. an inline SPA
+	// that builds its login markup as a JS string) are never mistaken for real DOM elements.
+	const html = rawHtml.replace(/<script\b[\s\S]*?<\/script>/gi, " ").replace(/<style\b[\s\S]*?<\/style>/gi, " ");
 	const buttons = [
 		...tagInner(html, /<button\b[^>]*>([\s\S]*?)<\/button>/gi),
 		...[...html.matchAll(/<input\b[^>]*\btype\s*=\s*["']?(?:submit|button)["']?[^>]*>/gi)].map((m) =>

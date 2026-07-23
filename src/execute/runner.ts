@@ -116,6 +116,16 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 					if (ok) results[i] = { ...r, passed: true, detail: `${r.detail} · 비전 확인` };
 				}
 			}
+			if (results.length === 0 && tc.expected.trim()) {
+				// A purely visual expectation with no text assertion — let vision judge the screenshot.
+				const ok = await opts.visionAssert(snap.screenshot, tc.expected).catch(() => false);
+				if (ok)
+					results.push({
+						assertion: { kind: "textIncludes", value: tc.expected },
+						passed: true,
+						detail: `비전 확인: ${tc.expected.replace(/\s+/g, " ").slice(0, 50)}`,
+					});
+			}
 		}
 		const evidenceRefs = [evidenceRef("dom", snap.html), evidenceRef("url", snap.url)];
 		const passRatio = results.length > 0 ? results.filter((r) => r.passed).length / results.length : 0;
