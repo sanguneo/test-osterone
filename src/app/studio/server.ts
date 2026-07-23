@@ -674,6 +674,7 @@ export async function runBatch(
 				tracePath,
 				visionAssert: visionFn,
 				lenientMatch: !!input.lenientMatch,
+				assertRetryMs: 2500,
 			});
 			// Keep the trace only for cases that land in the review queue; drop pass/fail and any stale file.
 			const keptTrace =
