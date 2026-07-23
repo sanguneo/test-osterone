@@ -138,7 +138,7 @@ export function App() {
 		document.documentElement.style.setProperty("--sbw", `${width}px`);
 	}, []);
 	useEffect(() => {
-		api.reviewQueue(selectedProjectId, selectedSheetId || undefined, true).then((queue) => setNavReviewCount(queue.length)).catch(() => {});
+		api.reviewQueue(selectedProjectId, selectedSheetId || undefined).then((queue) => setNavReviewCount(queue.length)).catch(() => {});
 	}, [selectedProjectId, selectedSheetId, runSequence, reviewCount]);
 	useEffect(() => {
 		if (!selectedProject) return;

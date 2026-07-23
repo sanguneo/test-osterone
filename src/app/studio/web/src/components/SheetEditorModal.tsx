@@ -358,15 +358,35 @@ export function SheetEditorModal({
 	}
 	function doImport() {
 		if (!xlsxSheets) return;
-		const picked: TestSheet[] = [];
-		for (const [index, sheet] of xlsxSheets.entries()) {
-			if (pick[index]) picked.push({ id: `sh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, kind: "csv", name: sheet.name, sheetUrl: "", csvText: sheet.csv, origin: "xlsx" });
-		}
-		if (picked.length === 0) {
+		const chosen = xlsxSheets.filter((_, index) => pick[index]);
+		if (chosen.length === 0) {
 			setXlsxError(S[getLang()].pickOne);
 			return;
 		}
-		onImportSheets(picked);
+		// A test sheet is per FILE: merge the picked spreadsheet tabs into ONE sheet, tagging each
+		// tab's rows with a leading 분류 (category) column so the tabs become in-sheet categories.
+		const splitLines = (csv: string) => csv.replace(/\r\n?/g, "\n").split("\n");
+		const csvCell = (value: string) => (/[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
+		const header = splitLines(chosen[0]?.csv ?? "")[0] ?? "";
+		const merged = [`분류,${header}`];
+		for (const tab of chosen) {
+			const lines = splitLines(tab.csv);
+			for (let i = 1; i < lines.length; i++) {
+				if (!lines[i]?.trim()) continue;
+				merged.push(`${csvCell(tab.name)},${lines[i]}`);
+			}
+		}
+		const fileName = xlsxName.replace(/\.[^.]+$/, "").trim() || "가져온 시트";
+		onImportSheets([
+			{
+				id: `sh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+				kind: "csv",
+				name: fileName,
+				sheetUrl: "",
+				csvText: merged.join("\n"),
+				origin: "xlsx",
+			},
+		]);
 	}
 
 	async function sendRefine() {
