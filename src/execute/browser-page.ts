@@ -70,11 +70,50 @@ export class BrowserPage implements Page {
 		const locator = this.locate(target);
 		try {
 			await locator.click({ timeout: this.timeoutMs });
-		} catch {
-			// A popup/overlay may be intercepting pointer events — clear it and retry once.
+			return;
+		} catch (err) {
+			// A popup/overlay may be intercepting pointer events — clear it and retry.
 			await this.dismissOverlays();
-			await locator.click({ timeout: this.timeoutMs });
+			try {
+				await locator.click({ timeout: this.timeoutMs });
+				return;
+			} catch {
+				// Last resort: match the target against the live DOM's clickable text and dispatch a
+				// direct DOM click (bypasses label-spacing mismatch and any leftover overlay interception).
+				if (!(await this.clickByText(target))) throw err;
+			}
 		}
+	}
+
+	/** Grounded fallback: click the smallest visible element whose text matches the target. */
+	private async clickByText(target: string): Promise<boolean> {
+		const squished = target.replace(/\s+/g, "");
+		if (squished.length < 2) return false;
+		return await this.pwPage
+			.evaluate((sq) => {
+				const norm = (s: string | null) => (s || "").replace(/\s+/g, "");
+				const els = [
+					...document.querySelectorAll(
+						'a,button,[role="button"],[role="menuitem"],[role="tab"],[role="link"],[onclick],li',
+					),
+				];
+				let best: HTMLElement | null = null;
+				let bestLen = Number.POSITIVE_INFINITY;
+				for (const e of els) {
+					const t = norm(e.textContent);
+					if (!t.includes(sq) || t.length >= bestLen) continue;
+					const r = e.getBoundingClientRect();
+					if (r.width > 0 && r.height > 0) {
+						best = e as HTMLElement;
+						bestLen = t.length;
+					}
+				}
+				if (!best) return false;
+				best.scrollIntoView({ block: "center" });
+				best.click();
+				return true;
+			}, squished)
+			.catch(() => false);
 	}
 
 	/** Close/hide blocking onboarding & notice popups so they don't intercept clicks. */
