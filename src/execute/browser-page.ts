@@ -128,7 +128,7 @@ export class BrowserPage implements Page {
 	/** Self-heal candidate ranking: try the most specific locator first, widen to raw css last. */
 	private locate(target: string): Locator {
 		const p = this.pwPage;
-		return p
+		let loc = p
 			.getByRole("button", { name: target })
 			.or(p.getByRole("link", { name: target }))
 			.or(p.getByRole("menuitem", { name: target }))
@@ -136,9 +136,23 @@ export class BrowserPage implements Page {
 			.or(p.getByRole("checkbox", { name: target }))
 			.or(p.getByLabel(target))
 			.or(p.getByPlaceholder(target))
-			.or(p.getByText(target, { exact: false }))
-			.or(p.locator(target))
-			.first();
+			.or(p.getByText(target, { exact: false }));
+		// Whitespace-tolerant fallback: Korean labels often differ only by spacing
+		// (e.g. "전체 결재문서" vs "전체결재문서" vs "전체 결재 문서").
+		const squished = target.replace(/\s+/g, "");
+		if (squished.length >= 2) {
+			const flex = new RegExp(
+				squished
+					.split("")
+					.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+					.join("\\s*"),
+			);
+			loc = loc
+				.or(p.getByText(flex))
+				.or(p.getByRole("link", { name: flex }))
+				.or(p.getByRole("button", { name: flex }));
+		}
+		return loc.or(p.locator(target)).first();
 	}
 
 	/** Begin a per-case trace chunk (no-op unless tracing was enabled). */

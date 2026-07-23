@@ -7,9 +7,20 @@
  * implement this same `ModelClient` interface — the seam stays stable.
  */
 
+/** A single content part — text, or an image (data URL or http URL) for vision models. */
+export type ContentPart = { type: "text"; text: string } | { type: "image"; imageUrl: string };
+
 export interface ModelMessage {
 	role: "system" | "user" | "assistant";
-	content: string;
+	content: string | ContentPart[];
+}
+
+/** Map neutral content to OpenAI chat-completions format (string stays as-is). */
+export function toChatContent(content: string | ContentPart[]): unknown {
+	if (typeof content === "string") return content;
+	return content.map((p) =>
+		p.type === "image" ? { type: "image_url", image_url: { url: p.imageUrl } } : { type: "text", text: p.text },
+	);
 }
 
 export interface ModelClient {
@@ -61,7 +72,7 @@ export class ApiKeyModelClient implements ModelClient {
 				model: this.model,
 				temperature: 0,
 				max_tokens: this.maxTokens,
-				messages,
+				messages: messages.map((m) => ({ role: m.role, content: toChatContent(m.content) })),
 				...(this.reasoning ? { reasoning_effort: this.reasoning } : {}),
 			}),
 		});

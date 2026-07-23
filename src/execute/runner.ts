@@ -59,6 +59,8 @@ export interface RunOptions {
 	baselineEnv?: string;
 	/** When set (and the page supports tracing), capture a per-case trace chunk to this path; kept only if not pass. */
 	tracePath?: string;
+	/** Vision fallback: when a text assertion fails, judge the screenshot (for visual/image expectations). */
+	visionAssert?: (screenshot: string, expected: string) => Promise<boolean>;
 }
 
 function round2(n: number): number {
@@ -105,6 +107,16 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 
 		const snap = await opts.page.snapshot();
 		const results = assertions.map((a) => evaluateAssertion(a, snap));
+		if (opts.visionAssert && snap.screenshot) {
+			// Text assertion missed the DOM — the expected content may be an image/color. Ask vision.
+			for (let i = 0; i < results.length; i++) {
+				const r = results[i];
+				if (r && !r.passed && r.assertion.kind === "textIncludes") {
+					const ok = await opts.visionAssert(snap.screenshot, String(r.assertion.value ?? "")).catch(() => false);
+					if (ok) results[i] = { ...r, passed: true, detail: `${r.detail} · 비전 확인` };
+				}
+			}
+		}
 		const evidenceRefs = [evidenceRef("dom", snap.html), evidenceRef("url", snap.url)];
 		const passRatio = results.length > 0 ? results.filter((r) => r.passed).length / results.length : 0;
 

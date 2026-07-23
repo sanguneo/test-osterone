@@ -40,6 +40,7 @@ import {
 	setRuleCodeContext,
 	setRuleContext,
 } from "../../interpret/rule.ts";
+import { visionAssert } from "../../interpret/vision.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
 import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts";
 import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
@@ -589,6 +590,12 @@ export async function runBatch(
 	// No model connected → don't hard-fail; fall back to rule interpretation and tell the client.
 	const aiUnavailable = ai && !modelClient;
 	if (aiUnavailable) ai = false;
+	// Vision fallback for image/color expectations — only when a model is connected (AI runs).
+	let visionFn: ((screenshot: string, expected: string) => Promise<boolean>) | undefined;
+	if (ai && modelClient) {
+		const mc = modelClient;
+		visionFn = (screenshot, expected) => visionAssert(mc, screenshot, expected);
+	}
 	const project = allProjects().find((p) => p.id === (input.projectId ?? "sample"));
 	const sheet = input.sheets?.[0];
 	const accounts = input.accounts ?? [];
@@ -661,6 +668,7 @@ export async function runBatch(
 				baseline: layeredBaseline(st, sid),
 				baselineEnv,
 				tracePath,
+				visionAssert: visionFn,
 			});
 			// Keep the trace only for cases that land in the review queue; drop pass/fail and any stale file.
 			const keptTrace =

@@ -94,17 +94,29 @@ export class OAuthProxyModelClient implements ModelClient {
 	}
 
 	async complete(messages: ModelMessage[]): Promise<string> {
+		const textOf = (c: ModelMessage["content"]): string =>
+			typeof c === "string"
+				? c
+				: c
+						.filter((p) => p.type === "text")
+						.map((p) => p.text)
+						.join("\n");
 		const instructions = messages
 			.filter((m) => m.role === "system")
-			.map((m) => m.content)
+			.map((m) => textOf(m.content))
 			.join("\n\n");
 		const input = messages
 			.filter((m) => m.role !== "system")
-			.map((m) => ({
-				type: "message",
-				role: m.role,
-				content: [{ type: m.role === "assistant" ? "output_text" : "input_text", text: m.content }],
-			}));
+			.map((m) => {
+				const textType = m.role === "assistant" ? "output_text" : "input_text";
+				const content =
+					typeof m.content === "string"
+						? [{ type: textType, text: m.content }]
+						: m.content.map((p) =>
+								p.type === "image" ? { type: "input_image", image_url: p.imageUrl } : { type: textType, text: p.text },
+							);
+				return { type: "message", role: m.role, content };
+			});
 
 		const headers: Record<string, string> = {
 			"content-type": "application/json",
