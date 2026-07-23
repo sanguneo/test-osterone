@@ -187,6 +187,7 @@ export interface RunInput {
 	accounts?: Account[];
 	referenceRepo?: string;
 	aiInterpret?: boolean;
+	lenientMatch?: boolean;
 	projectId?: string;
 	/** Launch a visible (headed) browser window with slowMo so a human can watch the run. */
 	headed?: boolean;
@@ -259,6 +260,7 @@ interface Project {
 	accounts: Account[];
 	referenceRepo: string;
 	aiInterpret: boolean;
+	lenientMatch: boolean;
 }
 
 const SAMPLE_PROJECT: Project = {
@@ -270,6 +272,7 @@ const SAMPLE_PROJECT: Project = {
 	accounts: [],
 	referenceRepo: "",
 	aiInterpret: false,
+	lenientMatch: false,
 };
 const projectsFile = join(homedir(), ".test-osterone", "studio-projects.json");
 
@@ -369,6 +372,7 @@ function sanitizeProject(raw: unknown): Project {
 		accounts: sanitizeAccounts(o.accounts, o.username, o.password),
 		referenceRepo: String(o.referenceRepo ?? "").slice(0, 300),
 		aiInterpret: !!o.aiInterpret,
+		lenientMatch: !!o.lenientMatch,
 	};
 }
 let userProjects: Project[] = loadProjects();
@@ -669,6 +673,7 @@ export async function runBatch(
 				baselineEnv,
 				tracePath,
 				visionAssert: visionFn,
+				lenientMatch: !!input.lenientMatch,
 			});
 			// Keep the trace only for cases that land in the review queue; drop pass/fail and any stale file.
 			const keptTrace =

@@ -61,6 +61,8 @@ export interface RunOptions {
 	tracePath?: string;
 	/** Vision fallback: when a text assertion fails, judge the screenshot (for visual/image expectations). */
 	visionAssert?: (screenshot: string, expected: string) => Promise<boolean>;
+	/** Lenient text matching: ignore whitespace/punctuation so near-miss assertions still pass. */
+	lenientMatch?: boolean;
 }
 
 function round2(n: number): number {
@@ -106,7 +108,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		}
 
 		const snap = await opts.page.snapshot();
-		const results = assertions.map((a) => evaluateAssertion(a, snap));
+		const results = assertions.map((a) => evaluateAssertion(a, snap, { lenient: opts.lenientMatch }));
 		if (opts.visionAssert && snap.screenshot) {
 			// Text assertion missed the DOM — the expected content may be an image/color. Ask vision.
 			for (let i = 0; i < results.length; i++) {

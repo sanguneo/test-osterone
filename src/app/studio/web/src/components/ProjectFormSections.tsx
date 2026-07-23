@@ -18,6 +18,7 @@ const S = {
 		referenceRepo: "참고 프로젝트 repo (선택)",
 		referenceRepoHint: "— AI가 앱 맥락 파악에 사용",
 		aiStepDefault: "기본으로 AI 스텝 해석 사용",
+		lenientMatch: "근접 일치 허용 (공백·구두점 무시)",
 	},
 	en: {
 		defaultsHint: "Target and environment are project defaults; a sheet can override them individually.",
@@ -34,6 +35,7 @@ const S = {
 		referenceRepo: "Reference project repo (optional)",
 		referenceRepoHint: "— used by AI to understand app context",
 		aiStepDefault: "Use AI step interpretation by default",
+		lenientMatch: "Lenient matching (ignore spaces & punctuation)",
 	},
 } as const;
 
@@ -50,6 +52,7 @@ export interface ProjectDraft {
 	readonly accounts: Account[];
 	readonly referenceRepo: string;
 	readonly aiInterpret: boolean;
+	readonly lenientMatch: boolean;
 }
 
 export function ProjectEnvironmentSection({ draft, onUpdate }: { readonly draft: ProjectDraft; readonly onUpdate: (patch: Partial<ProjectDraft>) => void }) {
@@ -91,6 +94,7 @@ export function ProjectEnvironmentSection({ draft, onUpdate }: { readonly draft:
 			<label htmlFor="project-reference-repo" style={{ marginTop: 10 }}>{t.referenceRepo} <span className="muted">{t.referenceRepoHint}</span></label>
 			<input id="project-reference-repo" type="text" value={draft.referenceRepo} onChange={(event) => onUpdate({ referenceRepo: event.target.value })} placeholder="https://github.com/org/app" />
 			<label className="check-label"><input type="checkbox" checked={draft.aiInterpret} onChange={(event) => onUpdate({ aiInterpret: event.target.checked })} /><span>{t.aiStepDefault}</span></label>
+			<label className="check-label"><input type="checkbox" checked={draft.lenientMatch} onChange={(event) => onUpdate({ lenientMatch: event.target.checked })} /><span>{t.lenientMatch}</span></label>
 		</>
 	);
 }

@@ -29,6 +29,7 @@ export interface Project {
 	accounts: Account[];
 	referenceRepo: string;
 	aiInterpret: boolean;
+	lenientMatch: boolean;
 }
 
 export interface AssertionView {
@@ -205,6 +206,7 @@ export interface RunInput {
 	accounts?: Account[];
 	referenceRepo?: string;
 	aiInterpret?: boolean;
+	lenientMatch?: boolean;
 	projectId?: string;
 	headed?: boolean;
 }

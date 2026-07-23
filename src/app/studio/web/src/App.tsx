@@ -180,6 +180,7 @@ export function App() {
 				accounts: selectedProject.accounts,
 				referenceRepo: selectedProject.referenceRepo,
 				aiInterpret: selectedProject.aiInterpret,
+				lenientMatch: selectedProject.lenientMatch,
 			});
 			setProjects(result.projects);
 		} catch (error) {

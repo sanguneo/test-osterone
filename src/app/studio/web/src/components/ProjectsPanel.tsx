@@ -34,7 +34,7 @@ const S = {
 } as const;
 
 function blankDraft(): ProjectDraft {
-	return { id: "", name: "", sheets: [], baseUrl: "", env: "", accounts: [], referenceRepo: "", aiInterpret: false };
+	return { id: "", name: "", sheets: [], baseUrl: "", env: "", accounts: [], referenceRepo: "", aiInterpret: false, lenientMatch: false };
 }
 
 function editorFromProject(project: Project | null): ProjectDraft {
@@ -48,6 +48,7 @@ function editorFromProject(project: Project | null): ProjectDraft {
 		accounts: project.accounts ?? [],
 		referenceRepo: project.referenceRepo,
 		aiInterpret: project.aiInterpret,
+		lenientMatch: project.lenientMatch,
 	};
 }
 
@@ -88,6 +89,7 @@ export function ProjectsPanel({ initialProject, onSaved, onClose }: { readonly i
 			accounts: draft.accounts,
 			referenceRepo: draft.referenceRepo.trim(),
 			aiInterpret: draft.aiInterpret,
+			lenientMatch: draft.lenientMatch,
 		};
 	}
 	async function save() {

@@ -19,19 +19,26 @@ export interface AssertionResult {
 	detail: string;
 }
 
-/** Pure, deterministic evaluation of one assertion against a snapshot. */
-export function evaluateAssertion(a: Assertion, snap: PageSnapshot): AssertionResult {
+/** Collapse whitespace + drop light punctuation so a near-miss (a stray comma/space) still matches. */
+function looseText(s: string): string {
+	return s.replace(/\s+/g, "").replace(/[.,·・…–—\-!?~()[\]{}"'“”‘’`:;]/gu, "");
+}
+
+/** Pure, deterministic evaluation of one assertion against a snapshot. `lenient` ignores whitespace/punctuation. */
+export function evaluateAssertion(a: Assertion, snap: PageSnapshot, opts: { lenient?: boolean } = {}): AssertionResult {
+	const has = (hay: string, needle: string) =>
+		opts.lenient ? looseText(hay).includes(looseText(needle)) : hay.includes(needle);
 	switch (a.kind) {
 		case "urlIncludes": {
 			const passed = snap.url.includes(a.value);
 			return { assertion: a, passed, detail: passed ? `url has "${a.value}"` : `url "${snap.url}" lacks "${a.value}"` };
 		}
 		case "textIncludes": {
-			const passed = snap.text.includes(a.value);
+			const passed = has(snap.text, a.value);
 			return { assertion: a, passed, detail: passed ? `text has "${a.value}"` : `text lacks "${a.value}"` };
 		}
 		case "textNotIncludes": {
-			const passed = !snap.text.includes(a.value);
+			const passed = !has(snap.text, a.value);
 			return {
 				assertion: a,
 				passed,
