@@ -237,24 +237,21 @@ export async function reconApp(page: Page, model: ModelClient, opts: ReconOption
 	const notes: string[] = [];
 	const pages: ReconPage[] = [];
 
-	await page.goto(opts.loginPath ?? "/");
-
 	let loggedIn = false;
 	const acct = opts.account;
 	if (acct && (acct.username || acct.password)) {
-		const filledUser = acct.username
-			? await tryFill(page, opts.usernameHints ?? DEFAULT_USER_HINTS, acct.username)
-			: true;
-		const filledPass = acct.password
-			? await tryFill(page, opts.passwordHints ?? DEFAULT_PASS_HINTS, acct.password)
-			: true;
-		const clicked = await tryClick(page, opts.loginHints ?? DEFAULT_LOGIN_HINTS);
-		loggedIn = filledUser && filledPass && clicked;
-		notes.push(
-			loggedIn
-				? "로그인 시도함(계정 필드/버튼 매칭)"
-				: "로그인 미완료 — 로그인 필드나 버튼을 찾지 못함(공개 화면만 스캔)",
-		);
+		// Reuse the run's login precondition so we wait for the redirect to land before scanning
+		// (otherwise recon captures the login page instead of the authenticated app).
+		const res = await attemptLogin(page, acct, {
+			loginPath: opts.loginPath,
+			usernameHints: opts.usernameHints,
+			passwordHints: opts.passwordHints,
+			loginHints: opts.loginHints,
+		});
+		loggedIn = res.ok;
+		notes.push(res.ok ? "로그인 완료(로그인 폼 이탈 확인)" : `로그인 미완료 — ${res.note} (공개 화면만 스캔)`);
+	} else {
+		await page.goto(opts.loginPath ?? "/");
 	}
 
 	const landing = await page.snapshot();

@@ -129,7 +129,7 @@ test("reconApp logs in via hint iteration, scans the landing page, and reduces c
 	const model = new FakeModelClient(() => "- 도메인 브리프");
 	const res = await reconApp(page, model, { account: CREDS });
 	expect(res.loggedIn).toBe(true);
-	expect(res.notes).toContain("로그인 시도함(계정 필드/버튼 매칭)");
+	expect(res.notes.some((n) => n.startsWith("로그인 완료"))).toBe(true);
 	expect(res.pages).toHaveLength(1);
 	expect(res.pages[0]?.title).toBe("xperp 홈");
 	expect(res.context).toBe("- 도메인 브리프");

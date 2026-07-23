@@ -634,6 +634,8 @@ export async function runBatch(
 			});
 			if (!login.ok) throw new Error(`로그인 precondition 실패로 실행을 중단했습니다 — ${login.note}`);
 		}
+		// Close any blocking onboarding/notice modal so it doesn't intercept the first click.
+		if (!input.sample) await page.dismissOverlays().catch(() => {});
 		for (const tc of cases) {
 			if (signal?.aborted) break;
 			const account =
@@ -1162,6 +1164,14 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				});
 			} finally {
 				await page.close();
+			}
+			if (result.context?.trim()) {
+				// Persist the recon brief as the sheet's app context so plan authoring is grounded.
+				const st = stateFor(pid);
+				const sid = resolveSheetId(project, sheet.id);
+				const ss = sheetState(st, sid);
+				ss.rule = setRuleContext(ss.rule, result.context.slice(0, 4000));
+				saveState(pid, st);
 			}
 			return send(
 				res,

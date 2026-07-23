@@ -67,7 +67,46 @@ export class BrowserPage implements Page {
 	}
 
 	async click(target: string): Promise<void> {
-		await this.locate(target).click({ timeout: this.timeoutMs });
+		const locator = this.locate(target);
+		try {
+			await locator.click({ timeout: this.timeoutMs });
+		} catch {
+			// A popup/overlay may be intercepting pointer events — clear it and retry once.
+			await this.dismissOverlays();
+			await locator.click({ timeout: this.timeoutMs });
+		}
+	}
+
+	/** Close/hide blocking onboarding & notice popups so they don't intercept clicks. */
+	async dismissOverlays(): Promise<void> {
+		for (const name of ["오늘 하루 보지 않기", "다시 보지 않기", "닫기", "건너뛰기", "Skip", "Close"]) {
+			const closer = this.pwPage
+				.getByRole("button", { name })
+				.or(this.pwPage.getByText(name, { exact: false }))
+				.first();
+			if (await closer.count().catch(() => 0)) await closer.click({ timeout: 1000 }).catch(() => {});
+		}
+		// Hide any remaining large fixed/absolute high-z overlay that covers the page center.
+		await this.pwPage
+			.evaluate(() => {
+				for (let i = 0; i < 6; i++) {
+					let node: Element | null = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+					let overlay: HTMLElement | null = null;
+					while (node && node !== document.body) {
+						const cs = getComputedStyle(node);
+						const z = Number.parseInt(cs.zIndex || "0", 10) || 0;
+						if (cs.position === "fixed" && z >= 10) {
+							const r = node.getBoundingClientRect();
+							if (r.width > window.innerWidth * 0.5 && r.height > window.innerHeight * 0.4)
+								overlay = node as HTMLElement;
+						}
+						node = node.parentElement;
+					}
+					if (!overlay) break;
+					overlay.style.setProperty("display", "none", "important");
+				}
+			})
+			.catch(() => {});
 	}
 
 	async fill(target: string, value: string): Promise<void> {
@@ -92,6 +131,9 @@ export class BrowserPage implements Page {
 		return p
 			.getByRole("button", { name: target })
 			.or(p.getByRole("link", { name: target }))
+			.or(p.getByRole("menuitem", { name: target }))
+			.or(p.getByRole("tab", { name: target }))
+			.or(p.getByRole("checkbox", { name: target }))
 			.or(p.getByLabel(target))
 			.or(p.getByPlaceholder(target))
 			.or(p.getByText(target, { exact: false }))
