@@ -69,6 +69,14 @@ export interface ReviewItem {
 	sheetId: string;
 }
 
+/** A human "this held case is a fail" decision, kept per (caseId, ruleVersion, env) like an approval. */
+export interface ReviewRejection {
+	caseId: string;
+	ruleVersion: number;
+	env: string;
+	at: number;
+}
+
 export interface SheetState {
 	rule: InterpretationRule;
 	refineChat: ModelMessage[];
@@ -76,6 +84,8 @@ export interface SheetState {
 	baseline: MemoryBaselineStore;
 	history: RunView[];
 	reviewQueue: Map<string, ReviewItem>;
+	/** Human fail decisions (review queue rejections), keyed by caseId. */
+	rejections: Map<string, ReviewRejection>;
 }
 
 export interface ProjectState {
@@ -105,6 +115,7 @@ export function newSheetState(seedRule: InterpretationRule): SheetState {
 		baseline: new MemoryBaselineStore(),
 		history: [],
 		reviewQueue: new Map(),
+		rejections: new Map(),
 	};
 }
 
@@ -125,12 +136,13 @@ export function sheetState(st: ProjectState, sheetId: string): SheetState {
 	return s;
 }
 
-/** Clear a sheet's run residue — execution history + review queue. Baselines and plan cache are kept. */
+/** Clear a sheet's run residue — history, review queue, and human fail verdicts. Baselines and plan cache are kept. */
 export function clearSheetRuns(st: ProjectState, sheetId: string): boolean {
 	const s = st.sheets.get(sheetId);
 	if (!s) return false;
 	s.history = [];
 	s.reviewQueue = new Map();
+	s.rejections = new Map();
 	return true;
 }
 
@@ -197,6 +209,7 @@ interface PersistedSheet {
 	baselines: Baseline[];
 	history: RunView[];
 	reviewQueue: ReviewItem[];
+	rejections?: ReviewRejection[];
 }
 
 interface PersistedState {
@@ -294,6 +307,7 @@ export function serializeProjectState(st: ProjectState): PersistedState {
 			baselines: s.baseline.entries(),
 			history: s.history,
 			reviewQueue: [...s.reviewQueue.values()],
+			rejections: [...s.rejections.values()],
 		})),
 	};
 }
@@ -312,6 +326,7 @@ export function restoreProjectState(st: ProjectState, raw: unknown, defaultSheet
 		ss.baseline.load(Array.isArray(s.baselines) ? s.baselines : []);
 		ss.history = Array.isArray(s.history) ? s.history : [];
 		ss.reviewQueue = new Map((Array.isArray(s.reviewQueue) ? s.reviewQueue : []).map((it) => [it.caseId, it]));
+		ss.rejections = new Map((Array.isArray(s.rejections) ? s.rejections : []).map((r) => [r.caseId, r]));
 		st.sheets.set(s.sheetId, ss);
 	}
 }

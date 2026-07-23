@@ -1152,7 +1152,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		const pid = url.searchParams.get("projectId") || "sample";
 		const st = stateFor(pid);
 		const reconcile = (items: ReviewItem[]): ReviewItem[] =>
-			items.filter((it) => layeredBaseline(st, it.sheetId).get(it.caseId, it.ruleVersion, it.env)?.approved !== true);
+			items.filter((it) => {
+				if (layeredBaseline(st, it.sheetId).get(it.caseId, it.ruleVersion, it.env)?.approved === true) return false;
+				const rej = sheetState(st, it.sheetId).rejections.get(it.caseId);
+				if (rej && rej.ruleVersion === it.ruleVersion && rej.env === it.env) return false;
+				return true;
+			});
 		if (url.searchParams.get("all")) {
 			const all = [...st.sheets.values()].flatMap((s) => [...s.reviewQueue.values()]);
 			return send(res, 200, JSON.stringify(reconcile(all)));
@@ -1194,6 +1199,53 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				200,
 				JSON.stringify({
 					approved: true,
+					caseId: item.caseId,
+					queue: [...sheetState(st, sid).reviewQueue.values()],
+				}),
+			);
+		} catch (err) {
+			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
+		}
+	}
+	if (req.method === "POST" && url.pathname === "/api/review/reject") {
+		try {
+			const { caseId, projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
+				caseId?: string;
+				projectId?: string;
+				sheetId?: string;
+			};
+			const pid = projectId || "sample";
+			const st = stateFor(pid);
+			let item: ReviewItem | undefined;
+			let sid = sheetId;
+			if (sid) {
+				item = caseId ? sheetState(st, sid).reviewQueue.get(caseId) : undefined;
+			} else if (caseId) {
+				for (const [k, s] of st.sheets) {
+					const found = s.reviewQueue.get(caseId);
+					if (found) {
+						item = found;
+						sid = k;
+						break;
+					}
+				}
+			}
+			if (!item || !sid) return send(res, 404, JSON.stringify({ error: "unknown case in review queue" }));
+			// Human verdict: this held case is a real fail. Recorded per (caseId, ruleVersion, env) so it
+			// doesn't re-surface until the case content or rule changes (symmetric with baseline approval).
+			sheetState(st, sid).rejections.set(item.caseId, {
+				caseId: item.caseId,
+				ruleVersion: item.ruleVersion,
+				env: item.env,
+				at: Date.now(),
+			});
+			sheetState(st, sid).reviewQueue.delete(item.caseId);
+			saveState(pid, st);
+			return send(
+				res,
+				200,
+				JSON.stringify({
+					rejected: true,
 					caseId: item.caseId,
 					queue: [...sheetState(st, sid).reviewQueue.values()],
 				}),

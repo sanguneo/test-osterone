@@ -254,14 +254,30 @@ test("legacy approved baseline still matches for a sheet with no own baseline; m
 test("clearSheetRuns empties history + review queue but keeps baselines and plan cache", () => {
 	const st = seed();
 	const s = sheetState(st, DEFAULT_SHEET);
+	s.rejections.set("c2", { caseId: "c2", ruleVersion: 7, env: "prod", at: 1 });
 	expect(s.history).toHaveLength(1);
 	expect(s.reviewQueue.size).toBe(1);
 	expect(clearSheetRuns(st, DEFAULT_SHEET)).toBe(true);
 	expect(s.history).toHaveLength(0);
 	expect(s.reviewQueue.size).toBe(0);
+	// human fail verdicts (rejections) are run residue too — cleared
+	expect(s.rejections.size).toBe(0);
 	// baselines + plan cache are approved/authored assets — kept
 	expect(s.baseline.entries().length).toBeGreaterThan(0);
 	expect(s.planCache.get("k1")).toBeDefined();
 	// unknown sheet -> no-op false
 	expect(clearSheetRuns(st, "no-such-sheet")).toBe(false);
+});
+
+test("rejections (human fail verdicts) survive a serialize -> restore round-trip", () => {
+	const st = newProjectState();
+	sheetState(st, DEFAULT_SHEET).rejections.set("c9", { caseId: "c9", ruleVersion: 4, env: "prod", at: 111 });
+	const restored = newProjectState();
+	restoreProjectState(restored, serializeProjectState(st), DEFAULT_SHEET);
+	expect(sheetState(restored, DEFAULT_SHEET).rejections.get("c9")).toEqual({
+		caseId: "c9",
+		ruleVersion: 4,
+		env: "prod",
+		at: 111,
+	});
 });

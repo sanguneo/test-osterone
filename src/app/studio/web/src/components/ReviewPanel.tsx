@@ -39,6 +39,9 @@ const S = {
 		traceClose: "트레이스 뷰어 (아래 ↓)",
 		traceNewTab: "새 탭에서 크게 ↗",
 		traceDownload: "trace.zip 다운로드",
+		markFail: "실패로 처리",
+		processing: "처리 중…",
+		rejectFailed: (msg: string) => `실패 처리 실패: ${msg} — 다시 시도하세요.`,
 	},
 	en: {
 		sectionTitle: "Review queue",
@@ -73,6 +76,9 @@ const S = {
 		traceClose: "Trace viewer (below ↓)",
 		traceNewTab: "Open larger in a new tab ↗",
 		traceDownload: "Download trace.zip",
+		markFail: "Mark as fail",
+		processing: "Processing…",
+		rejectFailed: (msg: string) => `Mark-as-fail failed: ${msg} — try again.`,
 	},
 } as const;
 
@@ -146,6 +152,21 @@ export function ReviewPanel({
 			onCount(queue.length);
 		} catch (e) {
 			setApproveErr(t.approveFailed((e as Error).message));
+		} finally {
+			setBusyId("");
+		}
+	}
+
+	async function reject(caseId: string) {
+		setConfirmId("");
+		setBusyId(caseId);
+		setApproveErr("");
+		try {
+			const { queue } = await api.reviewReject(caseId, selId, selSheetId);
+			setItems(queue);
+			onCount(queue.length);
+		} catch (e) {
+			setApproveErr(t.rejectFailed((e as Error).message));
 		} finally {
 			setBusyId("");
 		}
@@ -271,6 +292,9 @@ export function ReviewPanel({
 						) : (
 							<>
 								<span className="rev-foot-note">{t.reviewFootNote}</span>
+								<button className="button secondary compact" type="button" disabled={busyId === it.caseId} style={{ color: "var(--error-500, #ff5a52)" }} onClick={() => reject(it.caseId)}>
+									{busyId === it.caseId ? t.processing : t.markFail}
+								</button>
 								<button className="approve" type="button" disabled={busyId === it.caseId} onClick={() => setConfirmId(it.caseId)}>
 									{busyId === it.caseId ? t.saving : t.reviewBaseline}
 								</button>
