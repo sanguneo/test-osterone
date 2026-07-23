@@ -125,6 +125,11 @@ Base unit: 4px.
 - **States**: pass, fail, review, runtime error.
 - **Accessibility**: text is always present; dot is decorative.
 
+### Category tag
+- **Structure**: a small tonal pill (`.cat-tag`) — micro, semibold, low-contrast label on `--surface-muted`, set inline before the case meta.
+- **Usage**: surfaces the case's 분류/`[말머리]` category across preview, results, dashboard, and review rows; a grouping aid, never the primary status.
+- **Accessibility**: repeats a category already present in the row data; decorative-adjacent, never the sole carrier of meaning.
+
 ### Data surface
 - **Structure**: a section header, optional controls, table/list body, state slot.
 - **Variants**: work queue, preview, result, evidence.
@@ -148,6 +153,11 @@ Base unit: 4px.
 - **States**: ready, active, complete, held, error.
 - **Accessibility**: stages are ordered content; state has visible text beyond color.
 - **Layout**: stack; track is decorative and never changes DOM order.
+
+### Review evidence
+- **Structure**: a two-column held-case card — left body (`.rev-body`) stacks a two-line header (`VerdictMark` + category tag + case meta, then title), a plain-language reason panel (`.rev-reason`), and a bounded, scrollable screen-text box (`.rev-txt-wrap .txt`); the right rail (`.rev-evidence`) frames the screenshot. A full-width collapsible Playwright trace (`.rev-trace` / `.trace-toggle`) reveals a same-origin trace `iframe` with a floating native-style icon toolbar (`.trace-float`: open-in-tab + download beside the viewer's own controls).
+- **States**: held (needs_review/error), reason-only (no screenshot), trace collapsed/expanded, approving/busy, empty evidence (`.rev-evidence-empty`).
+- **Accessibility**: reason and screen-text are real text with labels; the screenshot carries a caption; the trace toggle exposes `aria-expanded`; approval keeps the evidence-before-action order.
 
 ### Dialog
 - **Structure**: overlay, labelled panel, visible close, explicit cancel/submit actions.
