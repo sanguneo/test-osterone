@@ -11,8 +11,7 @@ dist/
 .claude/
 .codex/
 .gemini/
-.github/*
-!.github/workflows/
+# (.github/ is tracked: CI workflow, PR/issue templates)
 .mcp.json
 .ui-craft-backups/
 AGENTS.md

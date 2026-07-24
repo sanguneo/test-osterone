@@ -1,7 +1,7 @@
-# test-osterone Studio — 디자인 노트 (UI-Craft 정리 보고서)
+# test-osterone Studio — 디자인 노트
 
 > `DESIGN.md`가 **무엇을(디자인 시스템 스펙)**이라면, 이 문서는 **왜(제품 원칙·의사결정 근거)**를 담는다.
-> 정리된 로컬 도구 산출물(`.ui-craft/{brief,decisions,tokens}.md`, `.omo/evidence/*` 리뷰)에서 제품에 남길 가치가 있는 내용만 통합했다. 토큰의 **현재 확정값**은 `DESIGN.md`와 `src/app/studio/web/src/styles/`가 항상 우선한다.
+> 이 문서엔 제품에 남길 가치가 있는 원칙·의사결정만 통합했다. 토큰의 **현재 확정값**은 `DESIGN.md`와 `src/app/studio/web/src/styles/`가 항상 우선한다.
 
 ---
 
@@ -93,7 +93,7 @@ App이 4개 패널을 모두 렌더하고 `hidden`만 토글. 이유: 실행 중
 
 ## 10. 남은 품질 부채 (코드 리뷰 요약)
 
-Studio UI 재구성 최종 리뷰(2026-07-21, 정리된 `.omo/evidence/*`)에서 **비차단(non-blocking)**으로 기록된 후속 과제. 승인 기준을 실패시키지 않았으나 다음 손댈 때 정리 권장.
+Studio UI 재구성 최종 리뷰(2026-07-21)에서 **비차단(non-blocking)**으로 기록된 후속 과제. 승인 기준을 실패시키지 않았으나 다음 손댈 때 정리 권장.
 
 - **M1 — 대시보드 부분 실패의 조용한 집계 누락**: `DashboardPanel`이 `Promise.allSettled`로 일부 시트만 성공해도 그 값을 전체 프로젝트 집계로 제시. 부분 데이터 경고를 노출하거나 집계 상태를 명시할 것. (`DashboardPanel.tsx`)
 - **M2 — Studio UI 자동 회귀 테스트 부재**: 87개 Bun 테스트는 백엔드/도메인 전용. `App`/`StudioChrome`/`ModalShell`/`DashboardPanel`/`RunPanel` 등 상호작용에 대한 결정적 커버리지 없음(stale 요청 순서, 스트림 중 컨텍스트 전환, 모달 포커스 복원, 부분 결과). 관찰 가능한 동작 중심의 컴포넌트/브라우저 테스트 추가 권장.
@@ -116,4 +116,4 @@ Studio UI 재구성 최종 리뷰(2026-07-21, 정리된 `.omo/evidence/*`)에서
 > **T3(추후 고민)**: 케이스 단위 AI 플랜 교정 루프 — 특정 TC의 플랜이 틀렸을 때 규칙처럼 대화형으로 "이 케이스는 '로그인'을 눌러"라고 고치거나, 시트에 per-case 힌트 열을 두는 것. 데이터모델·UI(케이스별 플랜 표시/편집) 확장이 필요해 규모가 큼. 지금은 T1+T2로 프로젝트/시트 레벨 어시스트까지만 커버.
 > 맥락 자동화(2026-07-22): T2의 `appContext`/신규 `codeContext`를 사람이 직접 타이핑하지 않고 **자동 초안**으로 채우는 두 액션을 규칙 뷰에 추가. **라이브 정찰**(`reconApp`, `POST /api/app/analyze`) — 시트 계정으로 로그인 시도 + 페이지 구조(nav·폼·버튼·표) 결정적 스캔 → 모델이 한국어 도메인 브리프로 축약 → `appContext` 초안. **레포 코드 맥락**(`repo-recon`, `POST /api/repo/analyze`) — 참고 repo를 로컬/캐시/shallow clone(+토큰·refresh)로 확보 → 파일 스캔(AGENTS.md·README·라우트·컴포넌트) + **옵션 CodeGraph** → `codeContext` 초안. 둘 다 author-time이라 결정적 실행경로 불변, 사람이 검토 후 저장. 원칙: AI 산출물은 "보류 가능"(초안)으로 두고 사람이 확정한다.
 >
-> 트레이스 증거(2026-07-22): 리뷰 큐 증거를 스크린샷 1장에서 **Playwright 트레이스**로 확장. 실행 시 케이스별 chunk로 캡처하되 **needs_review/error만 보존**(깨끗한 pass는 discard — "증거는 조치 필요한 것만"). 뷰어는 playwright 번들 트레이스 뷰어(`node_modules/playwright-core/lib/vite/traceViewer`)를 Studio 서버가 **동일 오리진**으로 서빙(`/trace-viewer` + `/api/trace`)해 리뷰 뷰에 iframe 임베드 — 공개 `trace.playwright.dev`가 localhost를 fetch하다 막히는 Private Network Access 문제를 회피. (동료 프로젝트 `pw-test-agents`에서 차용 — 근거는 `PW-TEST-AGENTS-REVIEW.md`.)
+> 트레이스 증거(2026-07-22): 리뷰 큐 증거를 스크린샷 1장에서 **Playwright 트레이스**로 확장. 실행 시 케이스별 chunk로 캡처하되 **needs_review/error만 보존**(깨끗한 pass는 discard — "증거는 조치 필요한 것만"). 뷰어는 playwright 번들 트레이스 뷰어(`node_modules/playwright-core/lib/vite/traceViewer`)를 Studio 서버가 **동일 오리진**으로 서빙(`/trace-viewer` + `/api/trace`)해 리뷰 뷰에 iframe 임베드 — 공개 `trace.playwright.dev`가 localhost를 fetch하다 막히는 Private Network Access 문제를 회피.
