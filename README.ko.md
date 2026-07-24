@@ -13,7 +13,7 @@
 ![stack](https://img.shields.io/badge/stack-Node%2FTS-3178c6)
 ![runtime](https://img.shields.io/badge/runtime-Bun%20%E2%89%A51.3-black)
 ![browser](https://img.shields.io/badge/engine-Playwright-2ead33)
-![tests](https://img.shields.io/badge/tests-124%2F124-9ccc00)
+![tests](https://img.shields.io/badge/tests-132%2F132-9ccc00)
 ![false--pass](https://img.shields.io/badge/false--pass-0-critical)
 
 </div>
@@ -68,12 +68,13 @@
 ## 빠른 시작
 
 ```bash
-bun install            # postinstall이 Playwright Chromium 설치
-bun run setup          # 또는 헤드리스 브라우저 명시 설치
-bun test               # 124/124
+bun install            # 최초 1회 · postinstall이 Playwright Chromium 설치
+bun run setup          # 위에서 Chromium이 설치 안 됐으면 명시 실행
 
-test-osterone --help
-test-osterone setup
+bun run studio         # ← 본체: UI 빌드 후 http://localhost:8686 서빙
+bun run demo           # 또는 번들 fixture로 파이프라인 실행 관찰 (추가 설정 없이)
+
+bun test               # 132/132 (기여자용)
 ```
 
 > **Bun ≥ 1.3** 이 필요합니다. test-osterone은 **Studio 우선** 도구입니다 — 일상 사용은 브라우저 Studio(`bun run studio`)에서 이뤄지고, CLI는 `setup`·`--version`·`--help`만 제공하는 얇은 부트스트랩입니다.
@@ -195,7 +196,7 @@ bun run studio     # React UI(Vite) 빌드 후 서빙 — http://localhost:8686 
 
 ## 현재 상태
 
-**구축·검증 완료** (정적·결정적 — 자동화 테스트 124/124):
+**구축·검증 완료** (정적·결정적 — 자동화 테스트 132/132):
 
 - **코어 파이프라인** — 입력 → 정규화 → 중복 제거 → 규칙 → 선별 → 해석 → assertion 캐시 → 실행 → 판정 → baseline → 증거 → 러너 계약, 그리고 벤치마크 하드 게이트.
 - **플랫폼** — 웹 대시보드 · 오케스트레이션(노드/호스트) · 인증(API key + OAuth 프록시 + **네이티브 OpenAI 디바이스 코드 로그인**) · JUnit 출력.
@@ -218,7 +219,7 @@ src/
   testing/      fixture 앱 + fixture 모델
   app/studio/   브라우저 UI (Studio)
   cli.ts · index.ts
-test/           유닛 + 스모크 스위트 (124/124)
+test/           유닛 + 스모크 스위트 (132/132)
 examples/demo/  CLI 라이브 실행 예제
 ```
 
