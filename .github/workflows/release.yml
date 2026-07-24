@@ -1,0 +1,62 @@
+name: Release
+
+# Tag a version (e.g. `git tag v0.1.0 && git push origin v0.1.0`) to build the standalone
+# binaries and publish them on the matching GitHub Release. `workflow_dispatch` builds the
+# same binaries and uploads them as run artifacts without cutting a release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # Unit suites use FakePage — no real browser needed, so skip the Chromium download.
+      - run: bun install --ignore-scripts
+
+      # Gate the release on the same checks CI enforces on main.
+      - run: bun run typecheck
+      - run: bun run studio:webcheck
+      - run: bun run lint
+      - run: bun test
+
+      # One standalone binary per platform. `bun build --compile` bundles the CLI (which now
+      # includes the star prompt) together with the Bun runtime, so each artifact runs with no
+      # Bun/Node install on the target machine.
+      - name: Build binaries
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          build() { echo "→ $2"; bun build src/cli.ts --compile --target="$1" --outfile "dist/$2"; }
+          build bun-linux-x64    test-osterone-linux-x64
+          build bun-linux-arm64  test-osterone-linux-arm64
+          build bun-darwin-x64   test-osterone-macos-x64
+          build bun-darwin-arm64 test-osterone-macos-arm64
+          build bun-windows-x64  test-osterone-windows-x64.exe
+          ls -la dist
+
+      # Manual runs: grab the binaries from the run's artifacts (no release created).
+      - name: Upload artifacts (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-osterone-binaries
+          path: dist/test-osterone-*
+
+      # Tag pushes: create/update the GitHub Release and attach the binaries.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/test-osterone-*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
