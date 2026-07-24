@@ -44,6 +44,7 @@ import { visionAssert } from "../../interpret/vision.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
 import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts";
 import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
+import { maybePromptStar } from "../../star-prompt.ts";
 import { startFixture } from "../../testing/fixture-app.ts";
 import { isLoginOnlyCases, parseHealEvent } from "./run-helpers.ts";
 import { deleteProjectSheets, deleteSheetContent, readSheetContent, writeSheetContent } from "./sheet-store.ts";
@@ -1589,6 +1590,7 @@ async function main(): Promise<number> {
 	});
 	server.listen(port, () => {
 		console.log(`test-osterone Studio → http://localhost:${port}`);
+		maybePromptStar({ requireTty: false });
 	});
 	return 0;
 }

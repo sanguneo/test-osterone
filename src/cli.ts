@@ -6,6 +6,8 @@
  * installs the headless browser (Playwright Chromium).
  */
 
+import { maybePromptStar } from "./star-prompt.ts";
+
 export const NAME = "test-osterone";
 export const VERSION = "0.1.0";
 
@@ -17,6 +19,7 @@ export function help(): string {
 		"",
 		"commands:",
 		"  setup                install runtime prerequisites (Playwright Chromium)",
+		"  star                 show the 'star us on GitHub' link",
 		"  --version, -v        print version",
 		"  --help, -h           show this help",
 	].join("\n");
@@ -41,9 +44,18 @@ export async function main(argv: string[]): Promise<number> {
 		console.log(VERSION);
 		return 0;
 	}
-	if (cmd === "setup") return runSetup();
+	if (cmd === "setup") {
+		const code = await runSetup();
+		if (code === 0) maybePromptStar();
+		return code;
+	}
+	if (cmd === "star") {
+		maybePromptStar({ force: true, requireTty: false, persist: false });
+		return 0;
+	}
 	if (cmd === undefined || cmd === "--help" || cmd === "-h" || cmd === "help") {
 		console.log(help());
+		maybePromptStar();
 		return 0;
 	}
 	console.error(`unknown command: ${cmd}\n\n${help()}`);
