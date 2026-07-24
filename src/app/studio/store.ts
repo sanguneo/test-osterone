@@ -59,8 +59,13 @@ export interface ReviewItem {
 	caseId: string;
 	title: string;
 	category: string | null;
+	/** The case's natural-language steps + expected result — surfaced in the review card for context. */
+	steps: string[];
+	expected: string;
 	verdict: Verdict;
 	reason: string;
+	/** The element the failing action targeted (self-heal holds only) — surfaced in the review reason. */
+	healTarget?: string;
 	url: string;
 	text: string;
 	screenshot?: string;

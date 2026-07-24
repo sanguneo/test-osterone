@@ -25,9 +25,27 @@ export interface BrowserPageOptions {
 	trace?: boolean;
 }
 
+/** Map Playwright's "browser not installed" launch failure to an actionable, localized message (null if unrelated). */
+export function browserInstallHint(errorMessage: string): string | null {
+	if (/Executable doesn't exist|playwright install|Please run the following command/i.test(errorMessage)) {
+		return "Chromium 브라우저가 설치되어 있지 않습니다. 터미널에서 `npx playwright install chromium` (또는 `bun run setup`)을 실행한 뒤 다시 시도하세요.";
+	}
+	return null;
+}
+
+/** Launch Chromium, rethrowing the cryptic missing-binary error as a clear, actionable one. */
+async function launchChromium(opts: { headless?: boolean; slowMo?: number }): Promise<Browser> {
+	try {
+		return await chromium.launch(opts);
+	} catch (err) {
+		const hint = browserInstallHint((err as Error).message ?? "");
+		throw hint ? new Error(hint) : err;
+	}
+}
+
 /** Launch a standalone Chromium the caller owns and reuses across runs (avoids per-run cold starts). */
 export function launchBrowser(headless = true): Promise<Browser> {
-	return chromium.launch({ headless });
+	return launchChromium({ headless });
 }
 
 export class BrowserPage implements Page {
@@ -43,7 +61,7 @@ export class BrowserPage implements Page {
 
 	static async create(opts: BrowserPageOptions): Promise<BrowserPage> {
 		const ownsBrowser = !opts.browser;
-		const browser = opts.browser ?? (await chromium.launch({ headless: opts.headless ?? true, slowMo: opts.slowMo }));
+		const browser = opts.browser ?? (await launchChromium({ headless: opts.headless ?? true, slowMo: opts.slowMo }));
 		const context = await browser.newContext({ viewport: opts.viewport ?? { width: 1280, height: 800 } });
 		const tracing = !!opts.trace;
 		if (tracing) await context.tracing.start({ screenshots: true, snapshots: true, sources: true });

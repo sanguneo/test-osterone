@@ -50,5 +50,11 @@ export function VerdictCounts({ counts }: { counts: Record<Verdict, number> }) {
 export function SelfHealNote({ heal }: { heal: string[] }) {
 	const lang = useLang();
 	if (heal.length === 0) return null;
-	return <div className="heal"><Icon name="warning" size={14} /> {selfHealPrefix(lang)}: {stripAnsi(heal.join("; "))}</div>;
+	// Show only the concise op kinds — the verbose Playwright "Call log:" tail belongs in the trace/review, not the run table.
+	const ops = [...new Set(heal.map((h) => h.split(":")[0]?.trim()).filter(Boolean))];
+	return (
+		<div className="heal">
+			<Icon name="warning" size={14} /> {selfHealPrefix(lang)}: {ops.join(", ")}
+		</div>
+	);
 }

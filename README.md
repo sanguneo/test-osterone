@@ -68,12 +68,13 @@ Spreadsheet (XLSX / Google Sheet)
 ## Quickstart
 
 ```bash
-bun install            # installs Playwright Chromium via postinstall
-bun run setup          # or install the headless browser explicitly
-bun test               # 124/124
+bun install            # one-time; installs Playwright Chromium via postinstall
+bun run setup          # if Chromium didn't install above, run it explicitly
 
-test-osterone --help
-test-osterone setup
+bun run studio         # ← the app: builds the UI and serves http://localhost:8686
+bun run demo           # or watch the pipeline run against a bundled fixture (no extra setup)
+
+bun test               # 124/124 (for contributors)
 ```
 
 > Requires **Bun ≥ 1.3**. test-osterone is **Studio-first** — the day-to-day UI is the browser Studio (`bun run studio`); the CLI is a thin bootstrap that exposes `setup`, `--version`, and `--help`.

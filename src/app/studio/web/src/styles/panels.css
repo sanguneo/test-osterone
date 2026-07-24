@@ -221,6 +221,11 @@
 .rev-reason { padding: 12px; border: 1px solid color-mix(in srgb, var(--review) 30%, var(--line)); border-radius: var(--radius-sm); background: var(--review-soft); color: color-mix(in srgb, var(--review) 70%, var(--ink)); font-size: var(--text-small); line-height: 1.55; }
 .rev-reason-text { margin: 0; }
 .rev-reason-code { display: inline-block; margin-top: 8px; padding: 2px 7px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--review) 15%, transparent); color: color-mix(in srgb, var(--review) 80%, var(--ink)); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--text-micro); }
+.rev-tc { display: grid; gap: 5px; }
+.rev-tc .lbl { color: var(--dim); }
+.rev-steps { margin: 0 0 6px; padding-left: 18px; display: grid; gap: 3px; color: var(--ink); font-size: var(--text-small); line-height: 1.5; }
+.rev-steps li { padding-left: 2px; }
+.rev-expected { margin: 0; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-muted); color: var(--ink); font-size: var(--text-small); line-height: 1.5; }
 .rev-evidence { display: grid; gap: var(--space-2); align-content: start; padding-left: var(--space-5); border-left: 1px solid var(--line); }
 .rev-evidence img { display: block; width: 100%; max-height: 440px; object-fit: contain; object-position: left top; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); }
 .rev-txt-wrap { color: var(--dim); font-size: var(--text-small); line-height: 1.55; }
@@ -243,7 +248,7 @@
 .rev-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: var(--space-2); padding-top: var(--space-4); border-top: 1px solid var(--line); }
 .rev-foot-note { margin-right: auto; color: var(--dim); font-size: 12px; }
 .rev-body { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
-.rev-reason .lbl, .rev-txt-wrap .lbl { display: block; margin-bottom: 5px; font-size: 10px; font-weight: 850; letter-spacing: 0.09em; text-transform: uppercase; }
+.rev-reason .lbl, .rev-txt-wrap .lbl, .rev-tc .lbl { display: block; margin-bottom: 5px; font-size: 10px; font-weight: 850; letter-spacing: 0.09em; text-transform: uppercase; }
 .rev-reason .lbl { color: color-mix(in srgb, var(--review) 80%, var(--ink)); }
 .rev-evidence-empty { align-content: center; justify-items: start; min-height: 110px; color: var(--dim); font-size: 12px; }
 .dash-head .rev-actions { grid-area: action; display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); }

@@ -22,12 +22,18 @@ const S = {
 		approveAllFailed: (msg: string) => `전체 승인 실패: ${msg} — 다시 시도하세요.`,
 		approveFailed: (msg: string) => `승인 실패: ${msg} — 다시 시도하거나 서버 로그를 확인하세요.`,
 		reasonLabel: "확인이 필요한 이유",
-		reasonSelfHeal: (op: string) => `요소를 정확히 찾지 못해 유사 후보로 '${op}' 동작을 대신 수행했습니다. 의도한 요소에 실행됐는지 화면으로 확인하세요.`,
+		reasonSelfHeal: (op: string, target: string) =>
+			target
+				? `화면에서 '${target}' 요소를 찾지 못해 '${op}' 동작을 건너뛰었습니다. 라벨·텍스트가 다르거나 이전 단계가 실패했을 수 있으니, 그 요소가 화면에 실제로 있는지 화면·트레이스로 확인하세요.`
+				: `요소를 찾지 못해 '${op}' 동작을 건너뛰었습니다. 화면·트레이스로 원인을 확인하세요.`,
 		reasonNoAssertions: "이 케이스에 기대 결과(검증 항목)가 없어 통과/실패를 자동으로 판정할 수 없습니다. 화면을 보고 직접 판단하세요.",
 		reasonBaselinePending: "비교 기준(baseline) 화면이 아직 승인되지 않았습니다. 현재 화면이 올바르면 기준으로 승인하세요.",
 		reasonErrorInfo: (info: string) => `실행 중 오류가 발생해 판정을 보류했습니다: ${info} — 화면과 트레이스로 원인을 확인하세요.`,
 		reasonErrorGeneric: "실행 중 오류가 발생해 판정을 보류했습니다. 화면과 트레이스로 원인을 확인하세요.",
 		screenTextLabel: "화면 텍스트",
+		stepsLabel: "테스트 내용",
+		expectedLabel: "기대 결과",
+		noExpected: "(기대 결과 없음)",
 		emptyPage: "(빈 페이지)",
 		screenAlt: (title: string) => `${title} 화면`,
 		screenCaption: (url: string) => `화면 · ${url}`,
@@ -62,12 +68,18 @@ const S = {
 		approveAllFailed: (msg: string) => `Approve all failed: ${msg} — try again.`,
 		approveFailed: (msg: string) => `Approve failed: ${msg} — try again or check the server logs.`,
 		reasonLabel: "Reason for review",
-		reasonSelfHeal: (op: string) => `The exact element wasn't found, so a similar candidate was used to perform '${op}'. Check the screen to confirm it acted on the intended element.`,
+		reasonSelfHeal: (op: string, target: string) =>
+			target
+				? `The '${target}' element couldn't be found, so the '${op}' action was skipped. Its label/text may differ or a previous step may have failed — check the screen and trace to see whether that element is actually present.`
+				: `An element couldn't be found, so the '${op}' action was skipped. Check the screen and trace for the cause.`,
 		reasonNoAssertions: "This case has no expected result (assertions), so pass/fail can't be judged automatically. Review the screen and decide.",
 		reasonBaselinePending: "The comparison baseline hasn't been approved yet. If the current screen is correct, approve it as the baseline.",
 		reasonErrorInfo: (info: string) => `The run errored, so the verdict was held: ${info} — use the screen and trace to find the cause.`,
 		reasonErrorGeneric: "The run errored, so the verdict was held. Use the screen and trace to find the cause.",
 		screenTextLabel: "Screen text",
+		stepsLabel: "Test steps",
+		expectedLabel: "Expected result",
+		noExpected: "(no expected result)",
 		emptyPage: "(empty page)",
 		screenAlt: (title: string) => `${title} screenshot`,
 		screenCaption: (url: string) => `Screen · ${url}`,
@@ -96,16 +108,20 @@ const OP_LABEL: Record<Lang, Record<string, string>> = {
 };
 
 /** Turn a terse engine reason code into a friendly, human-readable "why review" explanation. */
-function explainReason(reason: string, t: ReviewStrings, lang: Lang): string {
+function explainReason(item: ReviewItem, t: ReviewStrings, lang: Lang): string {
+	const reason = item.reason;
 	if (reason.startsWith("self-heal:")) {
 		const raw = reason.slice("self-heal:".length).trim();
-		return t.reasonSelfHeal(OP_LABEL[lang][raw] ?? raw);
+		return t.reasonSelfHeal(OP_LABEL[lang][raw] ?? raw, item.healTarget ?? "");
 	}
 	if (reason === "no assertions authored") return t.reasonNoAssertions;
 	if (reason === "baseline pending approval") return t.reasonBaselinePending;
 	if (reason === "error" || reason.trim() === "") return t.reasonErrorGeneric;
 	return t.reasonErrorInfo(stripAnsi(reason));
 }
+
+/** Steps often already carry their own "1." / "2)" prefix; strip it so the <ol> auto-numbering doesn't double up. */
+const stripStepOrdinal = (s: string) => s.replace(/^\s*\d+[.)]\s+/, "");
 
 export function ReviewPanel({
 	selId,
@@ -271,9 +287,25 @@ export function ReviewPanel({
 							</div>
 							<b className="rev-title">{it.title}</b>
 						</header>
+						{((it.steps?.length ?? 0) > 0 || it.expected) && (
+							<div className="rev-tc">
+								{(it.steps?.length ?? 0) > 0 && (
+									<>
+										<span className="lbl">{t.stepsLabel}</span>
+										<ol className="rev-steps">
+											{it.steps?.map((s, i) => (
+												<li key={`${it.caseId}-s${i}`}>{stripStepOrdinal(s)}</li>
+											))}
+										</ol>
+									</>
+								)}
+								<span className="lbl">{t.expectedLabel}</span>
+								<p className="rev-expected">{it.expected || t.noExpected}</p>
+							</div>
+						)}
 						<div className="rev-reason">
 							<span className="lbl">{t.reasonLabel}</span>
-							<p className="rev-reason-text">{explainReason(it.reason, t, lang)}</p>
+							<p className="rev-reason-text">{explainReason(it, t, lang)}</p>
 							<code className="rev-reason-code">{it.reason}</code>
 						</div>
 						<div className="rev-txt-wrap">

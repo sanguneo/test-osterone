@@ -681,8 +681,12 @@ export async function runBatch(
 				(r.verdict === "needs_review" || r.verdict === "error") && !!r.tracePath && existsSync(r.tracePath);
 			if (tracePath && !keptTrace) rmSync(tracePath, { force: true });
 			if (r.verdict === "needs_review" || r.verdict === "error") {
+				// Heal events read "<kind>: <target> — <error>"; pull the kind + failed target for a precise, friendly reason.
+				const firstHeal = r.healEvents[0] ?? "";
+				const healMatch = /^([^:]+):\s*(.*?)\s*(?:—|$)/.exec(firstHeal);
+				const healTarget = r.healEvents.length ? (healMatch?.[2]?.trim() ?? "") : "";
 				const reason = r.healEvents.length
-					? `self-heal: ${r.healEvents[0]?.split(":")[0]}`
+					? `self-heal: ${healMatch?.[1]?.trim() || "action"}`
 					: r.verdict === "error"
 						? (r.errorInfo ?? "error")
 						: r.assertions.length === 0
@@ -692,8 +696,11 @@ export async function runBatch(
 					caseId: r.caseId,
 					title: caseById.get(r.caseId)?.title || r.caseId,
 					category: caseById.get(r.caseId)?.category ?? null,
+					steps: caseById.get(r.caseId)?.steps ?? [],
+					expected: caseById.get(r.caseId)?.expected ?? "",
 					verdict: r.verdict,
 					reason,
+					healTarget,
 					url: r.snapshot?.url ?? "",
 					text: (r.snapshot?.text ?? "").slice(0, 600),
 					screenshot: r.snapshot?.screenshot,
@@ -1570,9 +1577,19 @@ async function main(): Promise<number> {
 		}
 	}
 	const port = Number(process.env.PORT ?? 8686);
-	createServer((req, res) => {
+	const server = createServer((req, res) => {
 		handle(req, res).catch((err) => send(res, 500, JSON.stringify({ error: String(err) })));
-	}).listen(port, () => {
+	});
+	server.on("error", (err: NodeJS.ErrnoException) => {
+		if (err.code === "EADDRINUSE") {
+			console.error(
+				`\n포트 ${port}이(가) 이미 사용 중입니다. 다른 Studio가 이미 실행 중이거나, 다른 포트로 띄우려면:  PORT=${port + 1} bun run studio\n`,
+			);
+			process.exit(1);
+		}
+		throw err;
+	});
+	server.listen(port, () => {
 		console.log(`test-osterone Studio → http://localhost:${port}`);
 	});
 	return 0;

@@ -105,7 +105,9 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				else if (action.kind === "fill") await opts.page.fill(action.target, action.value);
 			} catch (err) {
 				// Unactionable target -> record a heal event; do NOT crash and do NOT allow a silent pass.
-				healEvents.push(`${action.kind}: ${(err as Error).message}`);
+				const failedTarget =
+					action.kind === "goto" ? action.path : action.kind === "click" || action.kind === "fill" ? action.target : "";
+				healEvents.push(`${action.kind}: ${failedTarget} — ${(err as Error).message}`);
 			}
 		}
 

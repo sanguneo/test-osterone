@@ -160,8 +160,11 @@ export interface ReviewItem {
 	caseId: string;
 	title: string;
 	category: string | null;
+	steps: string[];
+	expected: string;
 	verdict: Verdict;
 	reason: string;
+	healTarget?: string;
 	url: string;
 	text: string;
 	screenshot?: string;

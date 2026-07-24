@@ -41,6 +41,8 @@ function seed() {
 		caseId: "c2",
 		title: "Case 2",
 		category: null,
+		steps: ["로그인 화면 진입", "자격증명 입력"],
+		expected: "대시보드로 이동",
 		verdict: "needs_review",
 		reason: "baseline pending approval",
 		url: "/x",
