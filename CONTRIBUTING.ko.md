@@ -59,11 +59,6 @@ bun run studio:build     # src/app/studio/web을 건드렸을 때만
 - 메시지는 명확하게(`type: 요약` — `fix:`·`feat:`·`docs:`·`test:`·`chore:`).
 - PR 템플릿을 채우고 **CI가 초록인지** 확인하세요.
 
-## 플랫폼 주의 (Windows)
-
-- Studio/브라우저는 Bun이 아니라 **Node**로 실행하세요(`node --experimental-transform-types src/app/studio/server.ts`) — Bun은 Playwright 런치에서 멈춥니다.
-- 클라이언트는 `localhost`(IPv6 `::1`로 풀릴 수 있음)가 아니라 **`127.0.0.1`**로 접속하세요.
-
 ## 프로젝트 구조
 
 [README의 프로젝트 구조](README.ko.md#프로젝트-구조)를 참고하세요. 요약: `src/intake`(스프레드시트) · `src/interpret`(규칙/assertion/선별/author/recon) · `src/execute`(페이지/브라우저/러너) · `src/judge`(baseline) · `src/app/studio`(브라우저 UI) · `test/`.

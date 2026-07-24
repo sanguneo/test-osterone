@@ -59,11 +59,6 @@ bun run studio:build     # only if you touched src/app/studio/web
 - Clear messages (`type: summary` — e.g. `fix:`, `feat:`, `docs:`, `test:`, `chore:`).
 - Fill in the PR template and make sure **CI is green**.
 
-## Platform notes (Windows)
-
-- Run the Studio/browser under **Node**, not Bun (`node --experimental-transform-types src/app/studio/server.ts`) — Bun hangs on Playwright launch.
-- Clients should hit **`127.0.0.1`**, not `localhost` (may resolve to IPv6 `::1`).
-
 ## Project layout
 
 See the [project layout in the README](README.md#project-layout). In short: `src/intake` (spreadsheet) · `src/interpret` (rule/assertions/triage/author/recon) · `src/execute` (page/browser/runner) · `src/judge` (baseline) · `src/app/studio` (browser UI) · `test/`.
