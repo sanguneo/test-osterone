@@ -11,7 +11,8 @@ dist/
 .claude/
 .codex/
 .gemini/
-.github/
+.github/*
+!.github/workflows/
 .mcp.json
 .ui-craft-backups/
 AGENTS.md

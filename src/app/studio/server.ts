@@ -45,6 +45,7 @@ import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
 import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts";
 import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
 import { startFixture } from "../../testing/fixture-app.ts";
+import { isLoginOnlyCases, parseHealEvent } from "./run-helpers.ts";
 import { deleteProjectSheets, deleteSheetContent, readSheetContent, writeSheetContent } from "./sheet-store.ts";
 import {
 	type CaseView,
@@ -633,10 +634,8 @@ export async function runBatch(
 	const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
 	const results: CaseView[] = [];
 	try {
-		// Login-feature tests must run logged-out (they drive their own login), so a pure login
-		// sheet skips the auto-login precondition. Detected by category, falling back to the title.
-		const loginRe = /로그인|login|log\s?in|sign\s?in|인증|auth/i;
-		const isLoginSheet = cases.length > 0 && cases.every((c) => loginRe.test(c.category ?? c.title ?? ""));
+		// Login-feature sheets drive their own login, so they skip the auto-login precondition.
+		const isLoginSheet = isLoginOnlyCases(cases);
 		// Auto-login precondition: non-login runs authenticate once, then every case shares the session.
 		if (!input.sample && !isLoginSheet && defaultAccount && (defaultAccount.username || defaultAccount.password)) {
 			const login = await attemptLogin(page, {
@@ -682,11 +681,10 @@ export async function runBatch(
 			if (tracePath && !keptTrace) rmSync(tracePath, { force: true });
 			if (r.verdict === "needs_review" || r.verdict === "error") {
 				// Heal events read "<kind>: <target> — <error>"; pull the kind + failed target for a precise, friendly reason.
-				const firstHeal = r.healEvents[0] ?? "";
-				const healMatch = /^([^:]+):\s*(.*?)\s*(?:—|$)/.exec(firstHeal);
-				const healTarget = r.healEvents.length ? (healMatch?.[2]?.trim() ?? "") : "";
+				const heal = parseHealEvent(r.healEvents[0] ?? "");
+				const healTarget = r.healEvents.length ? heal.target : "";
 				const reason = r.healEvents.length
-					? `self-heal: ${healMatch?.[1]?.trim() || "action"}`
+					? `self-heal: ${heal.kind || "action"}`
 					: r.verdict === "error"
 						? (r.errorInfo ?? "error")
 						: r.assertions.length === 0
