@@ -12,10 +12,10 @@ function makeFixtureRepo(): string {
 	tmpDirs.push(root);
 	writeFileSync(
 		join(root, "package.json"),
-		JSON.stringify({ name: "xperp-web", scripts: { dev: "vite", build: "vite build" }, bin: { xperp: "cli.js" } }),
+		JSON.stringify({ name: "acme-web", scripts: { dev: "vite", build: "vite build" }, bin: { acme: "cli.js" } }),
 	);
-	writeFileSync(join(root, "AGENTS.md"), "# xperp\n전자결재 웹앱. 로그인 후 결재 요청/승인.");
-	writeFileSync(join(root, "README.md"), "# xperp-web\nReact SPA for approvals.");
+	writeFileSync(join(root, "AGENTS.md"), "# acme\n전자결재 웹앱. 로그인 후 결재 요청/승인.");
+	writeFileSync(join(root, "README.md"), "# acme-web\nReact SPA for approvals.");
 	mkdirSync(join(root, "src", "components"), { recursive: true });
 	mkdirSync(join(root, "src", "pages"), { recursive: true });
 	writeFileSync(
@@ -39,10 +39,10 @@ afterAll(() => {
 
 test("digestRepoDir extracts name, docs, scripts, routes, components, and a clean file map", () => {
 	const d = digestRepoDir(makeFixtureRepo());
-	expect(d.name).toBe("xperp-web");
+	expect(d.name).toBe("acme-web");
 	expect(d.agents).toContain("전자결재");
 	expect(d.readme).toContain("React SPA");
-	expect(d.scripts).toEqual(["dev", "build", "bin:xperp"]);
+	expect(d.scripts).toEqual(["dev", "build", "bin:acme"]);
 	expect(d.routes).toEqual(["/auth/login", "/orders", "/settings"]);
 	expect(d.components).toEqual(["OrdersTable", "SettingsPage"]);
 	expect(d.files).toContain("src/App.tsx");
@@ -65,7 +65,7 @@ test("reduceRepo builds a digest prompt and returns the trimmed model brief", as
 	});
 	const brief = await reduceRepo(digestRepoDir(makeFixtureRepo()), model);
 	expect(brief).toBe("- React SPA 전자결재\n- 라우트: /orders, /settings");
-	expect(seen).toContain("REPO xperp-web");
+	expect(seen).toContain("REPO acme-web");
 	expect(seen).toContain("routes: /auth/login, /orders, /settings");
 	expect(seen).toContain("src/components/OrdersTable.tsx");
 	expect(seen).toContain("전자결재");

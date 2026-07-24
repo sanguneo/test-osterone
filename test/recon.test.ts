@@ -3,7 +3,7 @@ import { type FakeAction, FakePage, type PageSnapshot } from "../src/execute/pag
 import { attemptLogin, extractStructure, reconApp, reduceRecon } from "../src/interpret/recon.ts";
 import { FakeModelClient, type ModelMessage } from "../src/model/model-client.ts";
 
-const LOGIN_HTML = `<!doctype html><html><head><title>xperp 로그인</title></head><body>
+const LOGIN_HTML = `<!doctype html><html><head><title>acme 로그인</title></head><body>
 	<h1>로그인</h1>
 	<form>
 		<input type="text" placeholder="아이디를 입력해주세요" name="loginId" />
@@ -13,7 +13,7 @@ const LOGIN_HTML = `<!doctype html><html><head><title>xperp 로그인</title></h
 	</form>
 </body></html>`;
 
-const HOME_HTML = `<!doctype html><html><head><title>xperp 홈</title></head><body>
+const HOME_HTML = `<!doctype html><html><head><title>acme 홈</title></head><body>
 	<nav>
 		<a href="/orders">주문 관리</a>
 		<a href="/settings?tab=1#top">환경 설정</a>
@@ -67,7 +67,7 @@ function reconReducer(action: FakeAction, state: PageSnapshot, inputs: Record<st
 test("extractStructure parses title, headings, links, fields, buttons, table headers", () => {
 	const p = extractStructure(HOME_HTML, "/home");
 	expect(p.url).toBe("/home");
-	expect(p.title).toBe("xperp 홈");
+	expect(p.title).toBe("acme 홈");
 	expect(p.headings).toEqual(["대시보드", "단지 95001"]);
 	expect(p.links.map((l) => `${l.label}|${l.href}`)).toEqual([
 		"주문 관리|/orders",
@@ -131,7 +131,7 @@ test("reconApp logs in via hint iteration, scans the landing page, and reduces c
 	expect(res.loggedIn).toBe(true);
 	expect(res.notes.some((n) => n.startsWith("로그인 완료"))).toBe(true);
 	expect(res.pages).toHaveLength(1);
-	expect(res.pages[0]?.title).toBe("xperp 홈");
+	expect(res.pages[0]?.title).toBe("acme 홈");
 	expect(res.context).toBe("- 도메인 브리프");
 });
 
