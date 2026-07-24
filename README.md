@@ -223,7 +223,11 @@ test/           unit + smoke suites (132/132)
 examples/demo/  CLI live-run example
 ```
 
-Prior Python (`webtest-agent`) and Bun (`webtest-agent-ts`) implementations are preserved under `archive/`; the fixture site + labeled cases are reused as a language-neutral benchmark asset.
+The bundled fixture app + labeled cases (`src/testing/`) double as a language-neutral benchmark asset.
+
+## Contributing
+
+Issues and PRs welcome. See **[CONTRIBUTING.md](CONTRIBUTING.md)** ([한국어](CONTRIBUTING.ko.md)) for setup, the gate commands, and the one rule that matters — **false-pass = 0**. Security reports: **[SECURITY.md](SECURITY.md)**.
 
 ---
 

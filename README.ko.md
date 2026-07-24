@@ -223,7 +223,11 @@ test/           유닛 + 스모크 스위트 (132/132)
 examples/demo/  CLI 라이브 실행 예제
 ```
 
-기존 Python(`webtest-agent`)·Bun(`webtest-agent-ts`) 구현은 `archive/`에 보존되어 있으며, fixture 사이트와 라벨링된 케이스는 언어 중립 벤치마크 자산으로 재사용합니다.
+번들 fixture 앱과 라벨링된 케이스(`src/testing/`)는 언어 중립 벤치마크 자산으로도 쓰입니다.
+
+## 기여하기
+
+이슈·PR 환영합니다. 셋업·게이트 명령·단 하나의 원칙(**false-pass = 0**)은 **[CONTRIBUTING.ko.md](CONTRIBUTING.ko.md)** ([English](CONTRIBUTING.md))를 보세요. 보안 신고는 **[SECURITY.md](SECURITY.md)**.
 
 ---
 

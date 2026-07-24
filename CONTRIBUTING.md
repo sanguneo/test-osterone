@@ -1,5 +1,7 @@
 # Contributing to test-osterone
 
+[English](CONTRIBUTING.md) · [한국어](CONTRIBUTING.ko.md)
+
 Thanks for helping out. This project has one sacred rule that shapes everything else:
 
 > **false-pass = 0.** A silently-wrong `pass` is the worst possible outcome. The AI *writes* tests; a deterministic engine *judges* them. Never weaken the verdict to make something green.
