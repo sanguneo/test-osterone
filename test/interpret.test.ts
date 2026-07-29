@@ -3,6 +3,7 @@ import type { NormalizedTC } from "../src/intake/schema.ts";
 import { assertionCacheKey } from "../src/interpret/assertion.ts";
 import {
 	authorPlanAI,
+	derivePreparationActions,
 	deriveRouteAssertion,
 	getOrAuthorPlan,
 	MemoryPlanCache,
@@ -174,7 +175,7 @@ test("requirementCoverage names the outcomes no assertion refers to", () => {
 	expect(cov?.missing[0]).toContain("계정 리스트");
 });
 
-test("requirementCoverage reports full coverage and stays silent on single-outcome cases", () => {
+test("requirementCoverage reports full coverage, and for one outcome asks only whether anything is about it", () => {
 	const expected = "1. 팝업 표출되어야 한다.\n2. X 버튼 표출되어야 한다.";
 	expect(
 		requirementCoverage(expected, [
@@ -182,9 +183,23 @@ test("requirementCoverage reports full coverage and stays silent on single-outco
 			{ kind: "textIncludes", value: "X 버튼" },
 		]),
 	).toEqual({ total: 2, covered: 2, missing: [] });
-	// One requirement → coverage would just restate "has assertions", and an assertion legitimately
-	// reworded from the sentence would be flagged for nothing. Not measured.
-	expect(requirementCoverage("1. 팝업이 종료되어야 한다.", [{ kind: "textIncludes", value: "닫힘" }])).toBeNull();
+	// One requirement asks the narrower question: is *any* assertion about this outcome? Measured false
+	// passes were "입력 제한되어야 한다" checked by the email field's hint, and "붉은색으로 표시" checked by
+	// the hint's content — nothing attributable either time.
+	expect(requirementCoverage("1. 팝업이 종료되어야 한다.", [{ kind: "textIncludes", value: "닫힘" }])).toEqual({
+		total: 1,
+		covered: 0,
+		missing: ["1. 팝업이 종료되어야 한다."],
+	});
+	// An assertion quoting the requirement is attributable, so a single-outcome case can still pass.
+	expect(
+		requirementCoverage("1. 저장 완료 문구 표출되어야 한다.", [{ kind: "textIncludes", value: "저장 완료" }])?.covered,
+	).toBe(1);
+	// A derived url check is by construction about the expectation; requiring its path to appear in the
+	// prose would reject every one of them.
+	expect(
+		requirementCoverage("1. 대시보드로 이동되어야 한다.", [{ kind: "urlIncludes", value: "/dashboard" }])?.covered,
+	).toBe(0);
 	// Whitespace differences must not manufacture a gap.
 	expect(
 		requirementCoverage("1. 전체 결재문서 표출되어야 한다.\n2. 목록 표출되어야 한다.", [
@@ -293,4 +308,35 @@ test("authorPlanAI adds the derived url assertion but never overrides one the mo
 	);
 	const kept = await authorPlanAI(tc({ expected: "1. 대시보드로 이동되어야 한다." }), opinionated, {}, rule);
 	expect(kept.assertions).toEqual([{ kind: "urlIncludes", value: "/dashboard?tab=1" }]);
+});
+test("derivePreparationActions navigates by route instead of clicking the sheet's prose", () => {
+	// Measured: 27 of 58 failed preparations were a click on the precondition's own words —
+	// `click "전체 기관 관리"` is a heading, not a control — while 기관 관리 = /agency sat unused.
+	expect(
+		derivePreparationActions(
+			"1. 전체 기관 관리 페이지 내 신규 기관 생성 버튼 선택된 상태",
+			[
+				{ kind: "click", target: "전체 기관 관리" },
+				{ kind: "click", target: "신규 기관 생성" },
+			],
+			ROUTES,
+		),
+	).toEqual([
+		{ kind: "goto", path: "/agency" },
+		// The part the table cannot answer is still the model's job.
+		{ kind: "click", target: "신규 기관 생성" },
+	]);
+	// A goto the model already authored for the same screen is not duplicated.
+	expect(
+		derivePreparationActions("1. 계정 관리 페이지 진입된 상태", [{ kind: "goto", path: "/account?page=0" }], ROUTES),
+	).toEqual([{ kind: "goto", path: "/account" }]);
+});
+
+test("derivePreparationActions leaves a precondition it cannot place alone", () => {
+	// "발송완료 상태 공문 상세페이지" names no route: a record has to be found, and inventing a goto
+	// would send every such case to the wrong screen and then report it as reached.
+	const actions = [{ kind: "click", target: "발송완료" } as const];
+	expect(derivePreparationActions("1. 발송완료 상태 공문 상세페이지 진입된 상태", actions, ROUTES)).toEqual(actions);
+	// No table at all (app analysis never ran) → nothing to derive, the model's plan is untouched.
+	expect(derivePreparationActions("1. 계정 관리 페이지 진입된 상태", actions, [])).toEqual(actions);
 });

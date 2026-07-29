@@ -21,6 +21,8 @@ const S = {
 			target
 				? `화면에서 '${target}' 요소를 찾지 못해 '${op}' 동작을 건너뛰었습니다. 라벨·텍스트가 다르거나 이전 단계가 실패했을 수 있으니, 그 요소가 화면에 실제로 있는지 화면·트레이스로 확인하세요.`
 				: `요소를 찾지 못해 '${op}' 동작을 건너뛰었습니다. 화면·트레이스로 원인을 확인하세요.`,
+		reasonPreconditionUnmet: (target: string) =>
+			`이 케이스가 전제하는 시작 상태에 도달하지 못했습니다${target ? ` — 준비 동작 '${target}' 실패` : ""}. 케이스가 검증하려던 것은 실행되지 않았으므로 앱 결함으로 볼 수 없습니다. 시트의 사전조건이 실제 화면과 맞는지, 그 화면에 도달할 수 있는지 확인하세요.`,
 		reasonAiRepair: (target: string) =>
 			target
 				? `'${target}' 동작이 실패해 AI가 실행 중 화면을 다시 읽고 대상을 교정한 뒤 진행했습니다. 교정된 동작이 테스트 의도와 같은지 화면·트레이스로 확인하고, 맞다면 기준으로 승인하세요.`
@@ -75,6 +77,8 @@ const S = {
 			target
 				? `The '${target}' element couldn't be found, so the '${op}' action was skipped. Its label/text may differ or a previous step may have failed — check the screen and trace to see whether that element is actually present.`
 				: `An element couldn't be found, so the '${op}' action was skipped. Check the screen and trace for the cause.`,
+		reasonPreconditionUnmet: (target: string) =>
+			`The starting state this case assumes was never reached${target ? ` — setup step '${target}' failed` : ""}. What the case set out to verify never ran, so this is not a defect in the app. Check whether the sheet's precondition matches the real screen, and whether that screen is reachable at all.`,
 		reasonAiRepair: (target: string) =>
 			target
 				? `The '${target}' action failed, so the AI re-read the live screen mid-run, corrected the target and continued. Check the screen and trace that the correction matches the test's intent, then approve it as the baseline.`
@@ -131,6 +135,7 @@ function explainReason(item: ReviewItem, t: ReviewStrings, lang: Lang): string {
 		const raw = reason.slice("self-heal:".length).trim();
 		return t.reasonSelfHeal(OP_LABEL[lang][raw] ?? raw, item.healTarget ?? "");
 	}
+	if (reason === "precondition unmet") return t.reasonPreconditionUnmet(item.healTarget ?? "");
 	if (reason === "ai repair") return t.reasonAiRepair(item.healTarget ?? "");
 	if (reason === "step not interpreted") return t.reasonStepNotInterpreted;
 	if (reason === "vision disagrees") return t.reasonVisionDisagrees(item.holdNote ?? "");

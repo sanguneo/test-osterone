@@ -622,6 +622,100 @@ test("re-render flicker is not evidence that an action revealed anything", async
 	expect(r.vacuousNote).toContain("동작 전 화면에서도");
 });
 
+/** Records what was done, and refuses one specific target so a precondition can be made to fail. */
+class PrepPage implements Page {
+	readonly did: string[] = [];
+	private opened = false;
+	constructor(private readonly refuse?: string) {}
+	async goto(path: string): Promise<void> {
+		this.did.push(`goto ${path}`);
+	}
+	async click(target: string): Promise<void> {
+		if (target === this.refuse) throw new Error(`locator.click: Timeout 1200ms exceeded — ${target}`);
+		this.did.push(`click ${target}`);
+		if (target === "신규 계정 생성") this.opened = true;
+	}
+	async fill(target: string, value: string): Promise<void> {
+		this.did.push(`fill ${target}=${value}`);
+	}
+	async snapshot(): Promise<PageSnapshot> {
+		// The 아이디 field only exists once setup opened the popup — the shape of 57 measured cases.
+		const text = this.opened ? "신규 계정 생성 아이디 이메일" : "전체 계정 관리 기관 유형";
+		return { url: "/account", text, html: `<main>${text}</main>`, fields: this.opened ? { 아이디: "" } : {} };
+	}
+}
+
+test("preparation reaches the state the case assumes before its own steps run", async () => {
+	// The measured shape: "계정 관리 페이지 내 신규 계정 생성 버튼 선택된 상태" — the field the case types
+	// into does not exist until setup opened the popup. The engine never read that column, so the
+	// model rediscovered it mid-run through the repair path and every recovery capped the case.
+	const page = new PrepPage();
+	const tc = loginTC({ caseId: "TC-prep", contentHash: "h-prep", steps: [], expected: "아이디" });
+	const r = await runScenario(tc, {
+		page,
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		preparation: [
+			{ kind: "goto", path: "/account" },
+			{ kind: "click", target: "신규 계정 생성" },
+		],
+		plan: { actions: [{ kind: "fill", target: "아이디", value: "테스트" }], assertions: [] },
+	});
+	expect(page.did).toEqual(["goto /account", "click 신규 계정 생성", "fill 아이디=테스트"]);
+	// Setup leaves no heal event, so a case whose only obstacle was the starting state is not capped.
+	expect(r.healEvents).toEqual([]);
+	expect(r.executedAsWritten).toBe(true);
+});
+
+test("an unreachable precondition holds the case instead of blaming the app", async () => {
+	// We never got to the screen the case describes, so nothing about the case was tested — reporting
+	// `fail` would file a defect against an app we never exercised.
+	const page = new PrepPage("신규 계정 생성");
+	const tc = loginTC({ caseId: "TC-prep2", contentHash: "h-prep2", steps: [], expected: "아이디" });
+	const r = await runScenario(tc, {
+		page,
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		preparation: [{ kind: "click", target: "신규 계정 생성" }],
+		plan: { actions: [{ kind: "fill", target: "아이디", value: "테스트" }], assertions: [] },
+	});
+	expect(r.verdict).toBe("needs_review");
+	expect(r.healEvents[0]).toContain("precondition:");
+	// The case's own steps are abandoned: running them against the wrong screen invents evidence.
+	expect(page.did).not.toContain("fill 아이디=테스트");
+	// And it can never be signed off with a baseline, because it did not run.
+	expect(r.executedAsWritten).toBe(false);
+});
+
+test("setup is not mistaken for the case's own effect", async () => {
+	// The discrimination check compares against the screen *after* preparation. Without that, opening
+	// a popup during setup looks like the case's click revealed it, and every such case passes.
+	const page = new PrepPage();
+	const tc = loginTC({ caseId: "TC-prep3", contentHash: "h-prep3", steps: [], expected: "아이디" });
+	const r = await runScenario(tc, {
+		page,
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		preparation: [{ kind: "click", target: "신규 계정 생성" }],
+		// The case clicks something that changes nothing, and asserts text setup had already revealed.
+		plan: {
+			actions: [{ kind: "click", target: "아이디" }],
+			assertions: [{ kind: "textIncludes", value: "아이디" }],
+		},
+	});
+	expect(r.verdict).toBe("needs_review");
+	expect(r.vacuousNote).toContain("동작 전 화면에서도");
+});
+
 /** Page that records trace-chunk calls, delegating page actions to a scripted FakePage. */
 class TracingPage implements Page {
 	readonly calls: string[] = [];

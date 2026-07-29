@@ -131,15 +131,24 @@ export interface RequirementCoverage {
  * occurs in that requirement's text), so it also works on plans cached before this existed and does
  * not depend on the model reporting its own coverage honestly.
  *
- * Only meaningful with two or more requirements: with one, "coverage" is just "has assertions",
- * which the runner already handles, and demanding a literal match would fire on every assertion
- * legitimately phrased differently from the sentence it came from.
+ * With a single requirement this answers a narrower but sharper question: is *any* assertion about the
+ * expectation at all? Two measured false passes were exactly that — a case demanding "새비밀번호 12자
+ * 초과 → 입력 제한되어야 한다" passed on `textIncludes "이메일 형식, 최대 255자"` (the email field's
+ * hint, unrelated to the case), and one demanding "하단 문구가 붉은색으로 표시되어야 한다" passed on the
+ * hint's *content*, which no colour requirement can be read from. Both had a green check that was
+ * never about the requirement.
+ *
+ * Only text assertions count toward attribution: a `urlIncludes` is derived from the expectation by
+ * construction, so demanding its path appear in the prose would reject every one of them.
  */
 export function requirementCoverage(expected: string, assertions: readonly Assertion[]): RequirementCoverage | null {
 	const reqs = expectedRequirements(expected);
-	if (reqs.length < 2) return null;
+	if (reqs.length === 0) return null;
 	const loose = (s: string) => s.replace(/\s+/g, "").toLowerCase();
-	const values = assertions.map((a) => loose(String(a.value ?? ""))).filter((v) => v.length >= 2);
+	const values = assertions
+		.filter((a) => a.kind === "textIncludes" || a.kind === "textNotIncludes")
+		.map((a) => loose(String(a.value ?? "")))
+		.filter((v) => v.length >= 2);
 	const missing = reqs.filter((req) => {
 		const hay = loose(req);
 		return !values.some((v) => hay.includes(v));

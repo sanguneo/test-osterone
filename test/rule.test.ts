@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
 	bumpRuleVersion,
 	establishRuleFromHeaders,
+	type InterpretationRule,
 	parseRule,
 	refineRule,
 	ruleLint,
@@ -21,9 +22,43 @@ test("establishRuleFromHeaders derives mapping + v1 + default intents/destructiv
 	expect(r.destructiveKeywords).toContain("delete");
 });
 
-test("serializeRule -> parseRule round-trips", () => {
-	const r = establishRuleFromHeaders(HEADERS);
-	expect(parseRule(serializeRule(r))).toEqual(r);
+test("serializeRule -> parseRule round-trips every field, including the optional ones", () => {
+	// This test existed and passed while `routes` was being parsed away, because the rule it round-tripped
+	// had no optional fields set at all. `parseRule` rebuilds field by field, so anything not listed there
+	// is silently dropped — recon wrote six routes, the state file kept them, the next server start lost
+	// them, and everything downstream behaved as if app analysis had never run. Populate everything.
+	const full: InterpretationRule = {
+		...establishRuleFromHeaders(HEADERS),
+		appContext: "공문 발송 시스템 — 관리자 콘솔",
+		codeContext: "React SPA, routes under /src/pages",
+		routes: [
+			{ label: "계정 관리", path: "/account" },
+			{ label: "대시보드", path: "/dashboard" },
+		],
+	};
+	expect(parseRule(serializeRule(full))).toEqual(full);
+});
+
+test("parseRule keeps only routes that are really a label and an internal path", () => {
+	// Off-disk input: a half-written or hand-edited state file must not produce a route that sends every
+	// derived assertion and preparation somewhere absurd.
+	const base = establishRuleFromHeaders(HEADERS);
+	const parsed = parseRule(
+		JSON.stringify({
+			...base,
+			routes: [
+				{ label: "계정 관리", path: "/account" },
+				{ label: "  ", path: "/blank" },
+				{ label: "외부", path: "https://example.com" },
+				{ label: "누락" },
+				"not an object",
+			],
+		}),
+	);
+	expect(parsed.routes).toEqual([{ label: "계정 관리", path: "/account" }]);
+	// Nothing usable → absent, not an empty array, so callers can treat it as "analysis never ran".
+	expect(parseRule(JSON.stringify({ ...base, routes: [] })).routes).toBeUndefined();
+	expect(parseRule(JSON.stringify({ ...base, routes: "nope" })).routes).toBeUndefined();
 });
 
 test("bumpRuleVersion increments only the version", () => {

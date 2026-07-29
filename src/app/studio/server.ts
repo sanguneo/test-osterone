@@ -30,7 +30,14 @@ import {
 } from "../../intake/ingest.ts";
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
-import { type AuthoredPlan, getOrAuthorPlan } from "../../interpret/author.ts";
+import {
+	type AuthoredPlan,
+	authorPreparation,
+	derivePreparationActions,
+	getOrAuthorPlan,
+	preparationCacheKey,
+} from "../../interpret/author.ts";
+import type { PageAction } from "../../interpret/interpret.ts";
 import {
 	attemptLogin,
 	extractStructure,
@@ -865,6 +872,34 @@ export async function runBatch(
 			}
 		};
 		authorAhead(0);
+		/**
+		 * Preparation plans, keyed by the precondition text rather than the case.
+		 *
+		 * The measured sheet has seven cases sharing "계정 관리 페이지 내 신규 계정 생성 버튼 선택된 상태",
+		 * so keying on the text authors one plan between them instead of seven identical ones. Cached in
+		 * the same per-sheet plan cache, which the rule version and AUTHOR_VERSION already invalidate.
+		 */
+		const preparationFor = async (tc: NormalizedTC): Promise<PageAction[] | undefined> => {
+			const text = tc.precondition?.trim();
+			if (!ai || !modelClient || !text) return undefined;
+			const key = preparationCacheKey(text, sheetSt.rule.ruleId, sheetSt.rule.ruleVersion);
+			const cached = sheetSt.planCache.get(key);
+			// Derived on the way out, not only at author time: navigating by route is a rule about what a
+			// preparation may be, so tightening it has to reach the sheets already cached — the same
+			// reason plans are re-sanitized on read.
+			if (cached) return derivePreparationActions(text, cached.actions, sheetSt.rule.routes);
+			try {
+				const actions = await authorPreparation(text, modelClient, sheetSt.rule);
+				sheetSt.planCache.set(key, { actions, assertions: [] });
+				return actions;
+			} catch (err) {
+				onProgress?.({
+					type: "notice",
+					message: `사전조건 해석 실패(${tc.title || tc.caseId}) — 준비 없이 실행합니다: ${(err as Error).message.slice(0, 100)}`,
+				});
+				return undefined;
+			}
+		};
 
 		for (const [index, tc] of cases.entries()) {
 			if (signal?.aborted) break;
@@ -874,6 +909,8 @@ export async function runBatch(
 			const plan = await planning.get(tc.caseId);
 			planning.delete(tc.caseId);
 			await prepareAuth(tc, account);
+			// Authored after auth so the setup starts from the session the case will actually run under.
+			const preparation = await preparationFor(tc);
 			if (signal?.aborted) break;
 			const tracePath = trace ? tracePathFor(input.projectId ?? "sample", sid, tc.caseId) : undefined;
 			const r = await runScenario(tc, {
@@ -882,6 +919,7 @@ export async function runBatch(
 				cache,
 				env: { browser: "chromium", viewport: "1280x800", baseUrl },
 				plan,
+				preparation,
 				baseline: layeredBaseline(st, sid),
 				baselineEnv,
 				tracePath,

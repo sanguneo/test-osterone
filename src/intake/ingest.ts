@@ -61,6 +61,20 @@ const FIELD_ALIASES: Record<TcField, string[]> = {
 	role: ["role", "persona", "account", "user", "담당자"],
 	env: ["environment", "env", "stage", "환경"],
 	category: ["category", "분류", "카테고리", "구분", "그룹", "group", "대분류", "중분류", "메뉴", "menu"],
+	// The starting state a case assumes, which the engine has to reach before the case's own steps
+	// mean anything. Measured on a real sheet: of 57 cases the engine could not drive, 57 had one
+	// written here — it was being dropped, so the model re-derived it mid-run, expensively, and every
+	// success was capped at needs_review.
+	precondition: [
+		"precondition",
+		"pre-condition",
+		"preconditions",
+		"given",
+		"setup",
+		"사전조건",
+		"전제조건",
+		"선행조건",
+	],
 };
 
 /**
@@ -81,6 +95,10 @@ export function mapColumns(headers: string[]): Partial<Record<TcField, string>> 
 			}
 		}
 	}
+	// A sheet with only a 사전조건 column and no 시험절차 uses it *as* the procedure (that is what the
+	// step field's last-resort alias is for). Claiming the same column twice would replay the steps as
+	// their own setup, so the procedure wins and there is no separate precondition.
+	if (mapping.precondition && mapping.precondition === mapping.step) delete mapping.precondition;
 	return mapping;
 }
 
@@ -130,8 +148,23 @@ export function normalizeTable(
 		const env = normText(cell(row, "env")) || null;
 		const priority = normText(cell(row, "priority")) || null;
 		const sourceId = normText(cell(row, "id")) || null;
+		const precondition = normText(cell(row, "precondition")) || undefined;
+		// `precondition` is deliberately outside the hash: it is the starting state, not what the case
+		// verifies, and hashing it would change every caseId and orphan every approved baseline.
 		const hash = contentHash([title, steps, expected, role, env]);
-		return { caseId: `TC-${hash}`, sourceId, title, steps, expected, priority, role, env, category, contentHash: hash };
+		return {
+			caseId: `TC-${hash}`,
+			sourceId,
+			title,
+			steps,
+			expected,
+			...(precondition ? { precondition } : {}),
+			priority,
+			role,
+			env,
+			category,
+			contentHash: hash,
+		};
 	});
 }
 

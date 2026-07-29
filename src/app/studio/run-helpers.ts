@@ -137,12 +137,16 @@ export function parseHealEvent(healEvent: string): { kind: string; target: strin
 
 /**
  * Turn a case's heal events into the single review reason that best explains why a human is
- * needed. Severity order: an action that could not be performed at all, then an AI repair the
- * human should confirm, then a step the rule could not interpret. Without this the first event
- * wins by accident and the review panel explains the wrong thing.
+ * needed. Severity order: a precondition that could not be reached (the case never got to the screen
+ * it describes, so nothing about it was tested), then an action that could not be performed at all,
+ * then an AI repair the human should confirm, then a step the rule could not interpret. Without this
+ * the first event wins by accident and the review panel explains the wrong thing.
  */
 export function summarizeHeal(healEvents: readonly string[]): { reason: string; target: string } {
 	const parsed = healEvents.map(parseHealEvent);
+	// First, because it changes what the reviewer does: fix the setup or the sheet, not the app.
+	const unmet = parsed.find((h) => h.kind === "precondition");
+	if (unmet) return { reason: "precondition unmet", target: unmet.target };
 	const failed = parsed.find((h) => h.kind === "goto" || h.kind === "click" || h.kind === "fill");
 	if (failed) return { reason: `self-heal: ${failed.kind}`, target: failed.target };
 	const repaired = parsed.find((h) => h.kind === "repair");

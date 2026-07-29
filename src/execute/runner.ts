@@ -105,6 +105,16 @@ export interface RunOptions {
 	now?: () => number;
 	/** Pre-authored plan (AI author-time). When present, replaces deterministic step parsing + assertions. */
 	plan?: AuthoredPlan;
+	/**
+	 * Actions that reach the starting state the case assumes, from its written 사전조건.
+	 *
+	 * Kept separate from `plan.actions` on purpose. Preparation is not what the case tests, so it must
+	 * not decide the verdict: a preparation that cannot complete holds the case as "precondition
+	 * unmet" rather than failing it (the app is not necessarily broken — we could not get to the
+	 * screen), and the baseline the discrimination check compares against is taken **after** it, so
+	 * opening a popup during setup is not mistaken for the case's own effect.
+	 */
+	preparation?: PageAction[];
 	/** Optional golden-baseline store: an approved match lifts a needs_review to pass; drift keeps it. */
 	baseline?: BaselineStore;
 	/** Stable env key for baselines (defaults to env.baseUrl, which may be ephemeral). */
@@ -299,8 +309,38 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 
 		/** The screen as last read, so grounding an action costs no extra round trip. */
 		let lastSeen: PageSnapshot | null = null;
-		for (let i = 0; i < actions.length; i++) {
-			let action = actions[i];
+
+		/**
+		 * Reach the state the case assumes before running any of its own steps.
+		 *
+		 * Measured: of 57 cases in a 98-case run the engine could not drive, all 57 had a precondition
+		 * written in the sheet that the engine had never read. Without it the model rediscovered the
+		 * setup through the repair path — 28 times in that one run, one model round trip each — and
+		 * every recovery was a heal event that capped the case at `needs_review`.
+		 *
+		 * A preparation that cannot complete is not a verdict about the app: we never reached the
+		 * screen the case describes, so nothing about the case was tested. It holds, and it leaves
+		 * `executedAsWritten` false so no approved baseline can sign it off either.
+		 */
+		let preparationFailure: string | undefined;
+		for (const prep of opts.preparation ?? []) {
+			if (prep.kind === "verify" || prep.kind === "unknown") continue;
+			// Full patience on the retry: setup is not the thing under test, and a slow popup is not a
+			// finding about the app.
+			const err = (await perform(prep, opts.firstTryMs ?? 1200)) ? await perform(prep) : null;
+			if (err) {
+				preparationFailure = `${prep.kind}: ${targetOf(prep)} — ${err.message.split("\n")[0] ?? "실패"}`;
+				executedAsWritten = false;
+				healEvents.push(`precondition: ${preparationFailure}`);
+				break;
+			}
+			lastSeen = await opts.page.snapshot({ screenshot: false }).catch(() => null);
+		}
+		// A case whose starting state was never reached must not run its own steps: performing them
+		// against the wrong screen manufactures evidence about something that was never exercised.
+		const actionsToRun = preparationFailure ? [] : actions;
+		for (let i = 0; i < actionsToRun.length; i++) {
+			let action = actionsToRun[i];
 			if (!action) continue;
 			// `verify` is covered by assertions; `unknown` is a step the rule could not interpret —
 			// record it (capping the verdict) instead of silently pretending the case ran in full.
@@ -338,7 +378,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			 * *last* interaction is what navigated, the navigation is the outcome the case is about, and
 			 * throwing the baseline away would make every assertion look like it "already held".
 			 */
-			const moreInteractionsAfter = actions.slice(i + 1).some((a) => a?.kind === "click" || a?.kind === "fill");
+			const moreInteractionsAfter = actionsToRun.slice(i + 1).some((a) => a?.kind === "click" || a?.kind === "fill");
 			let err = await perform(action, opts.firstTryMs ?? 1200);
 			// The live screen at the moment of failure — reused for the presence check and the repair,
 			// so a miss costs one cheap DOM read instead of a second full locator timeout.
@@ -564,11 +604,26 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 					.slice(0, 80)}`;
 			}
 		}
-		// The case listed several outcomes and the assertions only speak to some of them. Passing on a
-		// subset is how a case goes green while the very thing a human later reports as broken was
-		// never tested. Report the gap and hold it; a human can sign the screen off once.
+		/**
+		 * Do the assertions actually speak to what the case says should happen?
+		 *
+		 * With several written outcomes, passing on a subset is how a case goes green while the very
+		 * thing a human later reports as broken was never tested. With a single outcome the question is
+		 * narrower and sharper — is *anything* here about that outcome? Two measured false passes were
+		 * exactly that: "새비밀번호 12자 초과 → 입력 제한되어야 한다" passed on the email field's hint text,
+		 * and "하단 문구가 붉은색으로 표시되어야 한다" passed on the hint's content, colour being something
+		 * no text assertion can read. Nothing was attributable to the requirement in either.
+		 *
+		 * So: several outcomes must be covered fully, a single outcome must be covered at all. Either
+		 * way it holds rather than fails — the app may be fine and the check merely beside the point.
+		 */
 		const coverage = requirementCoverage(tc.expected, assertions) ?? undefined;
-		if (verdict === "pass" && coverage && coverage.covered < coverage.total) {
+		const underChecked = coverage
+			? coverage.total > 1
+				? coverage.covered < coverage.total
+				: coverage.covered === 0
+			: false;
+		if (verdict === "pass" && coverage && underChecked) {
 			verdict = "needs_review";
 			confidence = round2(coverage.covered / coverage.total);
 		}

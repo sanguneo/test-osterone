@@ -6,9 +6,10 @@
  * judges a run and re-runs stay identical (false-pass = 0).
  */
 
+import { createHash } from "node:crypto";
 import type { NormalizedTC } from "../intake/schema.ts";
 import type { ModelClient } from "../model/model-client.ts";
-import { type Assertion, assertionCacheKey } from "./assertion.ts";
+import { type Assertion, AUTHOR_VERSION, assertionCacheKey } from "./assertion.ts";
 import { isProse, type PageAction } from "./interpret.ts";
 import { normLabel, type RouteEntry } from "./recon.ts";
 import { extractJsonObject, type InterpretationRule } from "./rule.ts";
@@ -111,10 +112,24 @@ const NAVIGATION_RE = /이동|전환|redirect|navigat|moves? to/i;
  *  - two different paths matching equally well means the case is ambiguous, and nothing is authored.
  */
 export function deriveRouteAssertion(expected: string, routes: readonly RouteEntry[] = []): Assertion | null {
-	if (!NAVIGATION_RE.test(expected) || routes.length === 0) return null;
-	const haystack = normLabel(expected);
+	if (!NAVIGATION_RE.test(expected)) return null;
+	const best = matchRoute(expected, routes);
+	return best ? { kind: "urlIncludes", value: best.path } : null;
+}
+
+/**
+ * Which route, if any, a piece of prose unambiguously names.
+ *
+ * Shared by the assertion above and by preparation, because both need the same question answered from
+ * the same table: the model will not use a route even when it is handed one (measured 0/10 for
+ * assertions, and 27 of 58 failed preparations were a click on prose like "전체 기관 관리" while
+ * `기관 관리 = /agency` sat unused in the prompt). Prompt instructions are not a mechanism here.
+ */
+export function matchRoute(text: string, routes: readonly RouteEntry[] = []): RouteEntry | null {
+	if (routes.length === 0) return null;
+	const haystack = normLabel(text);
 	const hits = routes.filter((r) => {
-		// `urlIncludes: "/"` is contained in every path — a check that cannot fail is not a check.
+		// A "/" route is contained in every url and names every page — it identifies nothing.
 		// Recon does produce these: a dashboard's 일간/월간 toggles are anchors with no real href.
 		if (r.path === "/") return false;
 		const label = normLabel(r.label);
@@ -124,7 +139,7 @@ export function deriveRouteAssertion(expected: string, routes: readonly RouteEnt
 	if (!best) return null;
 	// Same label length, different destination → we cannot tell which was meant.
 	if (hits.some((h) => h.path !== best.path && h.label.length === best.label.length)) return null;
-	return { kind: "urlIncludes", value: best.path };
+	return best;
 }
 
 /**
@@ -225,6 +240,89 @@ export async function authorPlanAI(
 		? null
 		: deriveRouteAssertion(tc.expected, rule?.routes);
 	return { actions: sanitizeActions(obj.actions), assertions: route ? [...assertions, route] : assertions };
+}
+
+/**
+ * Cache key for a preparation plan: the precondition text itself, not the case.
+ *
+ * Seven cases in one measured sheet share "계정 관리 페이지 내 신규 계정 생성 버튼 선택된 상태". Keying on
+ * the text means they author one plan between them, and editing a precondition invalidates only its
+ * own plan — which is also why the precondition stays out of `contentHash` and leaves `caseId`, and
+ * every approved baseline, alone.
+ */
+export function preparationCacheKey(precondition: string, ruleId: string, ruleVersion: number): string {
+	const canonical = precondition.replace(/\s+/g, " ").trim();
+	const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 16);
+	return `prep|${ruleId}|v${ruleVersion}|a${AUTHOR_VERSION}|${hash}`;
+}
+
+/**
+ * Turn a written precondition into the actions that reach that starting state.
+ *
+ * Measured on a real sheet: of 57 cases the engine could not drive, **all 57** had a precondition
+ * written in the sheet and the engine had never read it. It was being dropped at ingest, so the model
+ * re-derived the setup mid-run through the repair path instead — 28 times in one 98-case run, at a
+ * model round trip each, and every recovery is a heal event that caps the case at `needs_review`. The
+ * same information was sitting in the next column.
+ *
+ * Actions only. A precondition is where the case starts, never something to assert: authoring a check
+ * from it would test the setup and report it as the case's own result.
+ */
+export async function authorPreparation(
+	precondition: string,
+	model: ModelClient,
+	rule?: InterpretationRule,
+): Promise<PageAction[]> {
+	const text = precondition.trim();
+	if (!text) return [];
+	const routes = (rule?.routes ?? []).filter((r) => r.path !== "/");
+	const system =
+		"You turn a QA case's PRECONDITION — the state the app must already be in before the case's own steps run — into the minimal browser actions that reach it. " +
+		'Reply ONLY with JSON: {"actions":[...]} where each action is ' +
+		'{"kind":"goto","path":"/..."} | {"kind":"click","target":"visible text"} | {"kind":"fill","target":"field label","value":"..."}. ' +
+		"Reach the state and stop. Never perform what the case itself is supposed to test, never submit a form, and never assert anything. " +
+		"Prefer goto with a route listed below over clicking through a menu. Targets must be user-visible text, never CSS. " +
+		"If the precondition only restates being logged in or being on the app at all, reply with an empty actions array — the runner already handles sessions. " +
+		(routes.length ? `Known routes: ${routes.map((r) => `${r.label} = ${r.path}`).join(", ")}. ` : "") +
+		"Output ONLY the JSON.";
+	const guide = [rule?.appContext?.trim(), rule?.codeContext?.trim()].filter(Boolean);
+	const user = `PRECONDITION:\n${text}${guide.length ? `\n\nApp context:\n${guide.map((g) => `- ${g}`).join("\n")}` : ""}`;
+	const obj =
+		extractJsonObject(
+			await model.complete(
+				[
+					{ role: "system", content: system },
+					{ role: "user", content: user },
+				],
+				{ defaultEffort: "low" },
+			),
+		) ?? {};
+	return derivePreparationActions(text, sanitizeActions(obj.actions), rule?.routes);
+}
+
+/**
+ * Put the navigation part of a preparation on rails: the route table decides it, not the model.
+ *
+ * Measured on a 98-case run, 58 preparations failed and 27 of those were a click on the precondition's
+ * own prose — `click "전체 기관 관리"` (a heading, not a control), `click "계정 관리"`, `click "관리자
+ * 대시보드"` — while `기관 관리 = /agency` and `계정 관리 = /account` sat unused in the same prompt. The
+ * model echoes the sheet's words instead of reading the table, exactly as it ignored the instruction to
+ * author a url assertion. So the goto is derived here and the model's duplicate nav clicks are dropped;
+ * whatever is left (opening a popup, selecting a row) is still its job.
+ */
+export function derivePreparationActions(
+	precondition: string,
+	modelActions: readonly PageAction[],
+	routes: readonly RouteEntry[] = [],
+): PageAction[] {
+	const route = matchRoute(precondition, routes);
+	if (!route) return [...modelActions];
+	const coversRoute = (a: PageAction): boolean =>
+		(a.kind === "click" && matchRoute(a.target, routes)?.path === route.path) ||
+		(a.kind === "goto" && (a.path.split(/[?#]/)[0] ?? "").replace(/\/+$/, "") === route.path);
+	// The precondition names the screen; navigating straight there is both the correct reading and
+	// idempotent, where a menu click depends on where the previous case happened to leave us.
+	return [{ kind: "goto", path: route.path }, ...modelActions.filter((a) => !coversRoute(a))];
 }
 
 export interface AuthoredPlanResult {

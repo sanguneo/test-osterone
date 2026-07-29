@@ -81,7 +81,31 @@ export function parseRule(text: string): InterpretationRule {
 		destructiveKeywords: sanitizeStrings((raw as Record<string, unknown>).destructiveKeywords, DEFAULT_DESTRUCTIVE),
 		appContext: typeof raw.appContext === "string" ? raw.appContext : undefined,
 		codeContext: typeof raw.codeContext === "string" ? raw.codeContext : undefined,
+		routes: sanitizeRoutes((raw as Record<string, unknown>).routes),
 	};
+}
+
+/**
+ * Routes come off disk, so they are untrusted: keep only entries that are really a label and an
+ * app-internal path.
+ *
+ * `parseRule` rebuilds the rule field by field instead of spreading it, which is deliberate — but it
+ * also means a newly added field is silently dropped until it is listed there. `routes` was: recon
+ * wrote six of them, the state file held them, and the next server start parsed them away. Everything
+ * downstream then behaved as if app analysis had never run, and a full measurement was spent on it —
+ * 58 preparations failing on clicks the route table would have replaced with a goto.
+ */
+function sanitizeRoutes(raw: unknown): RouteEntry[] | undefined {
+	if (!Array.isArray(raw)) return undefined;
+	const out: RouteEntry[] = [];
+	for (const item of raw) {
+		if (!item || typeof item !== "object") continue;
+		const { label, path } = item as Record<string, unknown>;
+		if (typeof label !== "string" || typeof path !== "string") continue;
+		if (!label.trim() || !path.startsWith("/")) continue;
+		out.push({ label: label.trim(), path });
+	}
+	return out.length > 0 ? out : undefined;
 }
 
 export function saveRule(path: string, rule: InterpretationRule): void {

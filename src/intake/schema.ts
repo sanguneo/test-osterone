@@ -7,7 +7,7 @@ export interface RawTable {
 }
 
 /** Canonical test-case fields the raw sheet is mapped onto. */
-export type TcField = "id" | "title" | "step" | "expected" | "priority" | "role" | "env" | "category";
+export type TcField = "id" | "title" | "step" | "expected" | "priority" | "role" | "env" | "category" | "precondition";
 
 /** A normalized, deduplicated test case with a deterministic content-derived id. */
 export interface NormalizedTC {
@@ -18,6 +18,16 @@ export interface NormalizedTC {
 	title: string;
 	steps: string[];
 	expected: string;
+	/**
+	 * The starting state the case assumes, verbatim from the sheet ("계정 관리 페이지 내 신규 계정 생성
+	 * 버튼 선택된 상태").
+	 *
+	 * Not part of `contentHash` on purpose. It is not what the case verifies, and folding it in would
+	 * change every `caseId` — orphaning every approved baseline in every project. The preparation it
+	 * produces is cached under its own text instead, which also means the seven cases that share one
+	 * precondition share one plan.
+	 */
+	precondition?: string;
 	priority: string | null;
 	role: string | null;
 	env: string | null;

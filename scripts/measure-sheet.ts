@@ -92,8 +92,17 @@ const res = await fetch(`${BASE}/api/run`, {
 	}
 }
 
-// The sheet's own verdict column is the ground truth. Row order survives ingest, so the Nth unique
-// case corresponds to the Nth data row.
+/**
+ * The sheet's own verdict column is the ground truth — so a case has to be paired with *its* row.
+ *
+ * This used to pair the Nth unique case with the Nth data row, on the assumption that row order
+ * survives ingest. It does not: ingest drops content-duplicate rows. On the sheet measured here 100
+ * rows produced 98 cases, and from the first duplicate onward every pairing slid — 24 of 98 cases were
+ * scored against another case's verdict. Every aggregate built on that was wrong by a quarter.
+ *
+ * So pair by the sheet's own id (`sourceId`, from the NO/ID column), and refuse to fall back to index
+ * pairing when the counts differ, because then it is known to be wrong rather than merely unverified.
+ */
 const { csvText } = await get<{ csvText: string }>(
 	`/api/sheet/content?projectId=${encodeURIComponent(projectId)}&sheetId=${encodeURIComponent(sheetId)}`,
 );
@@ -103,13 +112,29 @@ const labelIdx = header.indexOf(labelColumn);
 if (labelIdx < 0) {
 	throw new Error(`sheet has no "${labelColumn}" column. Columns: ${csvToRawTable(csvText).headers.join(", ")}`);
 }
-const idIdx = header.indexOf("NO");
+const idIdx = header.findIndex((h) => ["no", "no.", "id", "시험 id", "tc id"].includes(h.toLowerCase().trim()));
 const dataRows = rows.slice(1).filter((r) => (idIdx < 0 ? r.some(Boolean) : (r[idIdx] ?? "").trim()));
+const unique = ingestCsv(csvText, {}).unique;
 const labels = new Map<string, { label: string; source: string }>();
-ingestCsv(csvText, {}).unique.forEach((c, i) => {
-	const row = dataRows[i];
+const bySourceId = new Map<string, string[]>();
+if (idIdx >= 0) {
+	for (const row of dataRows) {
+		const id = (row[idIdx] ?? "").trim();
+		if (id) bySourceId.set(id, row);
+	}
+}
+const pairedById = idIdx >= 0 && unique.every((c) => c.sourceId && bySourceId.has(c.sourceId));
+if (!pairedById && unique.length !== dataRows.length) {
+	throw new Error(
+		`cannot pair cases with their labels: ${unique.length} cases vs ${dataRows.length} rows and no usable id column. ` +
+			`Ingest deduplicates, so index pairing would score cases against other cases' verdicts.`,
+	);
+}
+unique.forEach((c, i) => {
+	const row = (pairedById && c.sourceId ? bySourceId.get(c.sourceId) : dataRows[i]) as string[] | undefined;
 	labels.set(c.caseId, { label: row?.[labelIdx] ?? "", source: (idIdx >= 0 ? row?.[idIdx] : "") ?? "" });
 });
+console.log(`labels paired by ${pairedById ? "sheet id" : "row order"} · ${unique.length} cases / ${dataRows.length} rows`);
 
 interface RunView {
 	results: { caseId: string; verdict: ScoreInput["verdict"]; title: string; passed: number; total: number }[];
