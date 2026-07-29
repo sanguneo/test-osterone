@@ -1138,6 +1138,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			}
 			write(ev);
 		};
+		// A case can take minutes with no event of its own — plan authoring at a high reasoning level
+		// stalled one run for nine minutes at case 31. Node's fetch aborts a response body idle for five
+		// minutes (`UND_ERR_BODY_TIMEOUT`), so a silent stream loses the client mid-run: the batch keeps
+		// going in the registry but whoever asked for it is gone. A heartbeat keeps the stream alive;
+		// clients ignore unknown event types.
+		const heartbeat = setInterval(() => write({ type: "ping", at: Date.now() }), 20_000);
+		heartbeat.unref();
 		try {
 			const view = await runBatch(input, emit, run.controller.signal);
 			run.results = view.results;
@@ -1155,6 +1162,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				write({ type: "error", error: run.error });
 			}
 		}
+		clearInterval(heartbeat);
 		res.end();
 		return;
 	}
@@ -1185,6 +1193,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			}
 		};
 		const sheets = input.sheets ?? input.sources ?? [];
+		// Same reason as the single-sheet stream: a long silent gap loses the client to fetch's idle
+		// body timeout while the batch carries on in the registry.
+		const heartbeat = setInterval(() => write({ type: "ping", at: Date.now() }), 20_000);
+		heartbeat.unref();
 		try {
 			write({
 				type: "all-start",
@@ -1216,6 +1228,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			run.error = (err as Error).message;
 			write({ type: "error", error: run.error });
 		}
+		clearInterval(heartbeat);
 		res.end();
 		return;
 	}
