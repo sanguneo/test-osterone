@@ -62,6 +62,7 @@ import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts
 import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
 import { maybePromptStar } from "../../star-prompt.ts";
 import { startFixture } from "../../testing/fixture-app.ts";
+import { readModelPin, writeModelPin } from "./model-pin.ts";
 import {
 	authStepFor,
 	endsSignedOut,
@@ -1242,6 +1243,9 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		try {
 			const body = JSON.parse((await readBody(req)) || "{}") as AuthInput & { projectId?: string };
 			auth = connect(body);
+			// Remember the choice so a restart restores *this* model at *this* effort, instead of
+			// silently adopting whatever the local Codex config happens to say today.
+			writeModelPin({ model: auth.model, reasoning: auth.reasoning });
 			return send(res, 200, JSON.stringify(statusPayload(body.projectId || "sample")));
 		} catch (err) {
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
@@ -1838,8 +1842,13 @@ async function main(): Promise<number> {
 	// Auto-restore a Codex model connection on startup so a server restart never silently drops to rule mode.
 	if (!modelClient && readCodexLogin()) {
 		try {
-			auth = connect({ mode: "codex" });
-			console.log(`model: restored Codex connection (${auth.model})`);
+			// The pin, not the Codex config: the authoring model must not change underneath cached plans.
+			const pin = readModelPin();
+			auth = connect({ mode: "codex", ...pin });
+			console.log(
+				`model: restored Codex connection (${auth.model}${auth.reasoning ? ` · ${auth.reasoning}` : ""})` +
+					`${pin.model || pin.reasoning ? " [pinned]" : " [from codex config]"}`,
+			);
 		} catch (err) {
 			console.warn("model: could not auto-restore Codex connection:", (err as Error).message);
 		}
