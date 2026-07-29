@@ -29,7 +29,7 @@ import {
 	toCsvExportUrl,
 } from "../../intake/ingest.ts";
 import type { NormalizedTC } from "../../intake/schema.ts";
-import { MemoryAssertionCache } from "../../interpret/assertion.ts";
+import { describeAssertion, MemoryAssertionCache } from "../../interpret/assertion.ts";
 import {
 	type AuthoredPlan,
 	authorPreparation,
@@ -1030,7 +1030,7 @@ export async function runBatch(
 					detail: a.detail,
 					passed: a.passed,
 					kind: a.assertion.kind,
-					value: a.assertion.value,
+					value: describeAssertion(a.assertion),
 				})),
 			};
 			results.push(view);

@@ -14,6 +14,7 @@ import {
 	type Assertion,
 	type AssertionCache,
 	type AssertionResult,
+	describeAssertion,
 	evaluateAssertion,
 } from "../interpret/assertion.ts";
 import type { AuthoredPlan } from "../interpret/author.ts";
@@ -558,6 +559,18 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			confidence = round2(passRatio * 0.5);
 		}
 		/**
+		 * A field assertion is exempt from both gates below, and for the same reason each time.
+		 *
+		 * `fieldAtMost` / `fieldExcludes` check that the app *refused* what the case typed. A working
+		 * restriction changes nothing, so "did anything the assertions talk about change?" answers no —
+		 * and the limit is stated in the step, not the expectation, so "does an assertion quote the
+		 * requirement?" also answers no. Both gates exist to catch checks that cannot tell whether the app
+		 * did its job; these tell exactly that, by reading the field's own value. Unlike the string check
+		 * that had to be reverted, they cannot be satisfied by a field that was never found: an
+		 * unresolvable field fails.
+		 */
+		const checksField = results.some((r) => r.assertion.kind === "fieldAtMost" || r.assertion.kind === "fieldExcludes");
+		/**
 		 * Did anything the assertions talk about actually change during the case?
 		 *
 		 * A check whose answer is the same on every screen the case passed through — before the first
@@ -572,7 +585,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		 *
 		 * Not a `fail`: the app may be fine and the check merely too weak. Hand it to a human.
 		 */
-		if (verdict === "pass" && preInteraction) {
+		if (verdict === "pass" && preInteraction && !checksField) {
 			const pre = preInteraction;
 			/** Is the assertion's subject on this screen, regardless of which way the assertion reads? */
 			const present = (a: Assertion, s: PageSnapshot): boolean =>
@@ -598,7 +611,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				verdict = "needs_review";
 				confidence = 0.5;
 				vacuousNote = `동작 전 화면에서도 모든 검증이 통과합니다 — 이 검증은 동작이 실제로 무엇을 바꿨는지 구분하지 못합니다: ${results
-					.map((r) => String(r.assertion.value ?? ""))
+					.map((r) => describeAssertion(r.assertion))
 					.join(", ")
 					.replace(/\s+/g, " ")
 					.slice(0, 80)}`;
@@ -623,7 +636,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				? coverage.covered < coverage.total
 				: coverage.covered === 0
 			: false;
-		if (verdict === "pass" && coverage && underChecked) {
+		if (verdict === "pass" && coverage && underChecked && !checksField) {
 			verdict = "needs_review";
 			confidence = round2(coverage.covered / coverage.total);
 		}

@@ -441,7 +441,9 @@ export class BrowserPage implements Page {
 				for (const el of nodes) {
 					const v =
 						el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : (el.innerText ?? "");
-					if (!v) continue;
+					// Empty values are kept on purpose: a field assertion has to tell "the app cleared what I
+					// typed" from "there is no such field", and only presence in this map answers that. Text
+					// assertions filter the empties out themselves.
 					// Distinct keys for repeated labels so one field never masks another's value.
 					const key = labelOf(el);
 					out[key in out ? `${key}#${++i}` : key] = v;

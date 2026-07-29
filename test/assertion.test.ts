@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
 import type { PageSnapshot } from "../src/execute/page.ts";
-import { AUTHOR_VERSION, assertionCacheKey, evaluateAssertion } from "../src/interpret/assertion.ts";
+import { AUTHOR_VERSION, assertionCacheKey, describeAssertion, evaluateAssertion } from "../src/interpret/assertion.ts";
 
 const snap = (text: string, url = "/"): PageSnapshot => ({ url, text, html: `<body>${text}</body>` });
 
@@ -72,6 +72,69 @@ test("textIncludes matches a field value and says so, so a reviewer is not hunti
 	expect(evaluateAssertion({ kind: "textIncludes", value: "비밀번호 찾기" }, s).detail).toBe(
 		'text has "비밀번호 찾기"',
 	);
+});
+
+const withFields = (fields: Record<string, string>): PageSnapshot => ({
+	url: "/account",
+	text: "신규 계정 생성",
+	html: "<main>신규 계정 생성</main>",
+	fields,
+});
+
+test("fieldAtMost catches the truncation a string check reads as a restriction", () => {
+	// The reverted first attempt asserted the typed string was absent. An app that truncates 13 chars to
+	// 12 no longer contains the 13-char string, so partial acceptance passed — and two cases whose
+	// recorded defect is "the limit does not work" went green. Ask the field how long it is instead.
+	const truncated = withFields({ 아이디: "abcdefghijkl" }); // 12 of the 13 typed
+	const accepted = withFields({ 아이디: "abcdefghijklm" }); // all 13 — the limit did not work
+	const a = { kind: "fieldAtMost", field: "아이디", max: 12 } as const;
+	expect(evaluateAssertion(a, truncated).passed).toBe(true);
+	const failed = evaluateAssertion(a, accepted);
+	expect(failed.passed).toBe(false);
+	expect(failed.detail).toContain("over the 12 limit");
+	// Counted in characters, not UTF-16 units: a 3-char Hangul value is 3, not 3 surrogate pairs.
+	expect(
+		evaluateAssertion({ kind: "fieldAtMost", field: "아이디", max: 3 }, withFields({ 아이디: "가나다" })).passed,
+	).toBe(true);
+});
+
+test("a field assertion fails when the field is nowhere to be found", () => {
+	// The soundness property the string check lacked: if the typed value never landed anywhere, nothing
+	// was restricted — so an unresolvable field is a failure to verify, never a pass.
+	const elsewhere = withFields({ 비밀번호: "" });
+	expect(evaluateAssertion({ kind: "fieldAtMost", field: "아이디", max: 12 }, elsewhere).passed).toBe(false);
+	expect(evaluateAssertion({ kind: "fieldAtMost", field: "아이디", max: 12 }, elsewhere).detail).toContain(
+		"not on screen",
+	);
+	// An empty field, on the other hand, is present and satisfies both kinds — the app cleared the input.
+	expect(evaluateAssertion({ kind: "fieldAtMost", field: "비밀번호", max: 12 }, elsewhere).passed).toBe(true);
+	// Spacing the app renders differently still resolves.
+	expect(
+		evaluateAssertion({ kind: "fieldAtMost", field: "기관유형", max: 5 }, withFields({ "기관 유형": "전체" })).passed,
+	).toBe(true);
+});
+
+test("fieldExcludes names the character class the app let through", () => {
+	// Sheets state these limits by kind, never by literal: "한글/영문 대문자/특수문자 입력 → 입력 제한".
+	const a = { kind: "fieldExcludes", field: "아이디", classes: ["hangul", "upper", "symbol"] } as const;
+	expect(evaluateAssertion(a, withFields({ 아이디: "abc123" })).passed).toBe(true);
+	const hangul = evaluateAssertion(a, withFields({ 아이디: "한글abc" }));
+	expect(hangul.passed).toBe(false);
+	expect(hangul.detail).toContain("hangul");
+	expect(evaluateAssertion(a, withFields({ 아이디: "ABC" })).detail).toContain("upper");
+	expect(evaluateAssertion(a, withFields({ 아이디: "a!b" })).detail).toContain("symbol");
+	// "숫자 외 텍스트 입력 → 입력 제한" means the field must end up holding digits only.
+	const digits = { kind: "fieldExcludes", field: "연락처", classes: ["nonDigit"] } as const;
+	expect(evaluateAssertion(digits, withFields({ 연락처: "01012345678" })).passed).toBe(true);
+	expect(evaluateAssertion(digits, withFields({ 연락처: "010-1234" })).passed).toBe(false);
+});
+
+test("describeAssertion says what a field assertion checks, since it has no value", () => {
+	expect(describeAssertion({ kind: "fieldAtMost", field: "아이디", max: 12 })).toBe("아이디 ≤ 12자");
+	expect(describeAssertion({ kind: "fieldExcludes", field: "아이디", classes: ["hangul"] })).toBe(
+		"아이디 제외: hangul",
+	);
+	expect(describeAssertion({ kind: "textIncludes", value: "저장 완료" })).toBe("저장 완료");
 });
 
 test("the cache key covers the authoring contract, not just its inputs", () => {

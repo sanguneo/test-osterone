@@ -716,6 +716,81 @@ test("setup is not mistaken for the case's own effect", async () => {
 	expect(r.vacuousNote).toContain("동작 전 화면에서도");
 });
 
+/** Enforces a length limit, or silently accepts everything — a limit that works vs one that does not. */
+class InputLimitPage implements Page {
+	private value = "";
+	constructor(private readonly limit: number | null) {}
+	async goto(): Promise<void> {}
+	async click(): Promise<void> {}
+	async fill(_target: string, value: string): Promise<void> {
+		this.value = this.limit === null ? value : [...value].slice(0, this.limit).join("");
+	}
+	async snapshot(): Promise<PageSnapshot> {
+		return { url: "/account", text: "아이디", html: "<main>아이디</main>", fields: { 아이디: this.value } };
+	}
+}
+
+test("a working input limit passes, even though nothing on screen changed", async () => {
+	// A restriction that works changes nothing — the value is missing (or truncated) before and after —
+	// so the discrimination and attribution gates would both hold it. They are exempt for field
+	// assertions, because reading the field's own value is exactly the evidence they demand.
+	const tc = loginTC({ caseId: "TC-lim", contentHash: "h-lim", steps: [], expected: "1. 입력 제한되어야 한다." });
+	const r = await runScenario(tc, {
+		page: new InputLimitPage(12),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "fill", target: "아이디", value: "abcdefghijklm" }],
+			assertions: [{ kind: "fieldAtMost", field: "아이디", max: 12 }],
+		},
+	});
+	expect(r.verdict).toBe("pass");
+	expect(r.vacuousNote).toBeUndefined();
+});
+
+test("an input limit that does not work fails on the length the field kept", async () => {
+	// The case the reverted string check got wrong: asserting the typed string is absent passes on an app
+	// that truncates, so partial acceptance read as a restriction. Length is the honest question.
+	const tc = loginTC({ caseId: "TC-lim2", contentHash: "h-lim2", steps: [], expected: "1. 입력 제한되어야 한다." });
+	const r = await runScenario(tc, {
+		page: new InputLimitPage(null),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "fill", target: "아이디", value: "abcdefghijklm" }],
+			assertions: [{ kind: "fieldAtMost", field: "아이디", max: 12 }],
+		},
+	});
+	expect(r.verdict).toBe("fail");
+	expect(r.assertions[0]?.detail).toContain("over the 12 limit");
+});
+
+test("a field assertion whose field is nowhere on screen fails rather than passing", async () => {
+	// The soundness property: if the typed value never landed, nothing was restricted. A pass here is
+	// how the reverted version turned two real defects green.
+	const tc = loginTC({ caseId: "TC-lim3", contentHash: "h-lim3", steps: [], expected: "1. 입력 제한되어야 한다." });
+	const r = await runScenario(tc, {
+		page: new InputLimitPage(12),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "fill", target: "아이디", value: "abcdefghijklm" }],
+			assertions: [{ kind: "fieldAtMost", field: "존재하지 않는 입력란", max: 12 }],
+		},
+	});
+	expect(r.verdict).toBe("fail");
+	expect(r.assertions[0]?.detail).toContain("not on screen");
+});
+
 /** Page that records trace-chunk calls, delegating page actions to a scripted FakePage. */
 class TracingPage implements Page {
 	readonly calls: string[] = [];

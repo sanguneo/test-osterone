@@ -9,7 +9,7 @@
 import { createHash } from "node:crypto";
 import type { NormalizedTC } from "../intake/schema.ts";
 import type { ModelClient } from "../model/model-client.ts";
-import { type Assertion, AUTHOR_VERSION, assertionCacheKey } from "./assertion.ts";
+import { type Assertion, AUTHOR_VERSION, assertionCacheKey, type CharClass, type ValueAssertion } from "./assertion.ts";
 import { isProse, type PageAction } from "./interpret.ts";
 import { normLabel, type RouteEntry } from "./recon.ts";
 import { extractJsonObject, type InterpretationRule } from "./rule.ts";
@@ -51,7 +51,9 @@ export class MemoryPlanCache implements PlanCache {
 	}
 }
 
-const ASSERTION_KINDS = new Set<Assertion["kind"]>(["urlIncludes", "textIncludes", "textNotIncludes"]);
+/** Kinds the model may author. Field kinds are derived by code and validated separately. */
+const ASSERTION_KINDS = new Set<string>(["urlIncludes", "textIncludes", "textNotIncludes"]);
+const isValueKind = (k: Assertion["kind"]): k is ValueAssertion["kind"] => ASSERTION_KINDS.has(k);
 
 /** Keep only well-formed goto/click/fill actions (drops anything the model got wrong). */
 function sanitizeActions(raw: unknown): PageAction[] {
@@ -117,6 +119,55 @@ export function deriveRouteAssertion(expected: string, routes: readonly RouteEnt
 	return best ? { kind: "urlIncludes", value: best.path } : null;
 }
 
+/** An expectation that the app must refuse what was typed, however the sheet words it. */
+const RESTRICTION_RE = /입력\s*제한|제한되어야|입력되지\s*않아야|허용되지\s*않아야|막혀야|입력\s*불가|must not accept/i;
+/** "12자 초과 입력" — the limit the field is supposed to enforce. */
+const LENGTH_LIMIT_RE = /(\d+)\s*자\s*(?:초과|이상)/;
+/** How the sheet names a character class it expects to be refused. */
+const CLASS_MARKERS: [RegExp, CharClass][] = [
+	[/한글/, "hangul"],
+	[/영문\s*대문자|대문자/, "upper"],
+	[/특수\s*문자/, "symbol"],
+	[/숫자\s*외/, "nonDigit"],
+];
+
+/**
+ * Derive the check for "입력 제한되어야 한다" from the limit the case describes and the field it typed into.
+ *
+ * The largest unverifiable class on the measured sheet — 39 of 652 cases, and most of the cases in a
+ * 98-case run that produced no assertion at all. The expectation has no literal to quote, and asserting
+ * the requirement sentence verbatim is the false pass this engine refuses.
+ *
+ * A first attempt asserted the typed string was *absent* and had to be reverted: an app that truncates
+ * 13 characters to 12 no longer contains the 13-character string, so partial acceptance read as a
+ * restriction, and two cases whose recorded defect is "the limit does not work" went green. The sound
+ * question is about the field's value itself — how long it is, and what kinds of character it holds —
+ * which is why those became assertion kinds rather than another string search.
+ *
+ * The step says the limit ("12자 초과 입력", "특수문자 입력"); the plan's own `fill` says which field.
+ * Both must be present, so nothing is derived from a case that only describes typing in prose.
+ */
+export function deriveRestrictionAssertions(
+	expected: string,
+	steps: readonly string[],
+	actions: readonly PageAction[],
+): Assertion[] {
+	if (!RESTRICTION_RE.test(expected)) return [];
+	const fields = actions.filter((a): a is PageAction & { kind: "fill" } => a.kind === "fill").map((a) => a.target);
+	if (fields.length === 0) return [];
+	const text = steps.join("\n");
+	const out: Assertion[] = [];
+	const limit = LENGTH_LIMIT_RE.exec(text);
+	if (limit?.[1]) {
+		const max = Number(limit[1]);
+		// "12자 초과 입력" means 12 is allowed and 13 is not.
+		if (Number.isInteger(max) && max > 0) for (const field of fields) out.push({ kind: "fieldAtMost", field, max });
+	}
+	const classes = CLASS_MARKERS.filter(([re]) => re.test(text)).map(([, c]) => c);
+	if (classes.length > 0) for (const field of fields) out.push({ kind: "fieldExcludes", field, classes });
+	return out;
+}
+
 /**
  * Which route, if any, a piece of prose unambiguously names.
  *
@@ -152,6 +203,24 @@ export function matchRoute(text: string, routes: readonly RouteEntry[] = []): Ro
  * 2026-07-27; the model path is held to the same rule, and a case left with no assertion falls to
  * review rather than to a verdict nobody earned.
  */
+const CHAR_CLASSES = new Set<CharClass>(["hangul", "upper", "symbol", "nonDigit"]);
+
+/** Validate a field assertion off the wire (or off disk); null when it is not one, or is malformed. */
+function sanitizeFieldAssertion(kind: Assertion["kind"], o: Record<string, unknown>): Assertion | null {
+	if (typeof o.field !== "string" || !o.field.trim()) return null;
+	if (kind === "fieldAtMost") {
+		const max = typeof o.max === "number" ? o.max : Number.NaN;
+		return Number.isInteger(max) && max >= 0 ? { kind, field: o.field.trim(), max } : null;
+	}
+	if (kind === "fieldExcludes") {
+		const classes = Array.isArray(o.classes)
+			? o.classes.filter((c): c is CharClass => CHAR_CLASSES.has(c as CharClass))
+			: [];
+		return classes.length ? { kind, field: o.field.trim(), classes: [...new Set(classes)] } : null;
+	}
+	return null;
+}
+
 function sanitizeAssertions(raw: unknown): Assertion[] {
 	if (!Array.isArray(raw)) return [];
 	const out: Assertion[] = [];
@@ -160,7 +229,18 @@ function sanitizeAssertions(raw: unknown): Assertion[] {
 		if (!item || typeof item !== "object") continue;
 		const o = item as Record<string, unknown>;
 		const kind = o.kind as Assertion["kind"];
-		if (!ASSERTION_KINDS.has(kind) || typeof o.value !== "string" || !o.value || isProse(o.value)) continue;
+		// Field assertions are derived by code, never written by the model — but cached plans are
+		// re-sanitized on read, so they have to survive this or they vanish from every sheet that has run.
+		const field = sanitizeFieldAssertion(kind, o);
+		if (field) {
+			const key = JSON.stringify(field);
+			if (!seen.has(key)) {
+				seen.add(key);
+				out.push(field);
+			}
+			continue;
+		}
+		if (!isValueKind(kind) || typeof o.value !== "string" || !o.value || isProse(o.value)) continue;
 		// Only `textIncludes` enumerations split. "not includes A, B, C" is a single typed string in
 		// practice, and a url is never a list.
 		const values = kind === "textIncludes" ? splitEnumeratedValue(o.value) : [o.value];
@@ -234,12 +314,15 @@ export async function authorPlanAI(
 			),
 		) ?? {};
 	const assertions = sanitizeAssertions(obj.assertions);
-	// Add the url assertion the model does not author, when the route table makes it unambiguous.
-	// Never replaces one it did author.
+	const actions = sanitizeActions(obj.actions);
+	// Two checks the model does not author and code can, read from ground truth rather than prose: the
+	// route table says where "…로 이동되어야 한다" lands, and the step's stated limit plus the plan's own
+	// fill target say what "입력 제한되어야 한다" means for that field. Neither replaces the model's work.
 	const route = assertions.some((a) => a.kind === "urlIncludes")
 		? null
 		: deriveRouteAssertion(tc.expected, rule?.routes);
-	return { actions: sanitizeActions(obj.actions), assertions: route ? [...assertions, route] : assertions };
+	const restrictions = deriveRestrictionAssertions(tc.expected, tc.steps, actions);
+	return { actions, assertions: [...assertions, ...(route ? [route] : []), ...restrictions] };
 }
 
 /**

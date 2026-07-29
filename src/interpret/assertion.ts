@@ -8,15 +8,47 @@
 
 import type { PageSnapshot } from "../execute/page.ts";
 
+/**
+ * Character classes a field must not end up containing, named by what is forbidden.
+ *
+ * Sheets state an input limit by the *kind* of character typed — "한글/영문 대문자/특수문자 입력",
+ * "숫자 외 텍스트 입력" — never by a literal, which is why no string check can express them.
+ */
+export type CharClass = "hangul" | "upper" | "symbol" | "nonDigit";
+
 export type Assertion =
 	| { kind: "urlIncludes"; value: string }
 	| { kind: "textIncludes"; value: string }
-	| { kind: "textNotIncludes"; value: string };
+	| { kind: "textNotIncludes"; value: string }
+	/** The named field holds at most `max` characters — "12자 초과 입력 → 입력 제한되어야 한다". */
+	| { kind: "fieldAtMost"; field: string; max: number }
+	/** The named field holds none of these character classes — "특수문자 입력 → 입력 제한되어야 한다". */
+	| { kind: "fieldExcludes"; field: string; classes: readonly CharClass[] };
+
+/** The string-valued kinds — the only ones the model is allowed to author. */
+export type ValueAssertion = Extract<Assertion, { value: string }>;
 
 export interface AssertionResult {
 	assertion: Assertion;
 	passed: boolean;
 	detail: string;
+}
+
+/**
+ * One-line human description of what an assertion checks.
+ *
+ * Field assertions carry no `value`, and several call sites read `a.value` directly to build a review
+ * note or a results row. This keeps those honest for every kind.
+ */
+export function describeAssertion(a: Assertion): string {
+	switch (a.kind) {
+		case "fieldAtMost":
+			return `${a.field} ≤ ${a.max}자`;
+		case "fieldExcludes":
+			return `${a.field} 제외: ${a.classes.join(", ")}`;
+		default:
+			return a.value;
+	}
 }
 
 /** Collapse whitespace + drop light punctuation so a near-miss (a stray comma/space) still matches. */
@@ -33,6 +65,34 @@ function looseText(s: string): string {
 function haystack(snap: PageSnapshot): string {
 	const values = Object.values(snap.fields ?? {}).filter(Boolean);
 	return values.length ? `${snap.text}\n${values.join("\n")}` : snap.text;
+}
+/** What each class matches. Named by what must be *absent* from the field. */
+const CHAR_CLASS: Record<CharClass, RegExp> = {
+	hangul: /[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]/u,
+	upper: /[A-Z]/,
+	symbol: /[!-/:-@[-`{-~]/,
+	nonDigit: /[^0-9]/,
+};
+
+/**
+ * Find a field by the label the plan used, tolerating the spacing the app renders.
+ *
+ * Returns the live label too, so a reviewer reads the app's wording rather than the plan's. Absence is
+ * meaningful: `fields` carries every field including the empty ones, so "not found" means there is no
+ * such field — not that the app cleared it.
+ */
+function lookupField(snap: PageSnapshot, label: string): { label: string; value: string } | null {
+	const fields = snap.fields ?? {};
+	const direct = fields[label];
+	if (direct !== undefined) return { label, value: direct };
+	const want = looseText(label);
+	for (const [key, value] of Object.entries(fields)) {
+		if (looseText(key) === want) return { label: key, value };
+	}
+	for (const [key, value] of Object.entries(fields)) {
+		if (looseText(key).includes(want) && want.length >= 2) return { label: key, value };
+	}
+	return null;
 }
 
 /** Pure, deterministic evaluation of one assertion against a snapshot. `lenient` ignores whitespace/punctuation. */
@@ -61,6 +121,35 @@ export function evaluateAssertion(a: Assertion, snap: PageSnapshot, opts: { leni
 				detail: passed ? `text lacks "${a.value}"` : `${inText ? "text" : "field value"} unexpectedly has "${a.value}"`,
 			};
 		}
+		case "fieldAtMost": {
+			const found = lookupField(snap, a.field);
+			// Cannot see the field → cannot verify the limit. Passing here is exactly the unsound shortcut
+			// that let "입력 제한되어야 한다" go green on two cases whose recorded defect is that the limit
+			// does not work: if the typed value never landed anywhere, nothing was ever restricted.
+			if (!found) return { assertion: a, passed: false, detail: `field "${a.field}" not on screen` };
+			const length = [...found.value].length;
+			const passed = length <= a.max;
+			return {
+				assertion: a,
+				passed,
+				detail: passed
+					? `field "${found.label}" holds ${length} ≤ ${a.max} chars`
+					: `field "${found.label}" holds ${length} chars, over the ${a.max} limit`,
+			};
+		}
+		case "fieldExcludes": {
+			const found = lookupField(snap, a.field);
+			if (!found) return { assertion: a, passed: false, detail: `field "${a.field}" not on screen` };
+			const violated = a.classes.filter((c) => CHAR_CLASS[c].test(found.value));
+			const passed = violated.length === 0;
+			return {
+				assertion: a,
+				passed,
+				detail: passed
+					? `field "${found.label}" excludes ${a.classes.join(", ")}`
+					: `field "${found.label}" accepted ${violated.join(", ")}: "${found.value.slice(0, 24)}"`,
+			};
+		}
 	}
 }
 
@@ -68,7 +157,8 @@ export function dedupeAssertions(assertions: Assertion[]): Assertion[] {
 	const seen = new Set<string>();
 	const out: Assertion[] = [];
 	for (const a of assertions) {
-		const key = `${a.kind}:${a.value}`;
+		// Field assertions have no `value`; key on their own shape so two of them are not collapsed.
+		const key = a.kind === "fieldAtMost" || a.kind === "fieldExcludes" ? JSON.stringify(a) : `${a.kind}:${a.value}`;
 		if (!seen.has(key)) {
 			seen.add(key);
 			out.push(a);
@@ -86,7 +176,7 @@ export function dedupeAssertions(assertions: Assertion[]): Assertion[] {
  * filter only landed because plans are re-sanitized on read; a prompt change has no such escape
  * hatch. Making it part of the key is what lets authoring be fixed at all.
  */
-export const AUTHOR_VERSION = 3;
+export const AUTHOR_VERSION = 4;
 
 /** Cache key: any change to the case, the rule, or the authoring contract forces a miss -> re-author. */
 export function assertionCacheKey(caseId: string, ruleId: string, ruleVersion: number, caseHash: string): string {

@@ -4,6 +4,7 @@ import { assertionCacheKey } from "../src/interpret/assertion.ts";
 import {
 	authorPlanAI,
 	derivePreparationActions,
+	deriveRestrictionAssertions,
 	deriveRouteAssertion,
 	getOrAuthorPlan,
 	MemoryPlanCache,
@@ -273,7 +274,10 @@ test("deriveRouteAssertion turns a navigation expectation into a url check", () 
 		kind: "urlIncludes",
 		value: "/account",
 	});
-	expect(deriveRouteAssertion("1. 공문 발송 현황 목록으로 이동되어야 한다.", ROUTES)?.value).toBe("/document");
+	expect(deriveRouteAssertion("1. 공문 발송 현황 목록으로 이동되어야 한다.", ROUTES)).toEqual({
+		kind: "urlIncludes",
+		value: "/document",
+	});
 });
 
 test("deriveRouteAssertion stays silent unless the claim and the route are both unambiguous", () => {
@@ -339,4 +343,46 @@ test("derivePreparationActions leaves a precondition it cannot place alone", () 
 	expect(derivePreparationActions("1. 발송완료 상태 공문 상세페이지 진입된 상태", actions, ROUTES)).toEqual(actions);
 	// No table at all (app analysis never ran) → nothing to derive, the model's plan is untouched.
 	expect(derivePreparationActions("1. 계정 관리 페이지 진입된 상태", actions, [])).toEqual(actions);
+});
+
+test("deriveRestrictionAssertions reads the limit from the step and the field from the plan", () => {
+	// The largest unverifiable class measured: 39 of 652 cases — 28 length limits, 11 character-class
+	// limits. The expectation ("입력 제한되어야 한다") has no literal; the step has the limit and the plan's
+	// own fill has the field.
+	expect(
+		deriveRestrictionAssertions(
+			"1. 입력 제한되어야 한다.",
+			["1. 아이디 입력란 내 12자 초과 입력"],
+			[{ kind: "fill", target: "아이디", value: "abcdefghijklm" }],
+		),
+	).toEqual([{ kind: "fieldAtMost", field: "아이디", max: 12 }]);
+	expect(
+		deriveRestrictionAssertions(
+			"1. 입력제한되어야 한다.",
+			["1. 아이디 입력란 내 한글/영문대문자/특수문자 입력"],
+			[{ kind: "fill", target: "아이디", value: "한글ABC!@#" }],
+		),
+	).toEqual([{ kind: "fieldExcludes", field: "아이디", classes: ["hangul", "upper", "symbol"] }]);
+	// "숫자 외 텍스트 입력" means the field must end up holding digits only.
+	expect(
+		deriveRestrictionAssertions(
+			"1. 입력 제한되어야 한다.",
+			["1. 연락처 입력란 내 숫자 외 텍스트 입력"],
+			[{ kind: "fill", target: "연락처", value: "abc" }],
+		),
+	).toEqual([{ kind: "fieldExcludes", field: "연락처", classes: ["nonDigit"] }]);
+});
+
+test("deriveRestrictionAssertions needs both halves and stays silent without them", () => {
+	const typed = [{ kind: "fill", target: "아이디", value: "x" } as const];
+	// Not a restriction expectation at all.
+	expect(deriveRestrictionAssertions("1. 로그인되어야 한다.", ["1. 12자 초과 입력"], typed)).toEqual([]);
+	// The step never says what the limit is, so there is nothing to check against.
+	expect(deriveRestrictionAssertions("1. 입력 제한되어야 한다.", ["1. 아이디 입력란 내 텍스트 입력"], typed)).toEqual(
+		[],
+	);
+	// Nothing was typed, so no field is implicated.
+	expect(
+		deriveRestrictionAssertions("1. 입력 제한되어야 한다.", ["1. 12자 초과 입력"], [{ kind: "click", target: "저장" }]),
+	).toEqual([]);
 });
