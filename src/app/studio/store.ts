@@ -42,6 +42,8 @@ export interface CaseView {
 	passed: number;
 	total: number;
 	heal: string[];
+	/** This `pass` came from a human-approved baseline matching, not from the assertions passing. */
+	baselineLifted?: boolean;
 	assertions: { detail: string; passed: boolean; kind?: string; value?: string }[];
 }
 
@@ -50,6 +52,12 @@ export interface RunView {
 	source: string;
 	baseUrl: string;
 	interpreter: "ai" | "rule";
+	/** Model that authored this run's plans (AI runs only) — lets history compare model choices. */
+	model?: string;
+	/** Reasoning effort pinned on the connection; absent when the model's own default was used. */
+	reasoning?: string;
+	/** Wall clock for the whole run. Absent on entries written before this was recorded. */
+	durationMs?: number;
 	counts: Record<Verdict, number>;
 	results: CaseView[];
 	sheetId: string;
@@ -64,6 +72,8 @@ export interface ReviewItem {
 	expected: string;
 	verdict: Verdict;
 	reason: string;
+	/** Why the engine held this case, when it has more to say than the reason code (vision, vacuous check). */
+	holdNote?: string;
 	/** The element the failing action targeted (self-heal holds only) — surfaced in the review reason. */
 	healTarget?: string;
 	url: string;
@@ -71,6 +81,12 @@ export interface ReviewItem {
 	screenshot?: string;
 	/** True when a Playwright trace was captured for this held case (served via /api/trace). */
 	trace?: boolean;
+	/**
+	 * May a human sign this case off as a golden baseline? False when the case never ran as written
+	 * (a step could not be interpreted, an action failed, the tail was abandoned) — approving the
+	 * screen it happened to end on would pass a case that never exercised the app.
+	 */
+	baselineEligible?: boolean;
 	ruleVersion: number;
 	env: string;
 	sheetId: string;

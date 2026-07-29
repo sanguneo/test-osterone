@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test";
-import { type FakeAction, FakePage, type PageSnapshot } from "../src/execute/page.ts";
-import { attemptLogin, extractStructure, reconApp, reduceRecon } from "../src/interpret/recon.ts";
+import { type FakeAction, FakePage, type Page, type PageSnapshot } from "../src/execute/page.ts";
+import {
+	attemptLogin,
+	extractStructure,
+	loginErrorMessage,
+	pickFieldLabel,
+	reconApp,
+	reduceRecon,
+} from "../src/interpret/recon.ts";
 import { FakeModelClient, type ModelMessage } from "../src/model/model-client.ts";
 
 const LOGIN_HTML = `<!doctype html><html><head><title>acme 로그인</title></head><body>
@@ -112,6 +119,9 @@ test("reduceRecon builds a scan prompt with page facts and returns the trimmed m
 	expect(seen).toContain("주문 관리");
 	expect(seen).toContain("table headers: 번호, 상태, 금액");
 	expect(seen).toContain("PAGE /home");
+	// Real routes, not just labels — otherwise the plan author invents paths that 404.
+	expect(seen).toContain("routes: /orders, /settings");
+	expect(seen).not.toContain("https://external.example.com");
 });
 
 test("reduceRecon returns empty string for an empty scan (no model call needed)", async () => {
@@ -192,4 +202,199 @@ test("attemptLogin fails when no login fields are found on the page", async () =
 	const res = await attemptLogin(page, { username: "x", password: "y" });
 	expect(res.ok).toBe(false);
 	expect(res.note).toContain("입력 필드");
+});
+
+/**
+ * Real-world client-rendered login (dev-aptpaper.xperp.co.kr): the first navigation returns an
+ * empty app shell, the app then client-redirects to /auth/login, and its copy differs from the
+ * authored hints by spacing + a trailing period ("아이디를 입력해 주세요.").
+ */
+const SPA_SHELL_HTML = `<!doctype html><html><head><title>공문 발송 서비스</title></head><body><div id="__nuxt"></div></body></html>`;
+const SPA_LOGIN_HTML = `<!doctype html><html><head><title>공문 발송 서비스</title></head><body>
+	<form>
+		<label for="loginId">아이디</label>
+		<input id="loginId" name="loginId" type="text" placeholder="아이디를 입력해 주세요." />
+		<label>비밀번호</label>
+		<input id="password" name="password" type="password" placeholder="비밀번호를 입력해 주세요." />
+		<button type="submit">로그인</button>
+	</form>
+</body></html>`;
+const SPA_HOME_HTML = `<!doctype html><html><head><title>대시보드</title></head><body><h1>공문 발송</h1></body></html>`;
+const SPA_LIVE_TARGETS = ["아이디를 입력해 주세요.", "비밀번호를 입력해 주세요.", "아이디", "비밀번호"];
+
+class SpaLoginPage implements Page {
+	url = "/";
+	text = "";
+	html = SPA_SHELL_HTML;
+	polls = 0;
+	readonly filled: Record<string, string> = {};
+	constructor(
+		private readonly mountAfterPolls: number,
+		/** Whether the app prints an explicit rejection notice (vs. a submit that silently does nothing). */
+		private readonly showsRejection = true,
+	) {}
+	async goto(path: string): Promise<void> {
+		this.url = path;
+		this.html = SPA_SHELL_HTML;
+		this.text = "";
+		this.polls = 0;
+	}
+	async snapshot(): Promise<PageSnapshot> {
+		this.polls++;
+		if (this.html === SPA_SHELL_HTML && this.polls > this.mountAfterPolls) {
+			this.url = "/auth/login?returnUrl=/";
+			this.html = SPA_LOGIN_HTML;
+			this.text = "아이디\n비밀번호\n로그인";
+		}
+		return { url: this.url, text: this.text, html: this.html };
+	}
+	/** Only labels the live DOM actually exposes resolve — same contract as Playwright's locators. */
+	async fill(target: string, value: string): Promise<void> {
+		if (!SPA_LIVE_TARGETS.includes(target)) throw new Error(`no field "${target}"`);
+		this.filled[target] = value;
+	}
+	async click(target: string): Promise<void> {
+		if (target !== "로그인") throw new Error(`no element "${target}"`);
+		const ok = this.filled["아이디를 입력해 주세요."] === "u1" && this.filled["비밀번호를 입력해 주세요."] === "p1";
+		this.url = ok ? "/home" : "/auth/login?returnUrl=/";
+		this.html = ok ? SPA_HOME_HTML : SPA_LOGIN_HTML;
+		const refused = this.showsRejection
+			? "아이디\n비밀번호\n로그인\n로그인 안내\n아이디 또는 비밀번호를 확인해 주세요."
+			: "아이디\n비밀번호\n로그인";
+		this.text = ok ? "공문 발송" : refused;
+	}
+}
+
+test("pickFieldLabel matches live copy that differs from the hint by spacing/punctuation", () => {
+	const fields = ["아이디를 입력해 주세요.", "비밀번호를 입력해 주세요.", "아이디", "비밀번호"];
+	expect(pickFieldLabel(fields, ["아이디를 입력해주세요", "아이디"])).toBe("아이디를 입력해 주세요.");
+	expect(pickFieldLabel(fields, ["비밀번호를 입력해주세요", "비밀번호"])).toBe("비밀번호를 입력해 주세요.");
+});
+
+test("pickFieldLabel honors hint priority, prefers the shortest match, and reports no match", () => {
+	// Hint order wins over field order: the second hint matches nothing, the third does.
+	expect(pickFieldLabel(["사번", "사용자 이름"], ["이메일", "Username", "사용자 이름"])).toBe("사용자 이름");
+	// Within one hint, the tightest field wins (never a longer field that merely contains it).
+	expect(pickFieldLabel(["아이디 찾기 질문", "아이디"], ["아이디"])).toBe("아이디");
+	expect(pickFieldLabel(["제목", "내용"], ["아이디", "이메일"])).toBeNull();
+	// A one-character hint is too weak to anchor a field and is skipped.
+	expect(pickFieldLabel(["제목"], ["목"])).toBeNull();
+});
+
+test("loginErrorMessage surfaces the app's rejection line and ignores ordinary copy", () => {
+	expect(loginErrorMessage("아이디\n비밀번호\n로그인\n아이디 또는 비밀번호를 확인해 주세요.")).toBe(
+		"아이디 또는 비밀번호를 확인해 주세요.",
+	);
+	expect(loginErrorMessage("Invalid credentials")).toBe("Invalid credentials");
+	expect(loginErrorMessage("아이디\n비밀번호\n로그인")).toBe("");
+});
+
+test("attemptLogin waits for a client-rendered login form and fills the live labels → ok", async () => {
+	const page = new SpaLoginPage(2);
+	const res = await attemptLogin(page, { username: "u1", password: "p1" }, { settleTimeoutMs: 1500 });
+	expect(res.ok).toBe(true);
+	expect(page.filled).toEqual({ "아이디를 입력해 주세요.": "u1", "비밀번호를 입력해 주세요.": "p1" });
+});
+
+test("attemptLogin reports the app's own rejection message when credentials are refused", async () => {
+	const page = new SpaLoginPage(0);
+	const res = await attemptLogin(page, { username: "u1", password: "nope" }, { settleTimeoutMs: 1200 });
+	expect(res.ok).toBe(false);
+	expect(res.note).toContain("아이디 또는 비밀번호를 확인해 주세요.");
+});
+
+test("attemptLogin marks an app-refused credential as `rejected` so callers never retry it into a lockout", async () => {
+	const refused = await attemptLogin(
+		new SpaLoginPage(0),
+		{ username: "u1", password: "nope" },
+		{ settleTimeoutMs: 1200 },
+	);
+	expect(refused.ok).toBe(false);
+	expect(refused.rejected).toBe(true);
+
+	// Submit swallowed with no message on screen — transient, so a caller may retry this one.
+	const silent = await attemptLogin(
+		new SpaLoginPage(0, false),
+		{ username: "u1", password: "nope" },
+		{ settleTimeoutMs: 1200 },
+	);
+	expect(silent.ok).toBe(false);
+	expect(silent.rejected).toBeFalsy();
+});
+
+test("attemptLogin gives up early on a rendered page that has no login form, listing what it saw", async () => {
+	const noForm = (action: FakeAction): PageSnapshot => {
+		if (action.kind === "goto")
+			return { url: "/", text: "검색", html: "<title>공개</title><h1>환영</h1><input placeholder='검색어' />" };
+		throw new Error(`unmatchable "${action.target}"`);
+	};
+	const page = new FakePage({ url: "", text: "", html: "" }, noForm);
+	const started = Date.now();
+	const res = await attemptLogin(page, { username: "x", password: "y" }, { fieldWaitMs: 8000 });
+	expect(res.ok).toBe(false);
+	expect(res.note).toContain("검색어");
+	expect(Date.now() - started).toBeLessThan(4000);
+});
+
+/**
+ * An app whose first submit is swallowed — the handler is not attached yet — and whose second works.
+ * Exactly what this project's app does: the runner survived it because it retried, and recon did not,
+ * so app analysis kept scanning the login page.
+ */
+class FlakyFirstSubmitPage implements Page {
+	private submits = 0;
+	private signedIn = false;
+	readonly resets: number[] = [];
+	async goto(): Promise<void> {
+		this.signedIn = false;
+	}
+	async fill(): Promise<void> {}
+	async click(): Promise<void> {
+		this.submits++;
+		// First submit does nothing at all; the second authenticates.
+		if (this.submits >= 2) this.signedIn = true;
+	}
+	async resetSession(): Promise<void> {
+		this.resets.push(this.submits);
+		this.signedIn = false;
+	}
+	async snapshot(): Promise<PageSnapshot> {
+		return this.signedIn
+			? { url: "/dashboard", text: "대시보드", html: "<main>대시보드</main>" }
+			: {
+					url: "/login",
+					text: "아이디 비밀번호 로그인",
+					html: "<input placeholder='아이디' /><input placeholder='비밀번호' />",
+				};
+	}
+}
+
+test("attemptLogin retries a swallowed submit and reports why, so every caller gets the same behaviour", async () => {
+	const page = new FlakyFirstSubmitPage();
+	const notes: string[] = [];
+	const res = await attemptLogin(
+		page,
+		{ username: "u1", password: "p1" },
+		{ settleTimeoutMs: 1200, onRetry: (n) => notes.push(n) },
+	);
+	expect(res.ok).toBe(true);
+	// The caller is told rather than being retried behind its back — the run surfaces this as a notice.
+	expect(notes).toHaveLength(1);
+	expect(notes[0]).toContain("로그인 화면에 머무름");
+	// The session is cleared between attempts so the second starts from a known state.
+	expect(page.resets).toHaveLength(1);
+});
+
+test("attemptLogin never retries a credential the app refused, however many retries are allowed", async () => {
+	// A refused password re-submitted is a locked account, not a second chance.
+	const page = new SpaLoginPage(0);
+	const notes: string[] = [];
+	const res = await attemptLogin(
+		page,
+		{ username: "u1", password: "nope" },
+		{ settleTimeoutMs: 1200, retries: 3, onRetry: (n) => notes.push(n) },
+	);
+	expect(res.ok).toBe(false);
+	expect(res.rejected).toBe(true);
+	expect(notes).toEqual([]);
 });

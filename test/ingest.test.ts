@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-
+import { toCsv } from "../src/intake/csv.ts";
 import {
 	csvToRawTable,
 	ingestCsv,
@@ -116,6 +116,41 @@ test("mapColumns + ingest handle Korean QA headers (번호/소분류/사전조�
 	expect(unique[0]?.steps).toEqual(["1. 인쇄버튼 접근", "2. 파일 내보내기"]);
 	expect(unique[0]?.expected).toBe("첨부되어야함");
 	expect(unique[0]?.priority).toBe("상");
+});
+
+test("mapColumns: alias priority beats column order (사전조건 before 시험절차 must still map the procedure)", () => {
+	// The real-world sheet that exposed this lists the precondition column first. Mapping steps to
+	// it meant the run executed setup prose and never the actual test procedure.
+	const headers = ["분류", "NO", "대분류", "중분류", "소분류", "중요도", "사전조건", "시험절차", "예상결과"];
+	const m = mapColumns(headers);
+	expect(m.step).toBe("시험절차");
+	expect(m.title).toBe("소분류");
+	expect(m.category).toBe("분류");
+	// With no procedure column at all, the precondition is still better than nothing.
+	expect(mapColumns(["소분류", "사전조건", "예상결과"]).step).toBe("사전조건");
+});
+
+test("ingestCsv drops spreadsheet sub-header/spacer rows that carry no case at all", () => {
+	const csv = [
+		"분류,소분류,시험절차,예상결과",
+		"탭A,,,",
+		"탭A,로그인,1. 로그인 버튼 선택,대시보드 진입",
+		"탭A,,,",
+	].join("\n");
+	const { unique } = ingestCsv(csv);
+	expect(unique).toHaveLength(1);
+	expect(unique[0]?.title).toBe("로그인");
+});
+
+test("csv round-trip keeps a multi-line cell intact when a category column is prepended", () => {
+	// This is exactly what the xlsx tab-merge does. Doing it line-by-line (the old way) injected the
+	// category into the middle of the quoted cell; doing it per record must not.
+	const tab = 'NO,예상결과\n1,"1. 첫째 줄\n2. 둘째 줄\n\n3. 빈 줄 뒤"\n';
+	const merged = parseCsv(tab).map((row, i) => (i === 0 ? ["분류", ...row] : ["탭A", ...row]));
+	const reparsed = parseCsv(toCsv(merged));
+	expect(reparsed[1]?.[0]).toBe("탭A");
+	expect(reparsed[1]?.[2]).toBe("1. 첫째 줄\n2. 둘째 줄\n\n3. 빈 줄 뒤");
+	expect(toCsv(merged)).not.toContain("탭A,1.");
 });
 
 test("ingestCsv applies a mapping override (AI-refined rule.mapping) over auto-detection", () => {

@@ -15,16 +15,23 @@ const VISION_SYSTEM =
 
 /** Returns true when the model judges the screenshot satisfies the expected result. */
 export async function visionAssert(model: ModelClient, screenshotDataUrl: string, expected: string): Promise<boolean> {
-	const reply = await model.complete([
-		{ role: "system", content: VISION_SYSTEM },
-		{
-			role: "user",
-			content: [
-				{ type: "text", text: `Expected result:\n${expected}\n\nDoes the screenshot satisfy this? Answer YES or NO.` },
-				{ type: "image", imageUrl: screenshotDataUrl },
-			],
-		},
-	]);
+	const reply = await model.complete(
+		[
+			{ role: "system", content: VISION_SYSTEM },
+			{
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: `Expected result:\n${expected}\n\nDoes the screenshot satisfy this? Answer YES or NO.`,
+					},
+					{ type: "image", imageUrl: screenshotDataUrl },
+				],
+			},
+		],
+		// A yes/no read of one screenshot, fired per failing assertion — keep it cheap.
+		{ defaultEffort: "low" },
+	);
 	const first = reply.trim().toLowerCase();
 	return first.startsWith("yes") || first.startsWith("true") || first.startsWith("예") || first.startsWith("네");
 }

@@ -3,14 +3,28 @@
  * returns a `StructuredResult`. Trust invariants enforced here:
  *  - verdict is a deterministic function of cached assertions over the final snapshot;
  *  - any heal event caps the verdict at `needs_review` (never a silent pass);
+ *  - a case whose steps were skipped, failed, or aborted did not run as written, so an approved
+ *    golden baseline may not lift it to pass — only an AI-repaired case (which did run) may;
  *  - exceptions surface as `error` (excluded from pass/fail statistics upstream).
  * A `FakePage` yields identical deterministic verdict/assertions/confidence across runs.
  */
 
 import type { NormalizedTC } from "../intake/schema.ts";
-import { type AssertionCache, type AssertionResult, evaluateAssertion } from "../interpret/assertion.ts";
+import {
+	type Assertion,
+	type AssertionCache,
+	type AssertionResult,
+	evaluateAssertion,
+} from "../interpret/assertion.ts";
 import type { AuthoredPlan } from "../interpret/author.ts";
-import { getOrAuthorAssertions, parseStep } from "../interpret/interpret.ts";
+import {
+	getOrAuthorAssertions,
+	type PageAction,
+	parseStep,
+	type RequirementCoverage,
+	requirementCoverage,
+} from "../interpret/interpret.ts";
+import { pregroundAction, type RepairRequest, targetOnScreen } from "../interpret/repair.ts";
 import type { InterpretationRule } from "../interpret/rule.ts";
 import type { BaselineStore } from "../judge/baseline.ts";
 import type { Page, PageSnapshot } from "./page.ts";
@@ -39,6 +53,44 @@ export interface StructuredResult {
 	attempts: number;
 	env: RunEnv;
 	snapshot?: PageSnapshot;
+	/**
+	 * True when an action failed unrecoverably and the remaining actions were skipped. The page is
+	 * left wherever the failure happened, so the caller must reset shared state before the next case.
+	 */
+	aborted?: boolean;
+	/**
+	 * Did the case carry out the steps it describes? False when a step could not be interpreted, an
+	 * action failed, or the tail was abandoned. A `false` here means the final screen was never
+	 * driven to the state the case is about, so it must not be signed off with a golden baseline.
+	 */
+	executedAsWritten?: boolean;
+	/**
+	 * Why vision disagreed with a deterministic miss, when it did. A model's read of the screenshot
+	 * is not a verdict, so this only ever routes the case to a human — it never turns into a pass.
+	 */
+	visionNote?: string;
+	/**
+	 * Set when every assertion already held before the case's first interaction. The check cannot tell
+	 * whether the action did anything, so the case is held for a human instead of counted as a pass.
+	 */
+	vacuousNote?: string;
+	/**
+	 * How much of the written expected result the assertions actually refer to, for cases that list two
+	 * or more requirements. `covered < total` means the case passed on a subset of what it promised to
+	 * check, so it is held rather than counted as a pass.
+	 */
+	coverage?: RequirementCoverage;
+	/**
+	 * True when this `pass` came from a human-approved golden baseline matching, not from the
+	 * assertions passing.
+	 *
+	 * Without it one green case is indistinguishable from another, and the difference matters: an
+	 * approval is a judgement a person made once, against the build in front of them at the time. It
+	 * keeps producing `pass` for as long as the screen text matches — including after a regression
+	 * that leaves that text alone, and including when the screen it blessed was already broken.
+	 * "Clear runs" deliberately keeps approvals, so this is the only way to see one at work.
+	 */
+	baselineLifted?: boolean;
 	/** Relative path of the captured Playwright trace chunk (only kept for non-pass verdicts). */
 	tracePath?: string;
 }
@@ -65,10 +117,80 @@ export interface RunOptions {
 	lenientMatch?: boolean;
 	/** Re-check failing assertions for up to this many ms (async content like toasts). 0 = no retry. */
 	assertRetryMs?: number;
+	/**
+	 * How long to wait between reads when settling the pre-interaction screen. 0 (the default) reads
+	 * once, which is what a deterministic `FakePage` needs; a live browser wants a real value so the
+	 * comparison is not decided by how far an SPA had painted.
+	 */
+	settleMs?: number;
+	/**
+	 * In-run AI intervention: given the failed action and the live page, return a grounded
+	 * replacement action (or null to give up). Absent = deterministic-only execution.
+	 */
+	repair?: (req: RepairRequest) => Promise<PageAction | null>;
+	/** Max AI repairs per case (default 2 when `repair` is set) — bounds cost and blast radius. */
+	repairBudget?: number;
+	/** Pause before retrying a recovered action, letting the app settle (default 400ms). */
+	recoveryDelayMs?: number;
+	/** Budget for an action's *first* attempt (default 1200ms); the post-recovery retry gets the page default. */
+	firstTryMs?: number;
 }
 
 function round2(n: number): number {
 	return Math.round(n * 100) / 100;
+}
+
+/** Normalize a URL or path down to its pathname, without trailing slash ("" for the root). */
+function pathOf(urlOrPath: string): string {
+	const raw = urlOrPath.startsWith("http")
+		? URL.canParse(urlOrPath)
+			? new URL(urlOrPath).pathname
+			: urlOrPath
+		: (urlOrPath.split(/[?#]/)[0] ?? urlOrPath);
+	return raw.replace(/\/+$/, "");
+}
+
+/**
+ * Read the page's text once it stops changing, so a comparison against it does not depend on how far
+ * a single-page app happened to get with painting.
+ *
+ * Bounded: two consecutive identical reads win, and after `tries` reads the last one is used
+ * regardless. A page that never settles (a spinner, a ticking clock) must not stall the run.
+ */
+async function settledSnapshot(page: Page, quietMs: number, tries = 3): Promise<PageSnapshot | null> {
+	let prev = await page.snapshot({ screenshot: false }).catch(() => null);
+	if (quietMs <= 0) return prev;
+	for (let i = 1; i < tries && prev; i++) {
+		await new Promise((r) => setTimeout(r, quietMs));
+		const next = await page.snapshot({ screenshot: false }).catch(() => null);
+		if (!next) return prev;
+		if (next.text === prev.text) return next;
+		prev = next;
+	}
+	return prev;
+}
+
+const AUTH_PATH_RE = /(^|\/)(login|signin|sign-in|auth|logon|sso)(\/|$)/i;
+
+/**
+ * Did a navigation actually land where the plan asked? Returns a Korean reason, or null when the
+ * landing is acceptable. Deliberately narrow — apps legitimately redirect (`/orders` → `/orders/list`,
+ * `/` → anywhere) and flagging those would bury real failures in noise. Only two things count:
+ * an error status, and an auth bounce (the app threw us at a login screen we did not ask for),
+ * which is exactly the failure that silently invalidates every later step of a run.
+ */
+export function landingProblem(
+	requested: string,
+	landing: { url: string; status: number | null } | null | undefined,
+): string | null {
+	if (!landing) return null;
+	if (landing.status !== null && landing.status >= 400) return `HTTP ${landing.status} — 경로가 존재하지 않습니다`;
+	const want = pathOf(requested);
+	const got = pathOf(landing.url);
+	if (!want || want === got || got.startsWith(`${want}/`)) return null;
+	if (AUTH_PATH_RE.test(got) && !AUTH_PATH_RE.test(want))
+		return `요청 경로 ${want} 대신 로그인 화면(${got})으로 이동됨 — 세션이 없거나 만료되었습니다`;
+	return null;
 }
 
 function evidenceRef(kind: string, content: string): string {
@@ -83,6 +205,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 	const start = now();
 	const executionId = opts.executionId ?? `${tc.caseId}-${start}`;
 	const healEvents: string[] = [];
+	let aborted = false;
 	const base = {
 		schemaVersion: 1 as const,
 		caseId: tc.caseId,
@@ -98,20 +221,204 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		const actions = opts.plan ? opts.plan.actions : tc.steps.map((step) => parseStep(step, opts.rule));
 		const assertions = opts.plan ? opts.plan.assertions : getOrAuthorAssertions(tc, opts.rule, opts.cache).assertions;
 
-		for (const action of actions) {
+		const targetOf = (a: PageAction): string =>
+			a.kind === "goto" ? a.path : a.kind === "click" || a.kind === "fill" ? a.target : "";
+		/**
+		 * `patience` is the per-action budget. The first attempt is deliberately impatient: an element
+		 * that is on screen resolves in milliseconds, so a long wait only ever pays off for one that
+		 * isn't there — and across a batch that dead waiting dominates the wall clock. The retry after
+		 * recovery gets the full budget, because that is where a slow render actually needs it.
+		 */
+		const perform = async (a: PageAction, patience?: number): Promise<Error | null> => {
 			try {
-				if (action.kind === "goto") await opts.page.goto(action.path);
-				else if (action.kind === "click") await opts.page.click(action.target);
-				else if (action.kind === "fill") await opts.page.fill(action.target, action.value);
+				if (a.kind === "goto") {
+					await opts.page.goto(a.path);
+					// A navigation that "succeeds" onto the wrong screen is the quietest way to invalidate
+					// every later step — verify the landing and fail loudly enough for the recovery ladder.
+					const problem = landingProblem(a.path, await opts.page.landing?.());
+					if (problem) return new Error(problem);
+				} else if (a.kind === "click") await opts.page.click(a.target, patience);
+				else if (a.kind === "fill") await opts.page.fill(a.target, a.value, patience);
+				return null;
 			} catch (err) {
-				// Unactionable target -> record a heal event; do NOT crash and do NOT allow a silent pass.
-				const failedTarget =
-					action.kind === "goto" ? action.path : action.kind === "click" || action.kind === "fill" ? action.target : "";
-				healEvents.push(`${action.kind}: ${failedTarget} — ${(err as Error).message}`);
+				return err as Error;
+			}
+		};
+		let repairsLeft = opts.repair ? (opts.repairBudget ?? 2) : 0;
+		/**
+		 * Did the case actually carry out the steps it describes?
+		 *
+		 * A heal event alone does not answer that: an AI repair means the case *did* run (one action
+		 * was re-grounded on the live screen and the rest continued), while a skipped step, a failed
+		 * action, or an abort means it did not. Only the first kind may later be lifted to pass by an
+		 * approved baseline — a screen that matches the golden image proves nothing about a case that
+		 * never touched it.
+		 */
+		let executedAsWritten = true;
+		/**
+		 * The screens this case actually passed through, in order, after each successful action.
+		 *
+		 * The engine used to judge one moment: the final snapshot. Anything that appeared and left was
+		 * therefore unverifiable — 93 of this sheet's 652 cases say "팝업/스낵바가 표출되어야 한다", and a
+		 * toast is gone long before the run ends. Worse, the retry window already found such a toast and
+		 * then the final re-evaluation threw the result away, so `assertRetryMs` only ever helped
+		 * content that appears *and stays*.
+		 *
+		 * Their mirror image needs the same timeline: 93 more cases say "종료되어야 한다", which is
+		 * structurally true before the case begins too (the popup was not open yet). Judged on the final
+		 * screen alone that check can never discriminate. Judged across the timeline — appeared, then
+		 * gone — it can.
+		 *
+		 * Text only: this is read by assertions, never persisted, and keeping every screen's HTML for a
+		 * long case would cost far more than it is worth.
+		 */
+		const observed: PageSnapshot[] = [];
+		/**
+		 * Set when vision read the screenshot and disagreed with a deterministic miss. Carries the
+		 * reason to the review card; it can only soften `fail` to `needs_review`, never produce a pass.
+		 */
+		let visionNote: string | undefined;
+		/**
+		 * The screen as it looked immediately before the case's first interaction, and a note set when
+		 * the assertions turn out not to distinguish it from the final screen.
+		 *
+		 * An assertion that already held before the case clicked anything proves nothing about the
+		 * click. Measured on a live sheet: "개인정보처리방침 선택 → 팝업 표출되어야 한다" was checked with
+		 * `textIncludes: 개인정보처리방침` — the text of the link being clicked. The popup never opened
+		 * (the human's recorded defect) and the case passed anyway, because the assertion was testing
+		 * the trigger instead of the outcome.
+		 *
+		 * The baseline must be a *settled* screen. Taken naively it is whatever had rendered by the
+		 * time the click fired, which made the check disagree with itself: two live cases of identical
+		 * shape (same filter, same six labels, same assertions) split — one held as non-discriminating,
+		 * the other passed — purely because one SPA had painted its options and the other had not.
+		 * A verdict that depends on paint timing is the one thing this engine may not have.
+		 */
+		let preInteraction: PageSnapshot | null = null;
+		let vacuousNote: string | undefined;
+
+		/** The screen as last read, so grounding an action costs no extra round trip. */
+		let lastSeen: PageSnapshot | null = null;
+		for (let i = 0; i < actions.length; i++) {
+			let action = actions[i];
+			if (!action) continue;
+			// `verify` is covered by assertions; `unknown` is a step the rule could not interpret —
+			// record it (capping the verdict) instead of silently pretending the case ran in full.
+			if (action.kind === "verify") continue;
+			if (action.kind === "unknown") {
+				healEvents.push(
+					`skip: ${action.text.replace(/\s+/g, " ").slice(0, 80)} — 해석하지 못한 스텝이라 실행하지 않았습니다`,
+				);
+				executedAsWritten = false;
+				continue;
+			}
+
+			// Record the screen the first interaction is about to act on. Settled, not instantaneous —
+			// see `preInteraction`.
+			if (!preInteraction && (action.kind === "click" || action.kind === "fill")) {
+				preInteraction = await settledSnapshot(opts.page, opts.settleMs ?? 0);
+				lastSeen = preInteraction;
+			}
+			// Snap a drifted label onto the one the page actually carries, before spending a locator
+			// timeout and a model call on discovering the drift.
+			if (lastSeen) {
+				const g = pregroundAction(action, lastSeen.html, lastSeen.url);
+				if (g) {
+					// Spacing-only drift is a normalization, not a different element: no heal event, so a
+					// case whose only problem was a stray space can pass instead of being held forever.
+					// A partial match is a guess about which control was meant — that stays visible.
+					if (!g.normalizedOnly) {
+						healEvents.push(`ground: ${targetOf(action)} — 화면의 라벨 '${targetOf(g.action)}'로 맞췄습니다`);
+					}
+					action = g.action;
+				}
+			}
+			/**
+			 * Is a later click/fill still coming? Only then may a navigation reset the baseline — if the
+			 * *last* interaction is what navigated, the navigation is the outcome the case is about, and
+			 * throwing the baseline away would make every assertion look like it "already held".
+			 */
+			const moreInteractionsAfter = actions.slice(i + 1).some((a) => a?.kind === "click" || a?.kind === "fill");
+			let err = await perform(action, opts.firstTryMs ?? 1200);
+			// The live screen at the moment of failure — reused for the presence check and the repair,
+			// so a miss costs one cheap DOM read instead of a second full locator timeout.
+			let live = err ? await opts.page.snapshot({ screenshot: false }).catch(() => null) : null;
+			if (err && (!live || targetOnScreen(action, live.html, live.url))) {
+				// 1. Deterministic recovery: the target *is* on screen, so it is blocked or still
+				// settling — clear whatever intercepts input and give it the full budget this time.
+				if (opts.page.dismissOverlays) {
+					await opts.page.dismissOverlays().catch(() => {});
+					await new Promise((r) => setTimeout(r, opts.recoveryDelayMs ?? 400));
+				}
+				err = await perform(action);
+				if (err) live = await opts.page.snapshot({ screenshot: false }).catch(() => null);
+			}
+			if (err && opts.repair && repairsLeft > 0) {
+				// 2. AI intervention: re-read the live screen and act on what is actually there. The
+				// screenshot is worth its cost here — a blocking dialog is visible long before the DOM
+				// scan explains it — so this is the one place that pays for a full snapshot on failure.
+				repairsLeft--;
+				const shot = await opts.page.snapshot().catch(() => null);
+				const seen = shot ?? live;
+				const fixed = seen
+					? await opts
+							.repair({
+								action,
+								error: err.message,
+								html: seen.html,
+								url: seen.url,
+								screenshot: seen.screenshot,
+								title: tc.title,
+								steps: tc.steps,
+								expected: tc.expected,
+							})
+							.catch(() => null)
+					: null;
+				if (fixed) {
+					const repairErr = await perform(fixed);
+					if (!repairErr) {
+						// Repaired, not hidden: still a heal event, so the verdict stays capped at needs_review.
+						healEvents.push(
+							`repair: ${targetOf(action)} — AI가 화면을 다시 읽고 '${targetOf(fixed)}'(${fixed.kind})로 교정해 진행했습니다`,
+						);
+						continue;
+					}
+					err = repairErr;
+				}
+			}
+			if (err) {
+				// 3. Unrecoverable: the page is no longer where the plan thinks it is. Stop the case —
+				// running the tail would act on the wrong screen (and can fire destructive clicks).
+				healEvents.push(`${action.kind}: ${targetOf(action)} — ${err.message}`);
+				const remaining = actions
+					.slice(i + 1)
+					.filter((a) => a.kind === "goto" || a.kind === "click" || a.kind === "fill").length;
+				if (remaining > 0)
+					healEvents.push(`abort: 남은 동작 ${remaining}개 — 선행 스텝 실패로 화면 상태를 신뢰할 수 없어 중단했습니다`);
+				executedAsWritten = false;
+				aborted = true;
+				break;
+			}
+			// A toast raised by *this* action is gone long before the case ends, so record the screen at
+			// every action boundary rather than only after the last one. One text read per action.
+			const afterAction = await opts.page.snapshot({ screenshot: false }).catch(() => null);
+			if (afterAction) observed.push(afterAction);
+			// The screen after this action is the screen the next one acts on — reuse it for grounding
+			// rather than paying for another read.
+			if (afterAction) lastSeen = afterAction;
+			// This interaction navigated and the case has more to do, so it was getting to the screen,
+			// not exercising it. Rebase the baseline: measured on the live app, a menu click to 기관 관리
+			// left the baseline on 계정 관리 — a different page carrying the *same* six filter labels —
+			// so the real filter click looked like it revealed nothing. The identical case that was
+			// already on its page passed. Same shape, opposite verdicts, decided by a nav step.
+			if (preInteraction && moreInteractionsAfter && afterAction && afterAction.url !== preInteraction.url) {
+				preInteraction = await settledSnapshot(opts.page, opts.settleMs ?? 0);
 			}
 		}
 
-		let snap = await opts.page.snapshot();
+		// Cheap first: the retry loop only needs DOM text/url, and the PNG is most of a snapshot's cost.
+		let snap = await opts.page.snapshot({ screenshot: false });
+		observed.push(snap);
 		let results = assertions.map((a) => evaluateAssertion(a, snap, { lenient: opts.lenientMatch }));
 		// Async content (toasts, late-rendered lists) can appear just after the last action — if an
 		// assertion misses, re-snapshot briefly before giving up. Passing-all cases skip this.
@@ -119,28 +426,70 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			const deadline = Date.now() + opts.assertRetryMs;
 			while (results.some((r) => !r.passed) && Date.now() < deadline) {
 				await new Promise((r) => setTimeout(r, 400));
-				snap = await opts.page.snapshot();
+				snap = await opts.page.snapshot({ screenshot: false });
+				observed.push(snap);
 				results = assertions.map((a) => evaluateAssertion(a, snap, { lenient: opts.lenientMatch }));
 			}
 		}
+		// Evidence (and the vision fallback) needs the image: take exactly one full snapshot of the
+		// final state and judge on it, so the verdict and the screenshot always describe one moment.
+		snap = await opts.page.snapshot();
+		results = assertions.map((a) => evaluateAssertion(a, snap, { lenient: opts.lenientMatch }));
+		/**
+		 * The final screen decides absence; presence may be satisfied by any screen the case passed
+		 * through. `textIncludes` says "this must appear", and it did appear — that the run went on to
+		 * dismiss the toast is not the app's failure. `textNotIncludes` and `urlIncludes` keep judging
+		 * the end state, which is the whole point of "종료되어야 한다": matching any moment would pass
+		 * those the instant the popup showed.
+		 */
+		for (let i = 0; i < results.length; i++) {
+			const r = results[i];
+			if (!r || r.passed || r.assertion.kind !== "textIncludes") continue;
+			const seen = observed.find((s) => evaluateAssertion(r.assertion, s, { lenient: opts.lenientMatch }).passed);
+			if (seen) {
+				results[i] = { ...r, passed: true, detail: `${r.detail} · 실행 중 화면에서 확인됨(최종 화면에는 없음)` };
+			}
+		}
 		if (opts.visionAssert && snap.screenshot) {
-			// Text assertion missed the DOM — the expected content may be an image/color. Ask vision.
+			/**
+			 * Vision reads the screenshot when the DOM text could not confirm the expectation. What it
+			 * returns is a model's opinion, so it routes the case to a human — it never decides the
+			 * verdict.
+			 *
+			 * It used to flip a failed `textIncludes` straight to `passed: true`. Measured on a live
+			 * sheet, that turned five cases a human had marked Fail into `pass`, with details reading
+			 * `text lacks "dxsupport@aegisep.com" · 비전 확인` — the text genuinely was not there and
+			 * vision waved it through. That inverts the whole trust model: the engine judges
+			 * deterministically, the model only writes and repairs.
+			 *
+			 * So the assertion keeps its deterministic result and the disagreement is recorded. Below,
+			 * a dispute caps the verdict at `needs_review` instead of `fail`: the engine says no, the
+			 * screen says maybe, and that is precisely a case for a human. Once the human approves the
+			 * screen as a golden baseline, later runs pass deterministically — the sanctioned route for
+			 * a purely visual expectation to go green.
+			 */
 			for (let i = 0; i < results.length; i++) {
 				const r = results[i];
 				if (r && !r.passed && r.assertion.kind === "textIncludes") {
 					const ok = await opts.visionAssert(snap.screenshot, String(r.assertion.value ?? "")).catch(() => false);
-					if (ok) results[i] = { ...r, passed: true, detail: `${r.detail} · 비전 확인` };
+					if (ok) {
+						results[i] = { ...r, detail: `${r.detail} · 비전 판단: 화면상 충족(사람 확인 필요)` };
+						visionNote = `텍스트로는 확인되지 않았지만 화면상으로는 충족해 보입니다 — 사람 확인이 필요합니다: ${String(
+							r.assertion.value ?? "",
+						)
+							.replace(/\s+/g, " ")
+							.slice(0, 60)}`;
+					}
 				}
 			}
 			if (results.length === 0 && tc.expected.trim()) {
-				// A purely visual expectation with no text assertion — let vision judge the screenshot.
+				// A purely visual expectation with no checkable text assertion. The case is already
+				// heading for review (no assertions); vision only explains why a human should look.
 				const ok = await opts.visionAssert(snap.screenshot, tc.expected).catch(() => false);
 				if (ok)
-					results.push({
-						assertion: { kind: "textIncludes", value: tc.expected },
-						passed: true,
-						detail: `비전 확인: ${tc.expected.replace(/\s+/g, " ").slice(0, 50)}`,
-					});
+					visionNote = `검증 가능한 텍스트 assertion이 없습니다. 화면상으로는 기대와 일치해 보입니다 — 사람 확인이 필요합니다: ${tc.expected
+						.replace(/\s+/g, " ")
+						.slice(0, 60)}`;
 			}
 		}
 		const evidenceRefs = [evidenceRef("dom", snap.html), evidenceRef("url", snap.url)];
@@ -161,13 +510,82 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			verdict = "fail";
 			confidence = round2(1 - passRatio);
 		}
+		// The engine says the text is not there, the screenshot says it looks satisfied. That is
+		// ambiguity, not a verdict — hand it to a human instead of blaming the app. Never the other
+		// direction: a dispute can only soften `fail`, never lift anything to `pass`.
+		if (verdict === "fail" && visionNote) {
+			verdict = "needs_review";
+			confidence = round2(passRatio * 0.5);
+		}
+		/**
+		 * Did anything the assertions talk about actually change during the case?
+		 *
+		 * A check whose answer is the same on every screen the case passed through — before the first
+		 * click, in between, and at the end — cannot tell whether the app did what the case describes.
+		 * Two live shapes land here: asserting the text of the very link being clicked (the popup never
+		 * opened and the case passed anyway), and asserting filter labels that were already on screen.
+		 *
+		 * The timeline, not just the pre/post pair, is what makes this usable for transient UI. A toast
+		 * that appeared and left changed twice, so both "표출되어야 한다" and its mirror "종료되어야 한다"
+		 * are informative — where a pre-versus-final comparison alone would call the second one vacuous
+		 * every time, since the popup was equally absent before the case started.
+		 *
+		 * Not a `fail`: the app may be fine and the check merely too weak. Hand it to a human.
+		 */
+		if (verdict === "pass" && preInteraction) {
+			const pre = preInteraction;
+			/** Is the assertion's subject on this screen, regardless of which way the assertion reads? */
+			const present = (a: Assertion, s: PageSnapshot): boolean =>
+				evaluateAssertion(a.kind === "textNotIncludes" ? { kind: "textIncludes", value: a.value } : a, s, {
+					lenient: opts.lenientMatch,
+				}).passed;
+			const informative = results.some((r) => {
+				const truth = (s: PageSnapshot) => evaluateAssertion(r.assertion, s, { lenient: opts.lenientMatch }).passed;
+				// The end state answers differently than the start: the case changed something.
+				if (truth(pre) !== truth(snap)) return true;
+				// Or the subject appeared and left. That is the only reason to look at the middle at all:
+				// "팝업이 종료되어야 한다" reads the same before the case and after it, and only the
+				// appearance in between separates a working close from a popup that never opened.
+				//
+				// One direction only — absent at both ends, present in between. The mirror shape
+				// (present, gone, present again) is re-render flicker, never an intended outcome, and
+				// counting it is how an always-visible filter label was called informative and passed.
+				return (
+					!present(r.assertion, pre) && !present(r.assertion, snap) && observed.some((s) => present(r.assertion, s))
+				);
+			});
+			if (!informative) {
+				verdict = "needs_review";
+				confidence = 0.5;
+				vacuousNote = `동작 전 화면에서도 모든 검증이 통과합니다 — 이 검증은 동작이 실제로 무엇을 바꿨는지 구분하지 못합니다: ${results
+					.map((r) => String(r.assertion.value ?? ""))
+					.join(", ")
+					.replace(/\s+/g, " ")
+					.slice(0, 80)}`;
+			}
+		}
+		// The case listed several outcomes and the assertions only speak to some of them. Passing on a
+		// subset is how a case goes green while the very thing a human later reports as broken was
+		// never tested. Report the gap and hold it; a human can sign the screen off once.
+		const coverage = requirementCoverage(tc.expected, assertions) ?? undefined;
+		if (verdict === "pass" && coverage && coverage.covered < coverage.total) {
+			verdict = "needs_review";
+			confidence = round2(coverage.covered / coverage.total);
+		}
 
-		if (verdict === "needs_review" && opts.baseline) {
+		// A golden baseline substitutes for an assertion we could not author — it does not substitute
+		// for running the case. Lifting a review whose cause was a skipped/failed/aborted step would
+		// pass a case that never exercised the app: on a prose sheet with no model connected, rule
+		// interpretation executes nothing, the browser sits on the landing screen, and any baseline
+		// approved for that screen turns the whole sheet green.
+		let baselineLifted = false;
+		if (verdict === "needs_review" && executedAsWritten && opts.baseline) {
 			const env = opts.baselineEnv ?? opts.env.baseUrl;
 			// gate() proposes a pending baseline on first sight; an approved + masked match lifts to pass.
 			if (opts.baseline.gate(tc.caseId, opts.rule.ruleVersion, env, snap.text).status === "match") {
 				verdict = "pass";
 				confidence = 0.9;
+				baselineLifted = true;
 			}
 		}
 
@@ -181,6 +599,12 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			timing: { ms: now() - start },
 			attempts: 1,
 			snapshot: snap,
+			executedAsWritten,
+			...(visionNote ? { visionNote } : {}),
+			...(vacuousNote ? { vacuousNote } : {}),
+			...(coverage ? { coverage } : {}),
+			...(baselineLifted ? { baselineLifted: true } : {}),
+			...(aborted ? { aborted: true } : {}),
 		};
 	} catch (err) {
 		result = {
@@ -193,6 +617,9 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			healEvents,
 			timing: { ms: now() - start },
 			attempts: 1,
+			// An exception means the case never reached a judged state at all.
+			executedAsWritten: false,
+			...(aborted ? { aborted: true } : {}),
 		};
 	}
 	if (opts.tracePath && opts.page.stopTrace) {

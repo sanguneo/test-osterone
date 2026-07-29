@@ -51,6 +51,37 @@ export interface ReconOptions {
 	loginHints?: string[];
 }
 
+/** A route the app actually links to, under the label a user reads. */
+export interface RouteEntry {
+	label: string;
+	path: string;
+}
+
+/**
+ * The app's label→route table, taken from the links recon actually saw.
+ *
+ * Recon already scans this and then throws it away: only the model-written prose brief was
+ * persisted, so nothing downstream could answer "which path is 대시보드". That gap is why 52 of 56
+ * navigation expectations went unchecked — the plan model had no route to name, and telling it to
+ * name one in the prompt did nothing (measured 0/10). A table is not a suggestion.
+ *
+ * Internal paths only, deduped, longest label first so a specific match wins over a generic one.
+ * Fragments and query strings are dropped: they identify a view's state, not the view.
+ */
+export function routeTable(pages: readonly ReconPage[]): RouteEntry[] {
+	const seen = new Map<string, RouteEntry>();
+	for (const page of pages) {
+		for (const link of page.links) {
+			const label = link.label.trim().replace(/\s+/g, " ");
+			const path = (link.href.trim().split(/[?#]/)[0] ?? "").replace(/\/+$/, "") || "/";
+			if (!label || !path.startsWith("/")) continue;
+			const key = `${normLabel(label)}|${path}`;
+			if (!seen.has(key)) seen.set(key, { label, path });
+		}
+	}
+	return [...seen.values()].sort((a, b) => b.label.length - a.label.length || a.label.localeCompare(b.label));
+}
+
 export interface ReconResult {
 	pages: ReconPage[];
 	/** Model-reduced Korean domain brief (empty when the model returns nothing). */
@@ -198,13 +229,18 @@ async function tryClick(page: Page, hints: string[]): Promise<boolean> {
 	return false;
 }
 
-function renderPageForPrompt(p: ReconPage): string {
+/** Render a structural scan as compact page facts for a model prompt (recon brief + in-run repair). */
+export function renderPageForPrompt(p: ReconPage): string {
 	const lines = [`PAGE ${p.url || "/"} — ${p.title || "(no title)"}`];
 	const navLabels = uniqCap(
 		p.links.map((l) => l.label),
 		25,
 	);
 	if (navLabels.length) lines.push(`nav: ${navLabels.join(", ")}`);
+	// Real routes, not just labels: without these the plan author invents paths like "/login" for an
+	// app whose login actually lives at "/auth/login", and every case fails on the very first goto.
+	const routes = uniqCap(p.links.map((l) => internalPath(l.href) ?? "").filter(Boolean), 20);
+	if (routes.length) lines.push(`routes: ${routes.join(", ")}`);
 	if (p.formFields.length) lines.push(`fields: ${p.formFields.slice(0, 25).join(", ")}`);
 	if (p.buttons.length) lines.push(`buttons: ${p.buttons.slice(0, 20).join(", ")}`);
 	if (p.headings.length) lines.push(`headings: ${p.headings.slice(0, 12).join(", ")}`);
@@ -213,10 +249,11 @@ function renderPageForPrompt(p: ReconPage): string {
 }
 
 const RECON_SYSTEM =
-	"You are given a structural scan of a web app (page titles, nav labels, form field labels, buttons, table headers). " +
+	"You are given a structural scan of a web app (page titles, nav labels, real routes, form field labels, buttons, table headers). " +
 	"Write a concise domain-context brief IN KOREAN that helps another AI author deterministic browser test steps. " +
-	"Cover: the app's apparent purpose, key navigation labels, login/form field labels, primary action buttons, and any " +
-	"domain vocabulary. Use 4-10 short bullet lines starting with '- '. Ground every statement in the scan — never invent " +
+	"Cover: the app's apparent purpose, key navigation labels with the routes they lead to, login/form field labels, primary " +
+	"action buttons, and any domain vocabulary. Quote routes exactly as they appear in the scan (e.g. /auth/login) so the plan " +
+	"author never invents one. Use 4-10 short bullet lines starting with '- '. Ground every statement in the scan — never invent " +
 	"routes, labels, or features that are not present. Output ONLY the bullets, no preamble or closing.";
 
 /** Reduce a multi-page structural scan into a concise Korean domain brief via the model seam. */
@@ -292,14 +329,105 @@ export interface LoginResult {
 	ok: boolean;
 	/** Human-readable outcome for logs and the run error message. */
 	note: string;
+	/**
+	 * True when the app itself refused the credentials (it printed a rejection message). A caller
+	 * must NOT retry these: re-submitting a refused password buys nothing and walks the account
+	 * toward a lockout. Transient failures (form never rendered, submit swallowed) leave it false.
+	 */
+	rejected?: boolean;
+}
+
+/** Spacing/punctuation-insensitive form of a label, so authored hints survive real-world UI copy. */
+export function normLabel(value: string): string {
+	return value.toLowerCase().replace(/[\s.,:;!?~*_\-()[\]{}<>/\\|"'`]/g, "");
 }
 
 /**
- * Auto-login precondition. Navigates to the login entry, fills the account
- * credentials via the same field-hint ranking recon uses, submits, and verifies
- * we left the login form. Unlike reconApp's best-effort login, this reports a
- * definite ok/!ok so the runner can abort a batch when auth was required but
- * did not take (rather than letting every case fail into the review queue).
+ * Choose the on-page field label that best matches a hint list (hints in priority order,
+ * shortest match wins within a hint). Matching against what the page actually renders beats
+ * blind hint iteration: one exact fill instead of N locator timeouts, and it survives copy
+ * like "아이디를 입력해 주세요." that no hint list can enumerate.
+ */
+export function pickFieldLabel(fields: string[], hints: string[]): string | null {
+	const scanned = fields.map((raw) => ({ raw, n: normLabel(raw) })).filter((f) => f.n.length > 0);
+	for (const hint of hints) {
+		const h = normLabel(hint);
+		if (h.length < 2) continue;
+		const exact = scanned.find((f) => f.n === h);
+		if (exact) return exact.raw;
+		const partial = scanned.filter((f) => f.n.includes(h)).sort((a, b) => a.n.length - b.n.length)[0];
+		if (partial) return partial.raw;
+	}
+	return null;
+}
+
+/** Did the app paint anything yet? An SPA shell scans as completely empty before it mounts. */
+function hasRendered(scan: ReconPage): boolean {
+	return (
+		scan.headings.length + scan.links.length + scan.formFields.length + scan.buttons.length + scan.tableHeaders.length >
+		0
+	);
+}
+
+/**
+ * Poll the live DOM until the credential fields exist. Client-rendered apps answer the first
+ * navigation with an empty shell and then client-redirect to their login route, so the fields
+ * appear seconds after `goto` resolves. Returns as soon as a hint matches; gives up early once
+ * the app has painted and gone quiet without a login form (nothing more is coming).
+ */
+async function waitForLoginFields(page: Page, hints: string[], budgetMs: number): Promise<string[]> {
+	const pollMs = 400;
+	let lastHtml = "";
+	let stable = 0;
+	let fields: string[] = [];
+	for (let waited = 0; ; waited += pollMs) {
+		const snap = await page.snapshot({ screenshot: false });
+		const scan = extractStructure(snap.html, snap.url);
+		fields = scan.formFields;
+		if (pickFieldLabel(fields, hints)) return fields;
+		stable = snap.html === lastHtml ? stable + 1 : 0;
+		lastHtml = snap.html;
+		if (waited >= budgetMs) return fields;
+		if (hasRendered(scan) && stable >= 2) return fields;
+		await new Promise((resolve) => setTimeout(resolve, pollMs));
+	}
+}
+
+/**
+ * Pull the app's own rejection message out of the post-submit screen so a failed precondition
+ * says *why* ("아이디 또는 비밀번호를 확인해 주세요.") instead of only that we stayed on the form.
+ */
+export function loginErrorMessage(text: string): string {
+	const pattern = /(확인해|일치하지|올바르지|유효하지|실패|잘못|오류|틀렸|만료|잠금|invalid|incorrect|failed|error)/i;
+	for (const raw of text.split("\n")) {
+		const line = raw.trim();
+		if (line.length < 4 || line.length > 120) continue;
+		if (pattern.test(line)) return line;
+	}
+	return "";
+}
+
+/** Fill a credential field: the scanned label first, then the raw hint list as a safety net. */
+async function fillField(page: Page, fields: string[], hints: string[], value: string): Promise<boolean> {
+	const picked = pickFieldLabel(fields, hints);
+	if (picked && (await tryFill(page, [picked], value))) return true;
+	return await tryFill(page, hints, value);
+}
+
+/**
+ * Auto-login precondition. Navigates to the login entry, waits for the form to render, fills the
+ * account credentials against the labels the page actually exposes, submits, and verifies we left the
+ * login form. Reports a definite ok/!ok so a caller can abort a batch when auth was required but did
+ * not take, rather than letting every case fail into the review queue.
+ *
+ * Retrying lives here, not in the callers. On this project's app the first attempt regularly submits
+ * into a form whose handler has not attached yet and the second succeeds — the runner carried that
+ * knowledge and recon did not, so app analysis kept scanning the login page and the plan model was
+ * handed an app with no routes at all. 56 of 652 cases expect a navigation; only 4 got a `urlIncludes`
+ * assertion, because the model had no route to name.
+ *
+ * A refused credential is never re-submitted (`rejected`): the app said no, and trying again buys
+ * nothing but a locked account.
  */
 export async function attemptLogin(
 	page: Page,
@@ -311,29 +439,68 @@ export async function attemptLogin(
 		loginHints?: string[];
 		/** Max time to wait for the login form to disappear after submit (default 6000ms). */
 		settleTimeoutMs?: number;
+		/** Max time to wait for the login fields to render after navigation (default 8000ms). */
+		fieldWaitMs?: number;
+		/** Extra attempts after a symptomless failure (default 1). A refused credential never retries. */
+		retries?: number;
+		/** Told about each retry and why, so a run can surface it instead of retrying silently. */
+		onRetry?: (note: string) => void;
 	} = {},
+): Promise<LoginResult> {
+	const budgetRetries = Math.max(0, opts.retries ?? 1);
+	let res = await attemptLoginOnce(page, account, opts);
+	for (let attempt = 0; attempt < budgetRetries && !res.ok && !res.rejected; attempt++) {
+		opts.onRetry?.(res.note);
+		await page.resetSession?.().catch(() => {});
+		res = await attemptLoginOnce(page, account, opts);
+	}
+	return res;
+}
+
+async function attemptLoginOnce(
+	page: Page,
+	account: ReconAccount,
+	opts: {
+		loginPath?: string;
+		usernameHints?: string[];
+		passwordHints?: string[];
+		loginHints?: string[];
+		settleTimeoutMs?: number;
+		fieldWaitMs?: number;
+	},
 ): Promise<LoginResult> {
 	if (!account.username && !account.password) return { ok: false, note: "계정 자격증명이 비어 있습니다" };
 	await page.goto(opts.loginPath ?? "/");
-	const filledUser = account.username
-		? await tryFill(page, opts.usernameHints ?? DEFAULT_USER_HINTS, account.username)
-		: true;
-	const filledPass = account.password
-		? await tryFill(page, opts.passwordHints ?? DEFAULT_PASS_HINTS, account.password)
-		: true;
-	if (!filledUser || !filledPass) return { ok: false, note: "로그인 입력 필드(아이디/비밀번호)를 찾지 못했습니다" };
+	const userHints = opts.usernameHints ?? DEFAULT_USER_HINTS;
+	const passHints = opts.passwordHints ?? DEFAULT_PASS_HINTS;
+	const fields = await waitForLoginFields(page, account.password ? passHints : userHints, opts.fieldWaitMs ?? 8000);
+	const filledUser = account.username ? await fillField(page, fields, userHints, account.username) : true;
+	const filledPass = account.password ? await fillField(page, fields, passHints, account.password) : true;
+	if (!filledUser || !filledPass) {
+		const seen = fields.length ? fields.slice(0, 8).join(", ") : "없음";
+		return { ok: false, note: `로그인 입력 필드(아이디/비밀번호)를 찾지 못했습니다 — 화면에서 찾은 입력: ${seen}` };
+	}
 	const clicked = await tryClick(page, opts.loginHints ?? DEFAULT_LOGIN_HINTS);
 	if (!clicked) return { ok: false, note: "로그인/제출 버튼을 찾지 못했습니다" };
 	// Wait for the login form to disappear (server auth + redirect / SPA transition can take a few seconds).
 	// Poll rather than a fixed delay so a fast login returns immediately and a slow one isn't a false failure.
-	const passHints = (opts.passwordHints ?? DEFAULT_PASS_HINTS).map((h) => h.toLowerCase());
+	const normPassHints = passHints.map(normLabel).filter((h) => h.length >= 2);
 	const stillOnLoginForm = (html: string, url: string): boolean =>
-		extractStructure(html, url).formFields.some((f) => passHints.some((h) => f.toLowerCase().includes(h)));
+		extractStructure(html, url)
+			.formFields.map(normLabel)
+			.some((f) => normPassHints.some((h) => f.includes(h)));
 	const budgetMs = opts.settleTimeoutMs ?? 6000;
+	let lastText = "";
 	for (let waited = 0; waited < budgetMs; waited += 500) {
 		await new Promise((resolve) => setTimeout(resolve, 500));
-		const snap = await page.snapshot();
+		const snap = await page.snapshot({ screenshot: false });
+		lastText = snap.text;
 		if (!stillOnLoginForm(snap.html, snap.url)) return { ok: true, note: "로그인 완료" };
 	}
-	return { ok: false, note: "제출 후에도 로그인 화면에 머무름(자격증명 거부 또는 로그인 지연)" };
+	const shown = loginErrorMessage(lastText);
+	return {
+		ok: false,
+		note: `제출 후에도 로그인 화면에 머무름(자격증명 거부 또는 로그인 지연)${shown ? ` — 화면 메시지: ${shown}` : ""}`,
+		rejected: !!shown,
+	};
 }

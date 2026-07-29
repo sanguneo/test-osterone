@@ -12,10 +12,10 @@
  * on Windows; it reuses the same deterministic engine as the CLI.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BrowserPage, launchBrowser } from "../../execute/browser-page.ts";
@@ -30,8 +30,16 @@ import {
 } from "../../intake/ingest.ts";
 import type { NormalizedTC } from "../../intake/schema.ts";
 import { MemoryAssertionCache } from "../../interpret/assertion.ts";
-import { getOrAuthorPlan } from "../../interpret/author.ts";
-import { attemptLogin, type ReconResult, reconApp } from "../../interpret/recon.ts";
+import { type AuthoredPlan, getOrAuthorPlan } from "../../interpret/author.ts";
+import {
+	attemptLogin,
+	extractStructure,
+	type LoginResult,
+	type ReconResult,
+	reconApp,
+	routeTable,
+} from "../../interpret/recon.ts";
+import { type RepairRequest, repairAction } from "../../interpret/repair.ts";
 import { acquireRepo, type RepoReconResult, reconRepo } from "../../interpret/repo-recon.ts";
 import {
 	type InterpretationRule,
@@ -39,6 +47,7 @@ import {
 	ruleLint,
 	setRuleCodeContext,
 	setRuleContext,
+	setRuleRoutes,
 } from "../../interpret/rule.ts";
 import { visionAssert } from "../../interpret/vision.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
@@ -46,7 +55,15 @@ import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts
 import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
 import { maybePromptStar } from "../../star-prompt.ts";
 import { startFixture } from "../../testing/fixture-app.ts";
-import { isLoginOnlyCases, parseHealEvent } from "./run-helpers.ts";
+import {
+	authStepFor,
+	endsSignedOut,
+	restoreTerminal,
+	runModelMeta,
+	stalePlaywrightTempDirs,
+	summarizeHeal,
+	tracesToEvict,
+} from "./run-helpers.ts";
 import { deleteProjectSheets, deleteSheetContent, readSheetContent, writeSheetContent } from "./sheet-store.ts";
 import {
 	type CaseView,
@@ -151,6 +168,21 @@ function traceDirFor(projectId: string, sheetId?: string): string {
 		: join(tracesBaseDir, traceSafe(projectId));
 }
 
+/** Delete a sheet's oldest trace zips so review evidence cannot grow without bound. */
+function pruneTraces(dir: string): void {
+	try {
+		const files = readdirSync(dir)
+			.filter((f) => f.endsWith(".zip"))
+			.map((f) => {
+				const path = join(dir, f);
+				return { path, mtimeMs: statSync(path).mtimeMs };
+			});
+		for (const path of tracesToEvict(files)) rmSync(path, { force: true });
+	} catch {
+		// no trace dir yet, or a concurrent run already removed it — nothing to prune
+	}
+}
+
 // SheetJS is CJS; load via createRequire so it works under Node without ESM-interop config.
 const XLSX = createRequire(import.meta.url)("xlsx") as {
 	read: (
@@ -251,6 +283,46 @@ let browserInstance: Awaited<ReturnType<typeof launchBrowser>> | null = null;
 async function sharedBrowser(): Promise<Awaited<ReturnType<typeof launchBrowser>>> {
 	if (!browserInstance) browserInstance = await launchBrowser(true);
 	return browserInstance;
+}
+
+/**
+ * Playwright deletes its trace scratch dir when the context closes, so a killed process leaves it
+ * behind — and tracing buffers every screencast frame there for the whole context lifetime (one
+ * killed 640-case sweep left a single 13GB directory). Reap dead runs' leftovers at startup.
+ */
+function sweepPlaywrightTemp(): void {
+	const dir = tmpdir();
+	try {
+		const entries = readdirSync(dir, { withFileTypes: true })
+			.filter((e) => e.isDirectory())
+			.map((e) => ({ name: e.name, mtimeMs: statSync(join(dir, e.name)).mtimeMs }));
+		let reaped = 0;
+		for (const name of stalePlaywrightTempDirs(entries, Date.now())) {
+			rmSync(join(dir, name), { recursive: true, force: true });
+			reaped++;
+		}
+		if (reaped > 0) console.log(`temp: reaped ${reaped} orphaned Playwright trace dir(s)`);
+	} catch {
+		// unreadable temp dir, or a racing process holding a lock — never worth failing startup over
+	}
+}
+
+/**
+ * Terminal restoration bound to this process. Shared by the shutdown path and the top-level
+ * failure handler, so no exit route can skip it.
+ *
+ * The streams are read on each call rather than captured: `setRawMode` has to stay bound to the
+ * real stdin stream, and touching the getters early would initialize stdin before we need it.
+ */
+function restoreProcessTerminal(): void {
+	restoreTerminal({ stdin: process.stdin, stdout: process.stdout, stderr: process.stderr, writeSync });
+}
+
+/** Close the shared browser so Playwright removes its scratch dirs on a normal shutdown. */
+async function shutdownBrowser(): Promise<void> {
+	const browser = browserInstance;
+	browserInstance = null;
+	await browser?.close().catch(() => {});
 }
 
 interface Project {
@@ -572,9 +644,8 @@ async function ingestSources(
 		if (!text?.trim()) continue;
 		all.push(...ingestCsv(text, mapping).all);
 	}
-	// Drop blank rows (merged/section rows in spreadsheets normalize to empty cases).
-	const nonEmpty = all.filter((c) => c.title || c.steps.length > 0 || c.expected);
-	return { all: nonEmpty, ...dedupe(nonEmpty) };
+	// Cross-sheet dedupe; each sheet already dropped its blank/section rows during ingest.
+	return { all, ...dedupe(all) };
 }
 
 /** Fetch a public/link-readable Google Sheet as CSV text. */
@@ -591,6 +662,7 @@ export async function runBatch(
 	onProgress?: (ev: Record<string, unknown>) => void,
 	signal?: AbortSignal,
 ): Promise<RunView> {
+	const startedAt = Date.now();
 	const st = stateFor(input.projectId ?? "sample");
 	let ai = !!input.aiInterpret;
 	// No model connected → don't hard-fail; fall back to rule interpretation and tell the client.
@@ -619,6 +691,40 @@ export async function runBatch(
 	for (const c of cases) sheetSt.reviewQueue.delete(c.caseId);
 	const cache = new MemoryAssertionCache();
 	const trace = !input.sample; // capture Playwright traces for real runs (sample stays ephemeral)
+	const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
+	const results: CaseView[] = [];
+	/**
+	 * Close out the run: stamp what produced it, then persist it as this sheet's latest history
+	 * entry. `model`/`reasoning`/`durationMs` are recorded because counts alone make two runs of
+	 * the same sheet indistinguishable — comparing models or reasoning levels afterwards needs to
+	 * know which one produced which verdicts, and how long it took.
+	 */
+	const finish = (): RunView => {
+		const view: RunView = {
+			at: startedAt,
+			source: input.sample ? "sample" : "project",
+			baseUrl,
+			interpreter: ai ? "ai" : "rule",
+			...runModelMeta(ai ? "ai" : "rule", auth),
+			durationMs: Date.now() - startedAt,
+			counts,
+			results,
+			sheetId: sid,
+		};
+		if (!signal?.aborted) {
+			sheetSt.history.unshift(view);
+			if (sheetSt.history.length > 20) sheetSt.history.length = 20;
+			saveState(input.projectId ?? "sample", st);
+		}
+		return view;
+	};
+	// Nothing to execute (empty sheet, or every row filtered out). Launching Chromium and creating
+	// a trace directory to run zero cases is pure cost, and on a machine with no browser installed
+	// it turns an empty run into a browser-install error.
+	if (cases.length === 0) {
+		stop();
+		return finish();
+	}
 	const page = input.headed
 		? await BrowserPage.create({ baseUrl, timeoutMs: 4000, headless: false, slowMo: 300, trace })
 		: await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser(), trace });
@@ -632,36 +738,143 @@ export async function runBatch(
 		},
 		{ once: true },
 	);
-	const counts: Record<Verdict, number> = { pass: 0, fail: 0, needs_review: 0, error: 0 };
-	const results: CaseView[] = [];
 	try {
-		// Login-feature sheets drive their own login, so they skip the auto-login precondition.
-		const isLoginSheet = isLoginOnlyCases(cases);
-		// Auto-login precondition: non-login runs authenticate once, then every case shares the session.
-		if (!input.sample && !isLoginSheet && defaultAccount && (defaultAccount.username || defaultAccount.password)) {
-			const login = await attemptLogin(page, {
-				username: defaultAccount.username,
-				password: defaultAccount.password,
-			});
-			if (!login.ok) throw new Error(`로그인 precondition 실패로 실행을 중단했습니다 — ${login.note}`);
-		}
-		// Close any blocking onboarding/notice modal so it doesn't intercept the first click.
+		// --- Session ownership -----------------------------------------------------------------
+		// Every case shares one browser session, so the runner — not the cases — decides who is
+		// signed in. Three rules: an auth-feature case starts signed out (otherwise there is no
+		// login form to test); every other case starts signed in **as its own role account**
+		// (routing a role to credentials the plan merely reads is not the same as being that user);
+		// a logout case leaves the session dead, so the next case signs back in.
+		//
+		// Sign-in is LAZY on purpose: validating the login page must not be preceded by a login.
+		// An eager precondition would authenticate, then immediately throw that session away for the
+		// first 로그인 case — a wasted round trip, and a login form the run never actually meets.
+		const hasCreds = (a?: Account): a is Account => !!a && !!(a.username || a.password);
+		/** Sign in. The retry (and the rule that a refused credential is never re-submitted) lives in
+		 * `attemptLogin`, so recon gets the same behaviour instead of only the runner having it. */
+		const signIn = (acct: Account): Promise<LoginResult> =>
+			attemptLogin(
+				page,
+				{ username: acct.username, password: acct.password },
+				{
+					onRetry: (note) =>
+						onProgress?.({
+							type: "notice",
+							message: `로그인 재시도(${acct.username || acct.role || acct.id}) — ${note}`,
+						}),
+				},
+			);
+		/** Account id the browser is currently authenticated as; null means signed out / unknown. */
+		let signedInAs: string | null = null;
+		let failedSignIns = 0;
+		let signedInEver = false;
+		/** Make the live session match `want`, signing the previous user out first when they differ. */
+		const ensureSignedInAs = async (want: Account, why: string): Promise<void> => {
+			if (signedInAs === want.id) return;
+			// The app refuses to authenticate — stop spending a login timeout on every remaining case.
+			if (failedSignIns >= 2) return;
+			if (signedInAs !== null) await page.resetSession().catch(() => {});
+			const res = await signIn(want);
+			signedInAs = res.ok ? want.id : null;
+			const who = want.role || want.username || want.id;
+			if (!res.ok) {
+				failedSignIns++;
+				// Nothing ever authenticated: the credentials or the app are wrong, and every remaining
+				// case would fail into the review queue one by one. Stop the batch with the real reason.
+				if (!signedInEver) throw new Error(`로그인 실패로 실행을 중단했습니다 (${who}) — ${res.note}`);
+				onProgress?.({ type: "notice", message: `${why} — ${who} 로그인 실패: ${res.note}` });
+				return;
+			}
+			signedInEver = true;
+			// The first authenticated screen is where onboarding/notice popups live — clear them now.
+			await page.dismissOverlays().catch(() => {});
+			onProgress?.({ type: "notice", message: `${why} — ${who} 계정으로 로그인했습니다` });
+		};
+		// Public entry screens can carry their own notice popup even before any sign-in.
 		if (!input.sample) await page.dismissOverlays().catch(() => {});
-		for (const tc of cases) {
+		// In-run AI intervention: when a step misses the live DOM, re-read the screen and act on what
+		// is actually there (grounded in the live scan) instead of replaying a plan authored blind.
+		const repairModel = ai ? modelClient : null;
+		const repair = repairModel ? (req: RepairRequest) => repairAction(repairModel, req) : undefined;
+		/**
+		 * Inter-case recovery. A case that aborted mid-plan leaves the shared page wherever it broke
+		 * (modal open, half-navigated, session expired), and every later case would inherit that wreck.
+		 * Reset to a known screen; a bounce back to the login form means the session is gone, which
+		 * the next case's auth preparation will fix.
+		 */
+		let recoveries = 0;
+		const recoverBetweenCases = async (): Promise<void> => {
+			recoveries++;
+			await page.dismissOverlays().catch(() => {});
+			await page.goto("/").catch(() => {});
+			onProgress?.({ type: "notice", message: `이전 케이스 실패 후 화면을 초기화했습니다 (${recoveries}회)` });
+			const snap = await page.snapshot({ screenshot: false }).catch(() => null);
+			const bouncedToLogin =
+				!!snap && extractStructure(snap.html, snap.url).formFields.some((f) => /비밀번호|password/i.test(f));
+			if (bouncedToLogin) signedInAs = null;
+		};
+		/**
+		 * The session contract, enforced before each case runs. The decision itself lives in
+		 * `authStepFor` so the whole sequence (login case → role switch → logout → restore) is
+		 * unit-tested; here we only carry it out.
+		 */
+		const prepareAuth = async (tc: NormalizedTC, account: Account | undefined): Promise<void> => {
+			const step = authStepFor(tc, account, { signedInAs, failedSignIns }, { sample: input.sample });
+			if (step.kind === "signOut") {
+				await page.resetSession().catch(() => {});
+				signedInAs = null;
+			} else if (step.kind === "signIn" && hasCreds(account)) {
+				await ensureSignedInAs(account, tc.title || tc.caseId);
+			}
+		};
+		/**
+		 * Plan authoring is a model round trip (~20s) while executing a case is ~1-2s of browser work,
+		 * so authoring inline made the run 20× slower than the app it drives. Author *ahead*: keep a
+		 * small window of cases in flight so the model works while the browser does, and a case's plan
+		 * is usually already waiting when its turn comes. Authoring stays per case (independent inputs,
+		 * cache keyed per case), and a failure is isolated — that one case falls back to rule
+		 * interpretation instead of killing the batch.
+		 */
+		const accountFor = (tc: NormalizedTC): Account | undefined =>
+			accounts.find((a) => a.role && tc.role && a.role.trim().toLowerCase() === tc.role.trim().toLowerCase()) ??
+			defaultAccount;
+		const PLAN_PREFETCH = 4;
+		const planning = new Map<string, Promise<AuthoredPlan | undefined>>();
+		const authorAhead = (from: number): void => {
+			if (!ai || !modelClient || signal?.aborted) return;
+			for (let i = from; i < Math.min(from + PLAN_PREFETCH, cases.length); i++) {
+				const tc = cases[i];
+				if (!tc || planning.has(tc.caseId)) continue;
+				const acct = accountFor(tc);
+				planning.set(
+					tc.caseId,
+					getOrAuthorPlan(tc, sheetSt.rule, sheetSt.planCache, modelClient, {
+						referenceRepo: input.referenceRepo,
+						username: acct?.username,
+						password: acct?.password,
+					})
+						.then((r) => r.plan)
+						.catch((err) => {
+							onProgress?.({
+								type: "notice",
+								message: `플랜 작성 실패(${tc.title || tc.caseId}) — 규칙 해석으로 대체: ${(err as Error).message.slice(0, 120)}`,
+							});
+							return undefined;
+						}),
+				);
+			}
+		};
+		authorAhead(0);
+
+		for (const [index, tc] of cases.entries()) {
 			if (signal?.aborted) break;
-			const account =
-				accounts.find((a) => a.role && tc.role && a.role.trim().toLowerCase() === tc.role.trim().toLowerCase()) ??
-				defaultAccount;
-			const plan =
-				ai && modelClient
-					? (
-							await getOrAuthorPlan(tc, sheetSt.rule, sheetSt.planCache, modelClient, {
-								referenceRepo: input.referenceRepo,
-								username: account?.username,
-								password: account?.password,
-							})
-						).plan
-					: undefined;
+			const account = accountFor(tc);
+			// Top the window back up before waiting, so the model keeps working during this case.
+			authorAhead(index + 1);
+			const plan = await planning.get(tc.caseId);
+			planning.delete(tc.caseId);
+			await prepareAuth(tc, account);
+			if (signal?.aborted) break;
 			const tracePath = trace ? tracePathFor(input.projectId ?? "sample", sid, tc.caseId) : undefined;
 			const r = await runScenario(tc, {
 				page,
@@ -675,22 +888,36 @@ export async function runBatch(
 				visionAssert: visionFn,
 				lenientMatch: !!input.lenientMatch,
 				assertRetryMs: 2500,
+				// A live SPA paints asynchronously; settle the pre-interaction screen so the
+				// "did this action change anything" check is not decided by paint timing.
+				settleMs: 250,
+				repair,
 			});
 			// Keep the trace only for cases that land in the review queue; drop pass/fail and any stale file.
 			const keptTrace =
 				(r.verdict === "needs_review" || r.verdict === "error") && !!r.tracePath && existsSync(r.tracePath);
 			if (tracePath && !keptTrace) rmSync(tracePath, { force: true });
+			// Cap what a sheet accumulates: a 640-case sweep otherwise leaves gigabytes of zips behind.
+			if (keptTrace) pruneTraces(traceDirFor(input.projectId ?? "sample", sid));
 			if (r.verdict === "needs_review" || r.verdict === "error") {
-				// Heal events read "<kind>: <target> — <error>"; pull the kind + failed target for a precise, friendly reason.
-				const heal = parseHealEvent(r.healEvents[0] ?? "");
+				// Heal events read "<kind>: <target> — <detail>"; the most severe one explains the review.
+				const heal = summarizeHeal(r.healEvents);
 				const healTarget = r.healEvents.length ? heal.target : "";
+				// A vision dispute outranks the generic fallbacks: it is the only reason that names a
+				// concrete thing the reviewer should look at on the screenshot.
 				const reason = r.healEvents.length
-					? `self-heal: ${heal.kind || "action"}`
+					? heal.reason
 					: r.verdict === "error"
 						? (r.errorInfo ?? "error")
-						: r.assertions.length === 0
-							? "no assertions authored"
-							: "baseline pending approval";
+						: r.visionNote
+							? "vision disagrees"
+							: r.vacuousNote
+								? "assertion not discriminating"
+								: r.coverage && r.coverage.covered < r.coverage.total
+									? "requirements partly checked"
+									: r.assertions.length === 0
+										? "no assertions authored"
+										: "baseline pending approval";
 				sheetSt.reviewQueue.set(r.caseId, {
 					caseId: r.caseId,
 					title: caseById.get(r.caseId)?.title || r.caseId,
@@ -699,11 +926,22 @@ export async function runBatch(
 					expected: caseById.get(r.caseId)?.expected ?? "",
 					verdict: r.verdict,
 					reason,
+					holdNote:
+						r.visionNote ??
+						r.vacuousNote ??
+						(r.coverage && r.coverage.covered < r.coverage.total
+							? `요구사항 ${r.coverage.total}건 중 ${r.coverage.covered}건만 검증했습니다. 검증하지 않은 항목: ${r.coverage.missing
+									.map((m) => m.replace(/\s+/g, " ").slice(0, 60))
+									.join(" / ")
+									.slice(0, 300)}`
+							: undefined),
 					healTarget,
 					url: r.snapshot?.url ?? "",
 					text: (r.snapshot?.text ?? "").slice(0, 600),
 					screenshot: r.snapshot?.screenshot,
 					trace: keptTrace,
+					// Only a case that actually ran can be signed off with a golden baseline.
+					baselineEligible: r.executedAsWritten !== false,
 					ruleVersion: r.ruleVersion,
 					env: baselineEnv,
 					sheetId: sid,
@@ -719,6 +957,7 @@ export async function runBatch(
 				passed: r.assertions.filter((a) => a.passed).length,
 				total: r.assertions.length,
 				heal: r.healEvents,
+				...(r.baselineLifted ? { baselineLifted: true } : {}),
 				assertions: r.assertions.map((a) => ({
 					detail: a.detail,
 					passed: a.passed,
@@ -728,26 +967,16 @@ export async function runBatch(
 			};
 			results.push(view);
 			onProgress?.({ type: "case", index: results.length - 1, total: cases.length, result: view });
+			// A logout case ends the session on purpose — don't let the next case inherit a dead one.
+			if (endsSignedOut(tc)) signedInAs = null;
+			// A case that aborted (or errored) left the shared page in an untrusted state — reset before the next one.
+			if (!input.sample && !signal?.aborted && (r.aborted || r.verdict === "error")) await recoverBetweenCases();
 		}
 	} finally {
 		await page.close().catch(() => {});
 		stop();
 	}
-	const view: RunView = {
-		at: Date.now(),
-		source: input.sample ? "sample" : "project",
-		baseUrl,
-		interpreter: ai ? "ai" : "rule",
-		counts,
-		results,
-		sheetId: sid,
-	};
-	if (!signal?.aborted) {
-		sheetSt.history.unshift(view);
-		if (sheetSt.history.length > 20) sheetSt.history.length = 20;
-		saveState(input.projectId ?? "sample", st);
-	}
-	return view;
+	return finish();
 }
 
 // --- Run registry: keeps a run alive across a client refresh, and enables reconnect + explicit cancel. ---
@@ -1185,12 +1414,15 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			} finally {
 				await page.close();
 			}
-			if (result.context?.trim()) {
-				// Persist the recon brief as the sheet's app context so plan authoring is grounded.
+			// Persist what recon saw. The prose brief grounds the plan model; the route table is read by
+			// code (a url assertion for a navigation expectation), which a paragraph cannot support.
+			const routes = routeTable(result.pages);
+			if (result.context?.trim() || routes.length > 0) {
 				const st = stateFor(pid);
 				const sid = resolveSheetId(project, sheet.id);
 				const ss = sheetState(st, sid);
-				ss.rule = setRuleContext(ss.rule, result.context.slice(0, 4000));
+				if (result.context?.trim()) ss.rule = setRuleContext(ss.rule, result.context.slice(0, 4000));
+				ss.rule = setRuleRoutes(ss.rule, routes);
 				saveState(pid, st);
 			}
 			return send(
@@ -1379,6 +1611,18 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				}
 			}
 			if (!item || !sid) return send(res, 404, JSON.stringify({ error: "unknown case in review queue" }));
+			if (item.baselineEligible === false) {
+				// A case that never ran has no proposed baseline, and signing off the screen it happened
+				// to stop on would pass it without exercising anything. Say why instead of throwing.
+				return send(
+					res,
+					400,
+					JSON.stringify({
+						error:
+							"작성된 대로 실행되지 않은 케이스입니다(스텝 미해석·동작 실패·중단). 기준 화면으로 승인할 수 없습니다 — 규칙을 고치거나 모델을 연결해 다시 실행하세요.",
+					}),
+				);
+			}
 			// The run's gate() already proposed a full-text pending baseline; approving flips it.
 			sheetState(st, sid).baseline.approve(item.caseId, item.ruleVersion, item.env);
 			sheetState(st, sid).reviewQueue.delete(item.caseId);
@@ -1443,32 +1687,21 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
 		}
 	}
-	if (req.method === "POST" && url.pathname === "/api/review/approve-all") {
-		try {
-			const { projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
-				projectId?: string;
-				sheetId?: string;
-			};
-			const pid = projectId || "sample";
-			const st = stateFor(pid);
-			const targets = sheetId ? [sheetState(st, sheetId)] : [...st.sheets.values()];
-			let approved = 0;
-			for (const s of targets) {
-				for (const item of [...s.reviewQueue.values()]) {
-					s.baseline.approve(item.caseId, item.ruleVersion, item.env);
-					s.reviewQueue.delete(item.caseId);
-					approved++;
-				}
-			}
-			saveState(pid, st);
-			const queue = sheetId
-				? [...sheetState(st, sheetId).reviewQueue.values()]
-				: [...st.sheets.values()].flatMap((s) => [...s.reviewQueue.values()]);
-			return send(res, 200, JSON.stringify({ approved, queue }));
-		} catch (err) {
-			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
-		}
-	}
+	/**
+	 * `/api/review/approve-all` is gone on purpose.
+	 *
+	 * Approving a golden baseline is a judgement about one specific screen, and every reason a case
+	 * reaches this queue now means "the engine could not confirm this — look at it": the text was not
+	 * there, the check does not discriminate, only some of the written outcomes were tested, an AI
+	 * repaired an action. A button that blesses all of them at once is a false-pass factory, and it was
+	 * measured as one on the 공문발송 sheet: one click took a run that correctly held 15 of 20 cases
+	 * (false-pass 1) to 12 passes and false-pass 7 — six screens a human had already filed as defects,
+	 * green from then on, because approvals outlive "Clear runs".
+	 *
+	 * There is no honest bulk version: "I checked all 15 screenshots" is exactly the claim nobody
+	 * makes truthfully. Approve per case (`/api/review/approve`) or mark it failed
+	 * (`/api/review/reject`).
+	 */
 
 	if (req.method === "GET" && url.pathname === "/api/sheet/content") {
 		const projectId = url.searchParams.get("projectId");
@@ -1525,47 +1758,45 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 }
 
 async function main(): Promise<number> {
+	// Registered before anything can spawn a browser: `--selftest` runs a batch (and therefore
+	// Chromium) too, and it used to exit with no terminal restoration at all.
+	process.on("exit", restoreProcessTerminal);
 	if (process.argv.includes("--selftest")) {
 		const view = await runBatch({ sample: true });
 		console.log("studio selftest — counts:", JSON.stringify(view.counts));
 		for (const r of view.results) console.log(`  ${r.verdict.padEnd(13)} ${r.passed}/${r.total}  ${r.title}`);
 		const ok = view.counts.pass === 2 && view.counts.fail === 1 && view.counts.needs_review === 1;
 		console.log(ok ? "SELFTEST OK" : "SELFTEST MISMATCH");
-		await browserInstance?.close();
+		await shutdownBrowser();
 		return ok ? 0 : 1;
 	}
-	// Restore the terminal on exit. An abrupt Ctrl+C — especially on Windows consoles with a
-	// Playwright child process — can leave the TTY in raw mode / cursor hidden / echo off. Show
-	// the cursor, reset attributes, and drop raw mode so the shell stays usable after shutdown.
-	const restoreTerminal = () => {
-		try {
-			if (process.stdin.isTTY && typeof process.stdin.setRawMode === "function") process.stdin.setRawMode(false);
-		} catch {}
-		try {
-			if (process.stdout.isTTY) process.stdout.write("\u001b[?25h\u001b[0m");
-		} catch {}
-	};
 	let shuttingDown = false;
-	const shutdown = () => {
+	const shutdown = (): void => {
 		// A second Ctrl+C forces an immediate exit instead of waiting on cleanup.
 		if (shuttingDown) {
-			restoreTerminal();
+			restoreProcessTerminal();
 			process.exit(0);
 		}
 		shuttingDown = true;
-		restoreTerminal();
+		// Restore now so a slow or stuck browser close never leaves the shell unusable in the
+		// meantime; the `exit` listener runs it again afterwards, because closing Chromium can touch
+		// the console on its way out.
+		restoreProcessTerminal();
 		// Bounded cleanup: never hang the terminal on a slow/stuck browser close.
 		const timer = setTimeout(() => process.exit(0), 2000);
 		timer.unref();
-		void Promise.resolve(browserInstance?.close())
-			.catch(() => {})
-			.finally(() => {
-				clearTimeout(timer);
-				process.exit(0);
-			});
+		// Let Playwright delete its scratch dirs instead of orphaning gigabytes in temp.
+		void shutdownBrowser().finally(() => {
+			clearTimeout(timer);
+			process.exit(0);
+		});
 	};
-	for (const sig of ["SIGINT", "SIGTERM"] as const) process.on(sig, shutdown);
-	process.on("exit", restoreTerminal);
+	// Exactly one handler per signal. There used to be two competing registrations for SIGINT/SIGTERM
+	// — the second closed the browser and exited without restoring anything, racing the first to
+	// `process.exit` and closing the browser twice. SIGBREAK (Windows Ctrl+Break) and SIGHUP (console
+	// window closed) are included because Node's default for those is to die without running any
+	// listener, leaving the console exactly as the child process left it.
+	for (const sig of ["SIGINT", "SIGTERM", "SIGBREAK", "SIGHUP"] as const) process.on(sig, shutdown);
 	// Auto-restore a Codex model connection on startup so a server restart never silently drops to rule mode.
 	if (!modelClient && readCodexLogin()) {
 		try {
@@ -1575,6 +1806,8 @@ async function main(): Promise<number> {
 			console.warn("model: could not auto-restore Codex connection:", (err as Error).message);
 		}
 	}
+	// A killed run's trace scratch survives in the OS temp dir; clear the dead ones before starting.
+	sweepPlaywrightTemp();
 	const port = Number(process.env.PORT ?? 8686);
 	const server = createServer((req, res) => {
 		handle(req, res).catch((err) => send(res, 500, JSON.stringify({ error: String(err) })));
@@ -1595,6 +1828,17 @@ async function main(): Promise<number> {
 	return 0;
 }
 
-main().then((code) => {
-	if (code !== 0 || process.argv.includes("--selftest")) process.exit(code);
-});
+main()
+	.then((code) => {
+		if (code !== 0 || process.argv.includes("--selftest")) process.exit(code);
+	})
+	.catch((err: unknown) => {
+		// A startup failure (browser not installed, unreadable state, a throwing selftest) used to
+		// escape as an unhandled rejection: Node dumps a stack over whatever the terminal was
+		// rendering and tears the process down without our shutdown, so the console keeps whatever
+		// input mode a child left behind. Exit through the same restore + close path as Ctrl+C, and
+		// print the actionable message instead of the stack.
+		restoreProcessTerminal();
+		console.error(`\n${err instanceof Error ? err.message : String(err)}\n`);
+		void shutdownBrowser().finally(() => process.exit(1));
+	});

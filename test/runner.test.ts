@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { type FakeAction, FakePage, type Page, type PageSnapshot } from "../src/execute/page.ts";
-import { determinismView, type RunEnv, runScenario } from "../src/execute/runner.ts";
+import { determinismView, landingProblem, type RunEnv, type RunOptions, runScenario } from "../src/execute/runner.ts";
 import type { NormalizedTC } from "../src/intake/schema.ts";
 import { MemoryAssertionCache } from "../src/interpret/assertion.ts";
-import { getOrAuthorAssertions } from "../src/interpret/interpret.ts";
+import { getOrAuthorAssertions, type PageAction } from "../src/interpret/interpret.ts";
 import { bumpRuleVersion, establishRuleFromHeaders } from "../src/interpret/rule.ts";
 import { MemoryBaselineStore } from "../src/judge/baseline.ts";
 
@@ -144,7 +144,13 @@ test("plan: a provided AI plan replays its actions + assertions and ignores raw 
 
 test("baseline gate: unapproved stays needs_review; approving lifts a matching re-run to pass", async () => {
 	const store = new MemoryBaselineStore(() => 0);
-	const tc = loginTC({ contentHash: "hash-baseline", steps: ["Navigate to /login", 'Click "Nonexistent Button"'] });
+	// The case runs to completion — it is held only because no assertion could be authored for it,
+	// which is exactly what a human-approved golden baseline is for.
+	const tc = loginTC({
+		contentHash: "hash-baseline",
+		steps: ["Navigate to /login"],
+		expected: "로그인 화면이 표시되어야 한다.",
+	});
 	const run2 = () =>
 		runScenario(tc, {
 			page: new FakePage({ url: "", text: "", html: "" }, loginReducer),
@@ -156,12 +162,464 @@ test("baseline gate: unapproved stays needs_review; approving lifts a matching r
 			baseline: store,
 			baselineEnv: "test",
 		});
-	const first = await run2(); // heal -> needs_review; gate proposes a pending baseline
+	const first = await run2(); // no assertions -> needs_review; gate proposes a pending baseline
 	expect(first.verdict).toBe("needs_review");
+	expect(first.healEvents).toEqual([]);
+	expect(first.executedAsWritten).toBe(true);
 	store.approve(tc.caseId, RULE.ruleVersion, "test");
 	const second = await run2(); // approved + same masked snapshot -> pass
 	expect(second.verdict).toBe("pass");
 	expect(second.confidence).toBe(0.9);
+});
+
+test("baseline gate: a case whose action failed is never lifted to pass by an approved baseline", async () => {
+	// A golden baseline stands in for a missing assertion, not for running the case. The screen a
+	// failed case stopped on says nothing about the behaviour the case describes.
+	const store = new MemoryBaselineStore(() => 0);
+	const tc = loginTC({
+		contentHash: "hash-baseline-fail",
+		steps: ["Navigate to /login", 'Click "Nonexistent Button"'],
+	});
+	const go = () =>
+		runScenario(tc, {
+			page: new FakePage({ url: "", text: "", html: "" }, loginReducer),
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			baseline: store,
+			baselineEnv: "test",
+		});
+	const first = await go();
+	expect(first.verdict).toBe("needs_review");
+	expect(first.executedAsWritten).toBe(false);
+	// Nothing was proposed, so there is nothing a reviewer could sign off in the first place.
+	expect(store.get(tc.caseId, RULE.ruleVersion, "test")).toBeUndefined();
+	// Even with a baseline approved out of band, the failed case stays held.
+	store.propose(tc.caseId, RULE.ruleVersion, "test", "page /login");
+	store.approve(tc.caseId, RULE.ruleVersion, "test");
+	expect((await go()).verdict).toBe("needs_review");
+});
+
+test("baseline gate: a rule-mode case that interpreted no steps cannot be signed off green", async () => {
+	// The real shape of this: a Korean prose sheet with no model connected. Every step comes back
+	// `unknown`, nothing is executed, the browser sits on the landing screen — and before this rule
+	// an approved baseline of that landing screen turned the whole sheet green.
+	const store = new MemoryBaselineStore(() => 0);
+	const home = { url: "/", text: "홈 대시보드", html: "<main>홈 대시보드</main>" };
+	const tc = loginTC({
+		caseId: "TC-perm",
+		contentHash: "hash-perm",
+		title: "권한 없는 사용자 관리 메뉴 비노출",
+		steps: ["1. 일반 사용자로 접속한다", "2. 상단 내비게이션을 살펴본다"],
+		expected: "관리 메뉴가 노출되지 않아야 한다.",
+	});
+	const go = () =>
+		runScenario(tc, {
+			page: new FakePage(home, loginReducer),
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			baseline: store,
+			baselineEnv: "test",
+		});
+	const first = await go();
+	expect(first.verdict).toBe("needs_review");
+	expect(first.assertions).toHaveLength(0);
+	expect(first.healEvents.every((h) => h.startsWith("skip:"))).toBe(true);
+	expect(first.executedAsWritten).toBe(false);
+	store.propose(tc.caseId, RULE.ruleVersion, "test", home.text);
+	store.approve(tc.caseId, RULE.ruleVersion, "test");
+	expect((await go()).verdict).toBe("needs_review");
+});
+
+/** Screens carry a screenshot so the vision fallback is reachable (it needs the image). */
+const shotReducer = (action: FakeAction, state: PageSnapshot): PageSnapshot => ({
+	url: action.kind === "goto" ? action.target : state.url,
+	text: "page /login",
+	html: "<main>page /login</main>",
+	screenshot: "data:image/png;base64,AAA",
+});
+const shotPage = () =>
+	new FakePage({ url: "", text: "", html: "", screenshot: "data:image/png;base64,AAA" }, shotReducer);
+
+/** Run one case with a vision judge that always agrees the screen is fine. */
+const withVision = (tc: NormalizedTC, agrees: boolean, extra: Partial<RunOptions> = {}) =>
+	runScenario(tc, {
+		page: shotPage(),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		visionAssert: async () => agrees,
+		...extra,
+	});
+
+test("vision may not turn a deterministically failed assertion into a pass", async () => {
+	// Measured on a live sheet: vision flipped five cases a human had marked Fail into `pass`, with
+	// details like `text lacks "dxsupport@aegisep.com" · 비전 확인`. The text was genuinely absent.
+	// A model's read of a screenshot is not a verdict — it routes the case to a human instead.
+	const tc = loginTC({ contentHash: "h-vision-1", steps: ["Navigate to /login"], expected: "Welcome, admin" });
+	const r = await withVision(tc, true);
+	expect(r.verdict).toBe("needs_review");
+	expect(r.assertions).toHaveLength(1);
+	expect(r.assertions[0]?.passed).toBe(false); // the deterministic truth is untouched
+	expect(r.assertions[0]?.detail).toContain("비전 판단");
+	expect(r.visionNote).toContain("사람 확인이 필요");
+	// The case did run, so the human's approved baseline is still the route to green.
+	expect(r.executedAsWritten).toBe(true);
+});
+
+test("vision disagreeing about nothing leaves a plain fail alone", async () => {
+	const tc = loginTC({ contentHash: "h-vision-2", steps: ["Navigate to /login"], expected: "Welcome, admin" });
+	const r = await withVision(tc, false);
+	expect(r.verdict).toBe("fail");
+	expect(r.visionNote).toBeUndefined();
+});
+
+test("vision may not invent a passing assertion for a case that had none", async () => {
+	// Prose expectation → nothing checkable was authored. Vision used to push a synthetic
+	// `textIncludes: "<the requirement sentence>"` marked passed, which read as a text assertion
+	// having passed and made a purely visual case go green on a model's opinion.
+	const tc = loginTC({
+		contentHash: "h-vision-3",
+		steps: ["Navigate to /login"],
+		expected: "로고가 상단에 표출되어야 한다.",
+	});
+	const r = await withVision(tc, true);
+	expect(r.verdict).toBe("needs_review");
+	expect(r.assertions).toEqual([]); // no fabricated assertion
+	expect(r.visionNote).toContain("사람 확인이 필요");
+});
+
+test("a vision-disputed case still reaches pass through a human-approved baseline", async () => {
+	// Vision never decides, but the sanctioned route stays open: a human approves the screen once,
+	// and later runs match it deterministically.
+	const store = new MemoryBaselineStore(() => 0);
+	const tc = loginTC({ contentHash: "h-vision-4", steps: ["Navigate to /login"], expected: "Welcome, admin" });
+	const go = () => withVision(tc, true, { baseline: store, baselineEnv: "test" });
+	expect((await go()).verdict).toBe("needs_review");
+	store.approve(tc.caseId, RULE.ruleVersion, "test");
+	const second = await go();
+	expect(second.verdict).toBe("pass");
+	expect(second.confidence).toBe(0.9);
+});
+
+test("a pass carried by an approved baseline is marked as such", async () => {
+	// A green case from assertions and a green case from a year-old approval look identical in a
+	// report otherwise — and "Clear runs" keeps approvals, so the approval outlives the run history
+	// that would have explained it.
+	const store = new MemoryBaselineStore(() => 0);
+	const tc = loginTC({ contentHash: "h-lift-marked", steps: ["Navigate to /login"], expected: "Welcome, admin" });
+	const go = () => withVision(tc, true, { baseline: store, baselineEnv: "test" });
+	const first = await go();
+	expect(first.verdict).toBe("needs_review");
+	expect(first.baselineLifted).toBeUndefined();
+	store.approve(tc.caseId, RULE.ruleVersion, "test");
+	const second = await go();
+	expect(second.verdict).toBe("pass");
+	expect(second.baselineLifted).toBe(true);
+	// The assertion itself still failed — the approval is what made it green, and it says so.
+	expect(second.assertions[0]?.passed).toBe(false);
+});
+
+/**
+ * The tautology shape observed on a live sheet: the case clicks 개인정보처리방침 and asserts that
+ * 개인정보처리방침 is on the page — which is the text of the link it just clicked. The popup never
+ * opens (this reducer models exactly that), and the assertion passes regardless.
+ */
+const inertReducer = (_action: FakeAction, state: PageSnapshot): PageSnapshot => state;
+const POLICY_SCREEN: PageSnapshot = {
+	url: "/login",
+	text: "로그인 아이디 비밀번호 개인정보처리방침",
+	html: "<main>로그인 <a>개인정보처리방침</a></main>",
+};
+
+test("a check that already held before the click cannot carry the case to pass", async () => {
+	const tc = loginTC({
+		caseId: "TC-policy",
+		contentHash: "h-vacuous",
+		steps: ["1. 개인정보처리방침 선택"],
+		expected: "개인정보처리방침",
+	});
+	const r = await runScenario(tc, {
+		page: new FakePage(POLICY_SCREEN, inertReducer),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+	});
+	// The assertion genuinely passes — the text is there. It just proves nothing about the click.
+	expect(r.assertions).toHaveLength(1);
+	expect(r.assertions[0]?.passed).toBe(true);
+	expect(r.verdict).toBe("needs_review");
+	expect(r.vacuousNote).toContain("동작 전 화면에서도");
+	// The case did run, so a human can still sign the screen off as the baseline.
+	expect(r.executedAsWritten).toBe(true);
+});
+
+test("a check that only holds after the click still passes", async () => {
+	// Same shape, but the click actually opens the popup — the assertion now discriminates.
+	const opens = (action: FakeAction, state: PageSnapshot): PageSnapshot =>
+		action.kind === "click"
+			? { ...state, text: `${state.text} 개인정보 처리방침 팝업 내용`, html: `${state.html}<dialog>팝업 내용</dialog>` }
+			: state;
+	const tc = loginTC({
+		caseId: "TC-policy-ok",
+		contentHash: "h-discriminates",
+		steps: ["1. 개인정보처리방침 선택"],
+		expected: "팝업 내용",
+	});
+	const r = await runScenario(tc, {
+		page: new FakePage(POLICY_SCREEN, opens),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+	});
+	expect(r.verdict).toBe("pass");
+	expect(r.vacuousNote).toBeUndefined();
+});
+
+test("an observation-only case may assert what was already on screen", async () => {
+	// No click or fill, so there is no interaction to discriminate against — "로그인 페이지 확인" is
+	// legitimately a check of what the page already renders.
+	const tc = loginTC({
+		caseId: "TC-observe",
+		contentHash: "h-observe",
+		steps: ["Navigate to /login"],
+		expected: "page /login",
+	});
+	const r = await runScenario(tc, {
+		page: new FakePage({ url: "", text: "", html: "" }, loginReducer),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+	});
+	expect(r.verdict).toBe("pass");
+	expect(r.vacuousNote).toBeUndefined();
+});
+
+/**
+ * A page that is still painting: the first read is missing content that the second read has. Models
+ * a single-page app whose filter options render a tick after navigation.
+ */
+class PaintingPage implements Page {
+	private reads = 0;
+	private clicked = false;
+	constructor(private readonly late: string) {}
+	async goto(): Promise<void> {}
+	async click(): Promise<void> {
+		this.clicked = true;
+	}
+	async fill(): Promise<void> {}
+	async snapshot(): Promise<PageSnapshot> {
+		this.reads++;
+		// Read 1 has not painted the list yet; every later read has it, click or no click.
+		const text = this.reads === 1 && !this.clicked ? "기관 유형 상태 검색" : `기관 유형 ${this.late} 상태 검색`;
+		return { url: "/agency", text, html: `<main>${text}</main>` };
+	}
+}
+
+test("the non-discriminating check settles the screen first, so paint timing cannot decide a verdict", async () => {
+	// Two live cases of identical shape once split into per-label assertions — same filter, same six
+	// labels — disagreed with each other: one was held as non-discriminating, the other passed, purely
+	// because one app had painted its options before the click and the other had not.
+	const tc = loginTC({
+		caseId: "TC-paint",
+		contentHash: "h-paint",
+		steps: ["1. 기관 유형 필터 선택"],
+		expected: "이지스",
+	});
+	const run = (settleMs: number) =>
+		runScenario(tc, {
+			page: new PaintingPage("이지스"),
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			settleMs,
+		});
+	// Unsettled: the first read misses 이지스, so the check believes the click revealed it → pass.
+	expect((await run(0)).verdict).toBe("pass");
+	// Settled: the label was already there before the click, so the check cannot attribute it → held.
+	const settled = await run(1);
+	expect(settled.verdict).toBe("needs_review");
+	expect(settled.vacuousNote).toContain("동작 전 화면에서도");
+});
+
+/** Two screens that carry the same labels; a nav click moves between them. */
+class TwoScreenPage implements Page {
+	private url = "/account";
+	private opened = false;
+	async goto(path: string): Promise<void> {
+		this.url = path;
+	}
+	async click(target: string): Promise<void> {
+		if (target === "기관 관리") this.url = "/agency";
+		else this.opened = true;
+	}
+	async fill(): Promise<void> {}
+	async snapshot(): Promise<PageSnapshot> {
+		// Both pages list the same filter labels; only opening the filter adds the option row.
+		const base = `${this.url === "/agency" ? "기관 관리" : "계정 관리"} 기관유형 이지스 지자체`;
+		const text = this.opened ? `${base} 옵션열림` : base;
+		return { url: this.url, text, html: `<main>${text}</main>` };
+	}
+}
+
+test("a nav click rebases the baseline, so getting to a screen is not mistaken for exercising it", async () => {
+	// The live divergence: one case was already on its page (`click 기관유형`) and passed; the identical
+	// case reached the page first (`click 기관 관리` then `click 기관유형`) and was held, because the
+	// baseline stayed on a different page that carried the same labels.
+	const tc = loginTC({ caseId: "TC-nav", contentHash: "h-nav", steps: [], expected: "이지스" });
+	const r = await runScenario(tc, {
+		page: new TwoScreenPage(),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [
+				{ kind: "click", target: "기관 관리" },
+				{ kind: "click", target: "기관유형" },
+			],
+			assertions: [{ kind: "textIncludes", value: "이지스" }],
+		},
+	});
+	// 이지스 is on both screens, so with the baseline left on /account it looked like the filter click
+	// revealed it. Rebased onto /agency, the check correctly reports it cannot attribute the label.
+	expect(r.verdict).toBe("needs_review");
+	expect(r.vacuousNote).toContain("동작 전 화면에서도");
+});
+
+test("a case whose last interaction navigates keeps its baseline", async () => {
+	// Here the navigation *is* the expected outcome, so the pre-nav screen is the right baseline.
+	const tc = loginTC({ caseId: "TC-nav-last", contentHash: "h-nav-last", steps: [], expected: "기관 관리" });
+	const r = await runScenario(tc, {
+		page: new TwoScreenPage(),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "click", target: "기관 관리" }],
+			assertions: [{ kind: "urlIncludes", value: "/agency" }],
+		},
+	});
+	expect(r.verdict).toBe("pass");
+	expect(r.vacuousNote).toBeUndefined();
+});
+
+/**
+ * A toast that shows once and is gone by the next read — the shape 93 of this sheet's 652 cases have
+ * ("팝업/스낵바가 표출되어야 한다"). Snapshot reads are the clock: the toast is in the first read after
+ * the click and in none after that.
+ */
+class ToastPage implements Page {
+	private clicked = false;
+	private readsSinceClick = 0;
+	async goto(): Promise<void> {}
+	async click(): Promise<void> {
+		this.clicked = true;
+		this.readsSinceClick = 0;
+	}
+	async fill(): Promise<void> {}
+	async snapshot(): Promise<PageSnapshot> {
+		const showToast = this.clicked && this.readsSinceClick === 0;
+		if (this.clicked) this.readsSinceClick++;
+		const text = showToast ? "목록 저장되었습니다" : "목록";
+		return { url: "/list", text, html: `<main>${text}</main>` };
+	}
+}
+
+test("a toast that appeared and vanished still satisfies a presence assertion", async () => {
+	// The engine evaluated, then re-evaluated on a strictly later snapshot and threw the first result
+	// away — so anything transient could only ever fail, and `assertRetryMs` only ever helped content
+	// that appears *and stays*.
+	const tc = loginTC({ caseId: "TC-toast", contentHash: "h-toast", steps: [], expected: "저장되었습니다" });
+	const r = await runScenario(tc, {
+		page: new ToastPage(),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "click", target: "저장" }],
+			assertions: [{ kind: "textIncludes", value: "저장되었습니다" }],
+		},
+	});
+	expect(r.verdict).toBe("pass");
+	expect(r.assertions[0]?.passed).toBe(true);
+	expect(r.assertions[0]?.detail).toContain("실행 중");
+});
+
+test("a case that must end with the popup gone is judged on the final screen only", async () => {
+	// The mirror image, and the reason presence and absence cannot share one rule: 93 cases say
+	// "종료되어야 한다". Matching "any moment observed" would pass those the instant the popup showed.
+	const tc = loginTC({ caseId: "TC-closed", contentHash: "h-closed", steps: [], expected: "x" });
+	const r = await runScenario(tc, {
+		page: new ToastPage(),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "click", target: "저장" }],
+			// The toast was on screen mid-run; the case asserts it is gone at the end, and it is.
+			assertions: [{ kind: "textNotIncludes", value: "저장되었습니다" }],
+		},
+	});
+	expect(r.verdict).toBe("pass");
+	expect(r.assertions[0]?.passed).toBe(true);
+});
+
+/** A label that is always on the page but blinks out during a re-render. */
+class FlickerPage implements Page {
+	private reads = 0;
+	async goto(): Promise<void> {}
+	async click(): Promise<void> {}
+	async fill(): Promise<void> {}
+	async snapshot(): Promise<PageSnapshot> {
+		this.reads++;
+		// Read 2 (the post-action read) catches the page mid-re-render; every other read has the label.
+		const text = this.reads === 2 ? "기관 유형 상태" : "기관 유형 이지스 상태";
+		return { url: "/agency", text, html: `<main>${text}</main>` };
+	}
+}
+
+test("re-render flicker is not evidence that an action revealed anything", async () => {
+	// The trap in reading the whole timeline: "anything varied anywhere" counts a label blinking out
+	// mid-re-render as a change, and an always-visible filter label passes as if the click revealed it.
+	// Only absent-at-both-ends-present-in-between is a real appearance.
+	const tc = loginTC({ caseId: "TC-flicker", contentHash: "h-flicker", steps: [], expected: "이지스" });
+	const r = await runScenario(tc, {
+		page: new FlickerPage(),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "click", target: "기관유형" }],
+			assertions: [{ kind: "textIncludes", value: "이지스" }],
+		},
+	});
+	expect(r.verdict).toBe("needs_review");
+	expect(r.vacuousNote).toContain("동작 전 화면에서도");
 });
 
 /** Page that records trace-chunk calls, delegating page actions to a scripted FakePage. */
@@ -221,4 +679,250 @@ test("trace: a needs_review case exports the chunk to the given path (kept for r
 	expect(r.verdict).toBe("needs_review");
 	expect(page.calls).toEqual(["start", "stop:/tmp/T.zip"]);
 	expect(r.tracePath).toBe("/tmp/T.zip");
+});
+/**
+ * Recovery ladder fixtures. `blocked` targets throw until the page is recovered (overlay
+ * dismissed); `missing` targets always throw, standing in for a label that no longer exists.
+ */
+class LadderPage implements Page {
+	readonly did: string[] = [];
+	dismissals = 0;
+	constructor(
+		private readonly blocked: string[] = [],
+		private readonly missing: string[] = [],
+	) {}
+	async goto(path: string): Promise<void> {
+		this.did.push(`goto ${path}`);
+	}
+	async click(target: string): Promise<void> {
+		if (this.missing.includes(target)) throw new Error(`no element matches "${target}"`);
+		if (this.dismissals === 0 && this.blocked.includes(target)) throw new Error(`intercepts pointer events: ${target}`);
+		this.did.push(`click ${target}`);
+	}
+	async fill(target: string, value: string): Promise<void> {
+		this.did.push(`fill ${target}=${value}`);
+	}
+	async dismissOverlays(): Promise<void> {
+		this.dismissals++;
+	}
+	async snapshot(): Promise<PageSnapshot> {
+		const text = this.did.join(" · ");
+		return { url: "/app", text, html: `<main>${text}</main>` };
+	}
+}
+
+function runPlan(page: Page, actions: PageAction[], extra: Partial<RunOptions> = {}) {
+	return runScenario(loginTC({ contentHash: "hash-ladder", steps: ["(plan-driven)"], expected: "" }), {
+		page,
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		recoveryDelayMs: 0,
+		plan: { actions, assertions: [{ kind: "textIncludes", value: "click 확인" }] },
+		...extra,
+	});
+}
+
+test("recovery: an overlay-blocked action is retried after dismissOverlays and leaves no heal event", async () => {
+	const page = new LadderPage(["저장"]);
+	const r = await runPlan(page, [
+		{ kind: "click", target: "저장" },
+		{ kind: "click", target: "확인" },
+	]);
+	expect(page.dismissals).toBe(1);
+	expect(page.did).toEqual(["click 저장", "click 확인"]);
+	expect(r.healEvents).toEqual([]);
+	expect(r.verdict).toBe("pass");
+	expect(r.aborted).toBeUndefined();
+});
+
+test("abort: an unrecoverable action stops the case instead of running the rest on a wrong screen", async () => {
+	const page = new LadderPage([], ["없는버튼"]);
+	const r = await runPlan(page, [
+		{ kind: "click", target: "열기" },
+		{ kind: "click", target: "없는버튼" },
+		{ kind: "click", target: "삭제" },
+		{ kind: "click", target: "확인" },
+	]);
+	// the destructive tail never ran
+	expect(page.did).toEqual(["click 열기"]);
+	expect(r.aborted).toBe(true);
+	expect(r.healEvents[0]).toContain('click: 없는버튼 — no element matches "없는버튼"');
+	expect(r.healEvents[1]).toContain("abort: 남은 동작 2개");
+	expect(r.verdict).toBe("needs_review");
+});
+
+test("AI repair: a failed action is re-grounded on the live screen, recorded, and never silently passed", async () => {
+	const page = new LadderPage([], ["저장"]);
+	const seen: string[] = [];
+	const r = await runPlan(
+		page,
+		[
+			{ kind: "click", target: "저장" },
+			{ kind: "click", target: "확인" },
+		],
+		{
+			repair: async (req) => {
+				seen.push(`${req.action.kind}:${req.error.slice(0, 20)}`);
+				return { kind: "click", target: "저장하기" };
+			},
+		},
+	);
+	expect(seen).toHaveLength(1);
+	expect(page.did).toEqual(["click 저장하기", "click 확인"]); // repaired, then the plan continued
+	expect(r.healEvents[0]).toContain("repair: 저장 — AI가 화면을 다시 읽고 '저장하기'(click)로 교정해 진행했습니다");
+	expect(r.aborted).toBeUndefined();
+	// assertions all pass, but AI intervention still caps the verdict — a human confirms it once
+	expect(r.assertions.every((a) => a.passed)).toBe(true);
+	expect(r.verdict).toBe("needs_review");
+});
+
+test("AI repair is budgeted, and a declined repair still aborts the case", async () => {
+	const page = new LadderPage([], ["A", "B"]);
+	let calls = 0;
+	const r = await runPlan(
+		page,
+		[
+			{ kind: "click", target: "A" },
+			{ kind: "click", target: "B" },
+		],
+		{
+			repairBudget: 1,
+			repair: async () => {
+				calls++;
+				return null; // the model declines rather than guessing
+			},
+		},
+	);
+	expect(calls).toBe(1);
+	expect(r.aborted).toBe(true);
+	expect(page.did).toEqual([]);
+});
+
+/** Page that renders a real button list, so the runner can tell "missing" from "blocked". */
+class ScannablePage implements Page {
+	readonly tried: string[] = [];
+	dismissals = 0;
+	constructor(private readonly present: string[]) {}
+	async goto(): Promise<void> {}
+	async click(target: string): Promise<void> {
+		this.tried.push(target);
+		if (!this.present.includes(target)) throw new Error(`no element matches "${target}"`);
+	}
+	async fill(): Promise<void> {}
+	async dismissOverlays(): Promise<void> {
+		this.dismissals++;
+	}
+	async snapshot(): Promise<PageSnapshot> {
+		const html = this.present.map((b) => `<button>${b}</button>`).join("");
+		return { url: "/app", text: this.present.join(" "), html: `<main>${html}</main>` };
+	}
+}
+
+test("a target that is absent from the live DOM skips the patient retry (and a blocked one keeps it)", async () => {
+	// Missing: one attempt, then straight to the ladder's next rung — no second locator timeout.
+	const missing = new ScannablePage(["저장", "취소"]);
+	const r1 = await runPlan(missing, [{ kind: "click", target: "결재요청" }]);
+	expect(missing.tried).toEqual(["결재요청"]);
+	expect(missing.dismissals).toBe(0);
+	expect(r1.aborted).toBe(true);
+
+	// Present but failing (overlay intercept): still worth clearing the overlay and waiting properly.
+	const blocked = new ScannablePage([]);
+	const r2 = await runPlan(blocked, [{ kind: "click", target: "저장" }]);
+	expect(blocked.tried).toEqual(["저장", "저장"]);
+	expect(blocked.dismissals).toBe(1);
+	expect(r2.aborted).toBe(true);
+});
+
+test("unknown step: an uninterpretable step is recorded (never silently skipped) and the rest still runs", async () => {
+	const page = new FakePage({ url: "", text: "", html: "" }, loginReducer);
+	const r = await runScenario(
+		loginTC({
+			contentHash: "hash-unknown",
+			steps: ["Navigate to /login", "Frobnicate the widget until it hums", 'Verify page shows "page /login"'],
+			expected: "page /login",
+		}),
+		{ page, rule: RULE, cache: new MemoryAssertionCache(), env: ENV, now: () => 0, executionId: "fixed" },
+	);
+	expect(r.healEvents).toHaveLength(1);
+	expect(r.healEvents[0]).toContain("skip: Frobnicate the widget until it hums");
+	expect(r.assertions.every((a) => a.passed)).toBe(true); // the goto still happened
+	expect(r.verdict).toBe("needs_review"); // …but the case did not run in full
+	expect(r.aborted).toBeUndefined();
+});
+
+/** Page whose navigations can redirect or 404, so landing verification can be exercised. */
+class RoutedPage implements Page {
+	url = "/";
+	status: number | null = 200;
+	readonly did: string[] = [];
+	constructor(
+		private readonly redirects: Record<string, string> = {},
+		private readonly statuses: Record<string, number> = {},
+	) {}
+	async goto(path: string): Promise<void> {
+		this.did.push(`goto ${path}`);
+		this.url = this.redirects[path] ?? path;
+		this.status = this.statuses[path] ?? 200;
+	}
+	async click(target: string): Promise<void> {
+		this.did.push(`click ${target}`);
+	}
+	async fill(target: string, value: string): Promise<void> {
+		this.did.push(`fill ${target}=${value}`);
+	}
+	async landing(): Promise<{ url: string; status: number | null }> {
+		return { url: this.url, status: this.status };
+	}
+	async snapshot(): Promise<PageSnapshot> {
+		const text = this.did.join(" · ");
+		return { url: this.url, text, html: `<main>${text}</main>` };
+	}
+}
+
+test("landingProblem flags auth bounces and error statuses, and tolerates benign redirects", () => {
+	expect(
+		landingProblem("/approvals", { url: "https://app.test/auth/login?returnUrl=/approvals", status: 200 }),
+	).toContain("로그인 화면");
+	expect(landingProblem("/approvals", { url: "https://app.test/approvals", status: 404 })).toContain("HTTP 404");
+	// benign: sub-route, trailing slash, query — and a root goto may redirect anywhere by design
+	expect(landingProblem("/orders", { url: "https://app.test/orders/list", status: 200 })).toBeNull();
+	expect(landingProblem("/orders", { url: "https://app.test/orders/?tab=1", status: 200 })).toBeNull();
+	expect(landingProblem("/", { url: "https://app.test/auth/login", status: 200 })).toBeNull();
+	// a redirect that is not an auth bounce is not our business to judge
+	expect(landingProblem("/dashboard", { url: "https://app.test/home", status: 200 })).toBeNull();
+	// asking for the login page and landing there is correct
+	expect(landingProblem("/auth/login", { url: "https://app.test/auth/login", status: 200 })).toBeNull();
+	expect(landingProblem("/x", null)).toBeNull();
+});
+
+test("route check: a goto bounced to the login screen fails the step instead of testing the wrong page", async () => {
+	const page = new RoutedPage({ "/approvals": "https://app.test/auth/login?returnUrl=/approvals" });
+	const r = await runPlan(page, [
+		{ kind: "goto", path: "/approvals" },
+		{ kind: "click", target: "확인" },
+	]);
+	// the goto is retried once by the ladder, but the click on the wrong screen never runs
+	expect(page.did.filter((d) => d.startsWith("click"))).toEqual([]);
+	expect(r.aborted).toBe(true);
+	expect(r.healEvents[0]).toContain("goto: /approvals — 요청 경로 /approvals 대신 로그인 화면");
+	expect(r.verdict).toBe("needs_review");
+});
+
+test("route check: a 404 route is reported, while a benign sub-route redirect runs clean", async () => {
+	const missing = new RoutedPage({}, { "/nope": 404 });
+	const r1 = await runPlan(missing, [{ kind: "goto", path: "/nope" }]);
+	expect(r1.healEvents[0]).toContain("HTTP 404");
+	expect(r1.aborted).toBe(true);
+
+	const redirected = new RoutedPage({ "/orders": "https://app.test/orders/list" });
+	const r2 = await runPlan(redirected, [
+		{ kind: "goto", path: "/orders" },
+		{ kind: "click", target: "확인" },
+	]);
+	expect(r2.healEvents).toEqual([]);
+	expect(r2.verdict).toBe("pass");
 });

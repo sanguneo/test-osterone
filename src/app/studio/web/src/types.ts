@@ -48,6 +48,8 @@ export interface CaseView {
 	passed: number;
 	total: number;
 	heal: string[];
+	/** This `pass` came from a human-approved baseline matching, not from the assertions passing. */
+	baselineLifted?: boolean;
 	assertions: AssertionView[];
 }
 
@@ -56,6 +58,12 @@ export interface RunView {
 	source: string;
 	baseUrl: string;
 	interpreter: "ai" | "rule";
+	/** Model that authored this run's plans (AI runs only) — lets history compare model choices. */
+	model?: string;
+	/** Reasoning effort pinned on the connection; absent when the model's own default was used. */
+	reasoning?: string;
+	/** Wall clock for the whole run. Absent on entries written before this was recorded. */
+	durationMs?: number;
 	counts: Record<Verdict, number>;
 	results: CaseView[];
 	sheetId: string;
@@ -164,11 +172,15 @@ export interface ReviewItem {
 	expected: string;
 	verdict: Verdict;
 	reason: string;
+	/** Why the engine held this case, when it has more to say than the reason code (vision, vacuous check). */
+	holdNote?: string;
 	healTarget?: string;
 	url: string;
 	text: string;
 	screenshot?: string;
 	trace?: boolean;
+	/** False when the case never ran as written — a golden baseline must not sign it off. */
+	baselineEligible?: boolean;
 	ruleVersion: number;
 	env: string;
 	sheetId: string;

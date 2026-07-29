@@ -23,9 +23,19 @@ export function toChatContent(content: string | ContentPart[]): unknown {
 	);
 }
 
+export interface CompleteOptions {
+	/**
+	 * Reasoning effort to use when the connection itself does not pin one. Every call site here is a
+	 * short structured task (author a plan, judge a screenshot, repair one action), and the model's
+	 * own default effort costs seconds per call for no measurable quality gain — the user's explicit
+	 * choice still wins over this.
+	 */
+	defaultEffort?: string;
+}
+
 export interface ModelClient {
 	/** Single-shot completion: messages -> reply text. */
-	complete(messages: ModelMessage[]): Promise<string>;
+	complete(messages: ModelMessage[], opts?: CompleteOptions): Promise<string>;
 }
 
 /** Deterministic, offline fake. The reply fn defaults to echoing nothing. */
@@ -64,7 +74,8 @@ export class ApiKeyModelClient implements ModelClient {
 		this.reasoning = opts.reasoning;
 	}
 
-	async complete(messages: ModelMessage[]): Promise<string> {
+	async complete(messages: ModelMessage[], opts: CompleteOptions = {}): Promise<string> {
+		const effort = this.reasoning ?? opts.defaultEffort;
 		const res = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
 			method: "POST",
 			headers: { "content-type": "application/json", authorization: `Bearer ${this.apiKey}` },
@@ -73,7 +84,7 @@ export class ApiKeyModelClient implements ModelClient {
 				temperature: 0,
 				max_tokens: this.maxTokens,
 				messages: messages.map((m) => ({ role: m.role, content: toChatContent(m.content) })),
-				...(this.reasoning ? { reasoning_effort: this.reasoning } : {}),
+				...(effort ? { reasoning_effort: effort } : {}),
 			}),
 		});
 		if (!res.ok) {

@@ -6,7 +6,7 @@
  * Implements the same `ModelClient` seam as `ApiKeyModelClient`.
  */
 
-import type { ModelClient, ModelMessage } from "./model-client.ts";
+import type { CompleteOptions, ModelClient, ModelMessage } from "./model-client.ts";
 
 export interface OAuthProxyOptions {
 	accessToken: string;
@@ -93,7 +93,8 @@ export class OAuthProxyModelClient implements ModelClient {
 		this.reasoning = opts.reasoning;
 	}
 
-	async complete(messages: ModelMessage[]): Promise<string> {
+	async complete(messages: ModelMessage[], opts: CompleteOptions = {}): Promise<string> {
+		const effort = this.reasoning ?? opts.defaultEffort;
 		const textOf = (c: ModelMessage["content"]): string =>
 			typeof c === "string"
 				? c
@@ -134,7 +135,7 @@ export class OAuthProxyModelClient implements ModelClient {
 			headers,
 			body: JSON.stringify({
 				model: this.model,
-				...(this.reasoning ? { reasoning: { effort: this.reasoning } } : {}),
+				...(effort ? { reasoning: { effort } } : {}),
 				instructions,
 				input,
 				stream: true,

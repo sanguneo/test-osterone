@@ -1,3 +1,4 @@
+import { parseCsv, toCsv } from "../../../../../intake/csv.ts";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { getLang, useLang } from "../i18n";
@@ -365,15 +366,17 @@ export function SheetEditorModal({
 		}
 		// A test sheet is per FILE: merge the picked spreadsheet tabs into ONE sheet, tagging each
 		// tab's rows with a leading 분류 (category) column so the tabs become in-sheet categories.
-		const splitLines = (csv: string) => csv.replace(/\r\n?/g, "\n").split("\n");
-		const csvCell = (value: string) => (/[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value);
-		const header = splitLines(chosen[0]?.csv ?? "")[0] ?? "";
-		const merged = [`분류,${header}`];
-		for (const tab of chosen) {
-			const lines = splitLines(tab.csv);
-			for (let i = 1; i < lines.length; i++) {
-				if (!lines[i]?.trim()) continue;
-				merged.push(`${csvCell(tab.name)},${lines[i]}`);
+		//
+		// Merge by CSV *record*, never by physical line: QA sheets put multi-line text in 예상결과,
+		// and splitting on "\n" would prefix the category onto every continuation line — injecting
+		// "분류," garbage inside the quoted cell and dropping its blank lines.
+		const grids = chosen.map((tab) => ({ name: tab.name, rows: parseCsv(tab.csv) }));
+		const header = grids[0]?.rows[0] ?? [];
+		const merged: string[][] = [["분류", ...header]];
+		for (const tab of grids) {
+			for (const row of tab.rows.slice(1)) {
+				if (!row.some((cell) => cell.trim())) continue;
+				merged.push([tab.name, ...row]);
 			}
 		}
 		const fileName = xlsxName.replace(/\.[^.]+$/, "").trim() || "가져온 시트";
@@ -383,7 +386,7 @@ export function SheetEditorModal({
 				kind: "csv",
 				name: fileName,
 				sheetUrl: "",
-				csvText: merged.join("\n"),
+				csvText: toCsv(merged),
 				origin: "xlsx",
 			},
 		]);

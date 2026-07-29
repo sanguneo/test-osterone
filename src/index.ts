@@ -101,4 +101,13 @@ export {
 } from "./report/benchmark.ts";
 export { createDashboard, serveDashboard } from "./report/dashboard.ts";
 export { toJUnitXml } from "./report/junit.ts";
+export {
+	formatScorecard,
+	type HumanVerdict,
+	type LabelScorecard,
+	parseHumanVerdict,
+	type ScoredCase,
+	type ScoreInput,
+	scoreAgainstLabels,
+} from "./report/label-scorecard.ts";
 export { fixtureReducer, makeFixturePage } from "./testing/fixture-model.ts";

@@ -114,6 +114,22 @@ function passRate(v: RunView): number | null {
 	return total === 0 ? null : (v.counts.pass || 0) / total;
 }
 
+/**
+ * Compact "what produced this run" stamp: model · reasoning · wall clock. Two runs of the same
+ * sheet otherwise look identical in history, so there is no way to tell which model or reasoning
+ * level produced which verdicts. Empty for rule runs and for entries recorded before this existed.
+ */
+function runStamp(v: RunView): string {
+	const parts: string[] = [];
+	if (v.model) parts.push(v.model);
+	if (v.reasoning) parts.push(v.reasoning);
+	if (typeof v.durationMs === "number") {
+		const s = Math.round(v.durationMs / 1000);
+		parts.push(s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`);
+	}
+	return parts.join(" · ");
+}
+
 export function DashboardPanel({
 	selId,
 	project,
@@ -194,6 +210,7 @@ export function DashboardPanel({
 	const prev = sheetRuns[runIdx + 1];
 
 	const rate = run ? passRate(run) : null;
+	const stamp = run ? runStamp(run) : "";
 	const prevRate = prev ? passRate(prev) : null;
 	const delta = rate !== null && prevRate !== null ? Math.round((rate - prevRate) * 100) : null;
 	const rates = useMemo(
@@ -323,6 +340,7 @@ export function DashboardPanel({
 							<div className="sub">
 								{t.caseInterpretLine(run.interpreter === "ai" ? t.ai : t.rule, fmtAgo(run.at, lang))}
 							</div>
+							{stamp ? <div className="sub">{stamp}</div> : null}
 						</div>
 					</div>
 
@@ -343,7 +361,7 @@ export function DashboardPanel({
 							</button>
 						)}
 						<span className="spacer" />
-						{sheetRuns.length > 1 && <select value={runIdx} onChange={(event) => setRunIdx(Number(event.target.value))} aria-label={t.selectRunAria}>{sheetRuns.map((item, index) => <option key={item.at} value={index}>{new Date(item.at).toLocaleString("ko-KR")} · {item.interpreter === "ai" ? t.ai : t.rule}</option>)}</select>}
+						{sheetRuns.length > 1 && <select value={runIdx} onChange={(event) => setRunIdx(Number(event.target.value))} aria-label={t.selectRunAria}>{sheetRuns.map((item, index) => <option key={item.at} value={index}>{new Date(item.at).toLocaleString("ko-KR")} · {item.interpreter === "ai" ? t.ai : t.rule}{runStamp(item) ? ` · ${runStamp(item)}` : ""}</option>)}</select>}
 					</div>
 
 					<div className="data-surface">

@@ -6,48 +6,10 @@
 
 import { createHash } from "node:crypto";
 
+import { parseCsv } from "./csv.ts";
 import type { NormalizedTC, RawTable, TcField } from "./schema.ts";
 
-/** RFC4180-ish CSV parser: handles quotes, embedded commas, and embedded newlines. */
-export function parseCsv(text: string): string[][] {
-	const rows: string[][] = [];
-	let row: string[] = [];
-	let field = "";
-	let inQuotes = false;
-	const s = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-	for (let i = 0; i < s.length; i++) {
-		const ch = s[i];
-		if (inQuotes) {
-			if (ch === '"') {
-				if (s[i + 1] === '"') {
-					field += '"';
-					i++;
-				} else {
-					inQuotes = false;
-				}
-			} else {
-				field += ch;
-			}
-		} else if (ch === '"') {
-			inQuotes = true;
-		} else if (ch === ",") {
-			row.push(field);
-			field = "";
-		} else if (ch === "\n") {
-			row.push(field);
-			rows.push(row);
-			row = [];
-			field = "";
-		} else {
-			field += ch;
-		}
-	}
-	if (field !== "" || row.length > 0) {
-		row.push(field);
-		rows.push(row);
-	}
-	return rows;
-}
+export { parseCsv };
 
 /** First non-empty grid row is the header; remaining rows become header-keyed objects. */
 export function csvToRawTable(text: string): RawTable {
@@ -74,13 +36,16 @@ const FIELD_ALIASES: Record<TcField, string[]> = {
 		"actions",
 		"action",
 		"procedure",
-		"사전조건",
+		"test procedure",
+		"시험절차",
+		"테스트 절차",
+		"재현 절차",
 		"절차",
 		"단계",
-		"재현 절차",
-		"테스트 절차",
-		"test procedure",
 		"시나리오",
+		// Last resort only: a precondition describes the starting state, not what to do. A sheet that
+		// carries both (사전조건 + 시험절차) must map its *procedure* column, whichever comes first.
+		"사전조건",
 	],
 	expected: [
 		"expected result",
@@ -98,15 +63,23 @@ const FIELD_ALIASES: Record<TcField, string[]> = {
 	category: ["category", "분류", "카테고리", "구분", "그룹", "group", "대분류", "중분류", "메뉴", "menu"],
 };
 
-/** Deterministic header→field mapping: exact alias match first, then substring. */
+/**
+ * Deterministic header→field mapping. **Alias priority decides**, not column order: with an
+ * exact-match-first-across-all-aliases rule a sheet listing 사전조건 before 시험절차 would map its
+ * steps to the precondition and silently never execute the real procedure. Within one alias, an
+ * exact header match still beats a substring match.
+ */
 export function mapColumns(headers: string[]): Partial<Record<TcField, string>> {
 	const mapping: Partial<Record<TcField, string>> = {};
 	const lower = headers.map((h) => ({ raw: h, low: h.toLowerCase().trim() }));
 	for (const field of Object.keys(FIELD_ALIASES) as TcField[]) {
-		const aliases = FIELD_ALIASES[field];
-		const exact = lower.find((h) => aliases.includes(h.low));
-		const hit = exact ?? lower.find((h) => aliases.some((a) => h.low.includes(a)));
-		if (hit) mapping[field] = hit.raw;
+		for (const alias of FIELD_ALIASES[field]) {
+			const hit = lower.find((h) => h.low === alias) ?? lower.find((h) => h.low.includes(alias));
+			if (hit) {
+				mapping[field] = hit.raw;
+				break;
+			}
+		}
 	}
 	return mapping;
 }
@@ -193,7 +166,14 @@ export function ingestCsv(
 ): { all: NormalizedTC[] } & DedupeResult {
 	const table = csvToRawTable(text);
 	const mapping = { ...mapColumns(table.headers), ...mappingOverride };
-	const all = normalizeTable(table, mapping);
+	// Spreadsheets carry sub-header and spacer rows (a "Chrome | Edge" band under the real header,
+	// section separators). Those normalize to a case with nothing to do and nothing to check, which
+	// would sit in the review queue as permanent noise — a row with no title, no steps and no
+	// expected result is not a test case. Only prune when the mapping resolved one of those columns:
+	// with nothing mapped, "empty" says nothing about the row.
+	const mapped = normalizeTable(table, mapping);
+	const canJudgeEmptiness = !!(mapping.title || mapping.step || mapping.expected);
+	const all = canJudgeEmptiness ? mapped.filter((tc) => tc.title || tc.steps.length > 0 || tc.expected) : mapped;
 	return { all, ...dedupe(all) };
 }
 

@@ -9,7 +9,7 @@
  * verified by the G004 benchmark against the fixture site (needs a real browser).
  */
 
-import { type Browser, type BrowserContext, chromium, type Locator, type Page as PwPage } from "playwright";
+import type { Browser, BrowserContext, Locator, Page as PwPage } from "playwright";
 
 import type { Page, PageSnapshot } from "./page.ts";
 
@@ -25,17 +25,80 @@ export interface BrowserPageOptions {
 	trace?: boolean;
 }
 
-/** Map Playwright's "browser not installed" launch failure to an actionable, localized message (null if unrelated). */
+/**
+ * Map a launch failure to an actionable, localized message (null if unrelated). Two distinct
+ * causes reach here now that the module is loaded on demand: the browser binary was never
+ * downloaded, or the `playwright` package itself is missing from the install.
+ */
 export function browserInstallHint(errorMessage: string): string | null {
+	if (/Cannot find (?:module|package) ['"]?playwright|ERR_MODULE_NOT_FOUND/i.test(errorMessage)) {
+		return "Playwright 패키지가 설치되어 있지 않습니다. 터미널에서 `bun install`을 실행한 뒤 `bun run setup`으로 브라우저를 내려받으세요.";
+	}
 	if (/Executable doesn't exist|playwright install|Please run the following command/i.test(errorMessage)) {
 		return "Chromium 브라우저가 설치되어 있지 않습니다. 터미널에서 `npx playwright install chromium` (또는 `bun run setup`)을 실행한 뒤 다시 시도하세요.";
 	}
 	return null;
 }
 
-/** Launch Chromium, rethrowing the cryptic missing-binary error as a clear, actionable one. */
+/**
+ * Whitespace-tolerant matcher for a human label: Korean UI copy differs from an authored
+ * hint only by spacing ("아이디를 입력해주세요" vs the live "아이디를 입력해 주세요.").
+ * Returns null for targets too short to match safely.
+ */
+export function flexTextRe(target: string): RegExp | null {
+	const squished = target.replace(/\s+/g, "");
+	if (squished.length < 2) return null;
+	return new RegExp(
+		squished
+			.split("")
+			.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+			.join("\\s*"),
+	);
+}
+
+/**
+ * Is this target a CSS selector rather than a human label? Only `#id`, `.class`, `[attr=…]` and
+ * bare tag names qualify — anything with spaces, slashes, or Korean is UI copy, and feeding that to
+ * a CSS engine raises a parse error instead of simply not matching.
+ */
+export function looksLikeCss(target: string): boolean {
+	const t = target.trim();
+	if (!t || /[\s가-힣]/.test(t)) return false;
+	return /^[.#[]/.test(t) || /^[a-zA-Z][\w-]*$/.test(t);
+}
+
+/**
+ * Elements Playwright's `fill` can actually write to. Restricting fills to these keeps a
+ * label/heading that shares the field's text (very common on Korean login forms) from winning
+ * the locator race and failing the action with "Element is not an <input>".
+ */
+const FILLABLE_CSS =
+	'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]), textarea, [contenteditable="true"], [contenteditable=""]';
+
+/**
+ * Playwright is loaded on demand, not at import time. `chromium.launch` is this file's only
+ * runtime use of the package — everything else is types — so a dynamic import keeps the ~0.5s
+ * module load (and the browser requirement itself) off every path that never opens a browser:
+ * the CLI, Studio boot, sheet ingest, rule/verdict evaluation, and the unit suites that exercise
+ * the pure helpers here. Cached after the first success; a failure is not cached, so a user who
+ * installs the browser mid-session does not have to restart Studio.
+ */
+let chromiumPromise: Promise<typeof import("playwright").chromium> | null = null;
+function loadChromium(): Promise<typeof import("playwright").chromium> {
+	chromiumPromise ??= import("playwright").then(
+		(m) => m.chromium,
+		(err) => {
+			chromiumPromise = null;
+			throw err;
+		},
+	);
+	return chromiumPromise;
+}
+
+/** Launch Chromium, rethrowing the cryptic missing-binary/missing-package error as a clear, actionable one. */
 async function launchChromium(opts: { headless?: boolean; slowMo?: number }): Promise<Browser> {
 	try {
+		const chromium = await loadChromium();
 		return await chromium.launch(opts);
 	} catch (err) {
 		const hint = browserInstallHint((err as Error).message ?? "");
@@ -49,6 +112,9 @@ export function launchBrowser(headless = true): Promise<Browser> {
 }
 
 export class BrowserPage implements Page {
+	/** HTTP status of the last document navigation (null when the browser served it from cache/SPA). */
+	private lastStatus: number | null = null;
+
 	private constructor(
 		private readonly browser: Browser,
 		private readonly context: BrowserContext,
@@ -64,7 +130,9 @@ export class BrowserPage implements Page {
 		const browser = opts.browser ?? (await launchChromium({ headless: opts.headless ?? true, slowMo: opts.slowMo }));
 		const context = await browser.newContext({ viewport: opts.viewport ?? { width: 1280, height: 800 } });
 		const tracing = !!opts.trace;
-		if (tracing) await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+		// `sources: false`: the sources in a trace are this engine's own files, not the app under
+		// test, so they only inflate every kept trace — and hundreds of kept traces fill a disk.
+		if (tracing) await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
 		const pwPage = await context.newPage();
 		// Auto-dismiss native alert/confirm/beforeunload popups so they never block a test run.
 		pwPage.on("dialog", (d) => void d.dismiss().catch(() => {}));
@@ -81,10 +149,57 @@ export class BrowserPage implements Page {
 
 	async goto(path: string): Promise<void> {
 		const url = path.startsWith("http") ? path : `${this.baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
-		await this.pwPage.goto(url, { waitUntil: "domcontentloaded", timeout: this.timeoutMs });
+		const res = await this.pwPage.goto(url, { waitUntil: "domcontentloaded", timeout: this.timeoutMs });
+		// Remember the document status so the runner can tell "the route 404'd" from "the click missed".
+		this.lastStatus = res ? res.status() : null;
+		await this.settleApp();
 	}
 
-	async click(target: string): Promise<void> {
+	/** Where the browser actually ended up (client redirects included) + the document's HTTP status. */
+	async landing(): Promise<{ url: string; status: number | null }> {
+		return { url: this.pwPage.url(), status: this.lastStatus };
+	}
+
+	/**
+	 * Browser-level sign-out: drop cookies and web storage, then return to the entry page. A
+	 * login-feature case must start signed out — otherwise it inherits the batch's shared session
+	 * and there is no login form left to test.
+	 */
+	async resetSession(): Promise<void> {
+		await this.context.clearCookies().catch(() => {});
+		await this.pwPage
+			.evaluate(() => {
+				try {
+					localStorage.clear();
+					sessionStorage.clear();
+				} catch {
+					// storage can be blocked (about:blank, third-party rules) — cookies alone still sign us out
+				}
+			})
+			.catch(() => {});
+		await this.goto("/");
+	}
+
+	/**
+	 * Client-rendered apps (Nuxt/Vue/React) return from DOMContentLoaded with an empty app shell and
+	 * mount (and often client-redirect to /auth/login) milliseconds later. Waiting for the first paint
+	 * here means the next action — and any snapshot-based precondition — sees the real DOM, not the shell.
+	 */
+	private async settleApp(): Promise<void> {
+		await this.pwPage
+			.waitForFunction(
+				() => {
+					const b = document.body;
+					if (!b) return false;
+					return (b.innerText || "").trim().length > 0 || !!b.querySelector("input,textarea,button,a,table,img,svg");
+				},
+				undefined,
+				{ timeout: this.timeoutMs },
+			)
+			.catch(() => {});
+	}
+
+	async click(target: string, timeoutMs = this.timeoutMs): Promise<void> {
 		// Prefer an interactive element (button/link/menuitem/tab/checkbox/label/placeholder) over a
 		// plain text match — otherwise a heading that shares the label (e.g. an <h1>로그인</h1> above a
 		// 로그인 button) wins by DOM order and the click hits dead text.
@@ -99,13 +214,13 @@ export class BrowserPage implements Page {
 			.first();
 		const locator = (await clickable.count().catch(() => 0)) > 0 ? clickable : this.locate(target);
 		try {
-			await locator.click({ timeout: this.timeoutMs });
+			await locator.click({ timeout: timeoutMs });
 			return;
 		} catch (err) {
 			// A popup/overlay may be intercepting pointer events — clear it and retry.
 			await this.dismissOverlays();
 			try {
-				await locator.click({ timeout: this.timeoutMs });
+				await locator.click({ timeout: timeoutMs });
 				return;
 			} catch {
 				// Last resort: match the target against the live DOM's clickable text and dispatch a
@@ -178,20 +293,162 @@ export class BrowserPage implements Page {
 			.catch(() => {});
 	}
 
-	async fill(target: string, value: string): Promise<void> {
-		await this.locate(target).fill(value, { timeout: this.timeoutMs });
+	async fill(target: string, value: string, timeoutMs = this.timeoutMs): Promise<void> {
+		try {
+			await this.locateFillable(target).fill(value, { timeout: timeoutMs });
+			return;
+		} catch (err) {
+			// Grounded fallback: match the target against every real input's label/placeholder/name.
+			if (await this.fillByProximity(target, value)) return;
+			// Last resort: the wide ranking (raw css selectors, exotic contenteditable widgets).
+			try {
+				await this.locate(target).fill(value, { timeout: 1000 });
+				return;
+			} catch {
+				throw err;
+			}
+		}
 	}
 
-	async snapshot(): Promise<PageSnapshot> {
+	/** Fill-specific candidate ranking: label -> placeholder -> name/id -> title, restricted to writable elements. */
+	private locateFillable(target: string): Locator {
+		const p = this.pwPage;
+		const esc = target.replace(/["\\]/g, "\\$&");
+		let loc = p
+			.getByLabel(target)
+			.or(p.getByPlaceholder(target))
+			.or(p.locator(`[name="${esc}"], [id="${esc}"], [title="${esc}"], [aria-label="${esc}"]`));
+		const flex = flexTextRe(target);
+		if (flex) loc = loc.or(p.getByLabel(flex)).or(p.getByPlaceholder(flex));
+		return loc.and(p.locator(FILLABLE_CSS)).first();
+	}
+
+	/**
+	 * Find the visible writable field whose own metadata or nearby label text matches the target
+	 * (spacing-insensitive), tag it, and let Playwright fill it so real input/change events still fire.
+	 */
+	private async fillByProximity(target: string, value: string): Promise<boolean> {
+		const squished = target.replace(/\s+/g, "");
+		if (squished.length < 2) return false;
+		const marked = await this.pwPage
+			.evaluate(
+				({ sq, fillable }) => {
+					const norm = (s: string | null | undefined) => (s || "").replace(/\s+/g, "");
+					for (const stale of document.querySelectorAll("[data-osteron-fill]"))
+						stale.removeAttribute("data-osteron-fill");
+					const labelsOf = (el: Element): string[] => {
+						const out: (string | null | undefined)[] = [
+							el.getAttribute("placeholder"),
+							el.getAttribute("aria-label"),
+							el.getAttribute("name"),
+							el.getAttribute("title"),
+							el.id,
+						];
+						if (el.id) out.push(document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent);
+						out.push(el.closest("label")?.textContent);
+						for (const id of (el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean))
+							out.push(document.getElementById(id)?.textContent);
+						const group = el.closest("div,li,td,fieldset,form");
+						if (group) for (const l of group.querySelectorAll("label,legend")) out.push(l.textContent);
+						return out.map(norm).filter((s) => s.length >= 2);
+					};
+					let best: HTMLElement | null = null;
+					let bestLen = Number.POSITIVE_INFINITY;
+					for (const el of document.querySelectorAll(fillable)) {
+						const r = el.getBoundingClientRect();
+						if (!r.width || !r.height) continue;
+						for (const label of labelsOf(el)) {
+							if (!label.includes(sq) && !sq.includes(label)) continue;
+							if (label.length >= bestLen) continue;
+							best = el as HTMLElement;
+							bestLen = label.length;
+						}
+					}
+					if (!best) return false;
+					best.setAttribute("data-osteron-fill", "1");
+					return true;
+				},
+				{ sq: squished, fillable: FILLABLE_CSS },
+			)
+			.catch(() => false);
+		if (!marked) return false;
+		const hit = this.pwPage.locator("[data-osteron-fill]").first();
+		try {
+			await hit.fill(value, { timeout: this.timeoutMs });
+			return true;
+		} catch {
+			return false;
+		} finally {
+			await this.pwPage
+				.evaluate(() => {
+					for (const el of document.querySelectorAll("[data-osteron-fill]")) el.removeAttribute("data-osteron-fill");
+				})
+				.catch(() => {});
+		}
+	}
+
+	async snapshot(opts: { screenshot?: boolean } = {}): Promise<PageSnapshot> {
 		const text = await this.pwPage
 			.locator("body")
 			.innerText()
 			.catch(() => "");
-		const screenshot = await this.pwPage
-			.screenshot({ type: "png" })
-			.then((buf) => `data:image/png;base64,${buf.toString("base64")}`)
-			.catch(() => undefined);
-		return { url: this.pwPage.url(), text, html: await this.pwPage.content(), screenshot };
+		// The PNG dominates the cost (~40ms vs ~5ms for text+html, more on a busy page), and polling
+		// loops re-snapshot up to a dozen times per case — they ask for it to be skipped.
+		const screenshot =
+			opts.screenshot === false
+				? undefined
+				: await this.pwPage
+						.screenshot({ type: "png" })
+						.then((buf) => `data:image/png;base64,${buf.toString("base64")}`)
+						.catch(() => undefined);
+		return {
+			url: this.pwPage.url(),
+			text,
+			html: await this.pwPage.content(),
+			fields: await this.fieldValues(),
+			screenshot,
+		};
+	}
+
+	/**
+	 * Live values of the page's form fields, keyed by the label a user would read.
+	 *
+	 * Typed text is a DOM *property*, so it appears in neither `innerText` nor `content()` — which
+	 * made every "입력 제한되어야 한다" case unfalsifiable. Read from the live page instead. Best
+	 * effort: a detached node mid-render must not fail the snapshot the verdict depends on.
+	 */
+	private async fieldValues(): Promise<Record<string, string>> {
+		return await this.pwPage
+			.evaluate(() => {
+				const out: Record<string, string> = {};
+				const labelOf = (el: Element): string => {
+					const id = el.getAttribute("id");
+					const byFor = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent : null;
+					const wrapping = el.closest("label")?.textContent;
+					return (
+						byFor?.trim() ||
+						wrapping?.trim() ||
+						el.getAttribute("aria-label")?.trim() ||
+						el.getAttribute("placeholder")?.trim() ||
+						el.getAttribute("name")?.trim() ||
+						el.tagName.toLowerCase()
+					);
+				};
+				const nodes = document.querySelectorAll<HTMLElement>(
+					'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea, [contenteditable="true"]',
+				);
+				let i = 0;
+				for (const el of nodes) {
+					const v =
+						el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : (el.innerText ?? "");
+					if (!v) continue;
+					// Distinct keys for repeated labels so one field never masks another's value.
+					const key = labelOf(el);
+					out[key in out ? `${key}#${++i}` : key] = v;
+				}
+				return out;
+			})
+			.catch(() => ({}));
 	}
 
 	/** Self-heal candidate ranking: try the most specific locator first, widen to raw css last. */
@@ -208,20 +465,17 @@ export class BrowserPage implements Page {
 			.or(p.getByText(target, { exact: false }));
 		// Whitespace-tolerant fallback: Korean labels often differ only by spacing
 		// (e.g. "전체 결재문서" vs "전체결재문서" vs "전체 결재 문서").
-		const squished = target.replace(/\s+/g, "");
-		if (squished.length >= 2) {
-			const flex = new RegExp(
-				squished
-					.split("")
-					.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-					.join("\\s*"),
-			);
+		const flex = flexTextRe(target);
+		if (flex) {
 			loc = loc
 				.or(p.getByText(flex))
 				.or(p.getByRole("link", { name: flex }))
 				.or(p.getByRole("button", { name: flex }));
 		}
-		return loc.or(p.locator(target)).first();
+		// Raw CSS only when the target actually is one. A human label like "아이디/비밀번호 찾기"
+		// makes Playwright throw a *selector parse* error at action time, which kills the whole
+		// `.or()` chain — including the role/text candidates that would have matched.
+		return (looksLikeCss(target) ? loc.or(p.locator(target)) : loc).first();
 	}
 
 	/** Begin a per-case trace chunk (no-op unless tracing was enabled). */

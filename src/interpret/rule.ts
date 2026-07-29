@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { mapColumns } from "../intake/ingest.ts";
 import type { TcField } from "../intake/schema.ts";
 import type { ModelClient, ModelMessage } from "../model/model-client.ts";
+import type { RouteEntry } from "./recon.ts";
 
 export const INTENT_KINDS = ["navigate", "click", "input", "verify", "wait"] as const;
 export type IntentKind = (typeof INTENT_KINDS)[number];
@@ -25,14 +26,24 @@ export interface InterpretationRule {
 	appContext?: string;
 	/** Author-provided free-text code/repo context fed to AI plan authoring (per sheet). */
 	codeContext?: string;
+	/**
+	 * The app's label→route table as recon observed it. Structured, not prose: it is read by code that
+	 * derives a url assertion for a navigation expectation, which a paragraph cannot support.
+	 */
+	routes?: RouteEntry[];
 }
 
+/**
+ * Default intent vocabulary. Korean terms are first-class, not an add-on: the sheets this tool
+ * exists for are written in Korean ("1. 개인정보처리방침 선택"), and an English-only vocabulary
+ * classifies every one of their steps as uninterpretable — a whole run that executes nothing.
+ */
 const DEFAULT_INTENTS: Record<IntentKind, string[]> = {
-	navigate: ["navigate", "go to", "open", "visit"],
-	click: ["click", "press", "tap", "select"],
-	input: ["enter", "type", "fill", "input"],
-	verify: ["verify", "expect", "should", "assert", "see", "shows"],
-	wait: ["wait", "until", "pause"],
+	navigate: ["navigate", "go to", "open", "visit", "이동", "진입", "접속", "열기", "들어가"],
+	click: ["click", "press", "tap", "select", "선택", "클릭", "누르", "터치", "탭"],
+	input: ["enter", "type", "fill", "input", "입력", "기입", "작성", "타이핑"],
+	verify: ["verify", "expect", "should", "assert", "see", "shows", "확인", "검증", "표출", "노출", "표시"],
+	wait: ["wait", "until", "pause", "대기", "기다"],
 };
 
 const DEFAULT_DESTRUCTIVE = ["delete", "remove", "drop", "purge", "wipe", "reset", "destroy"];
@@ -135,6 +146,16 @@ export function setRuleCodeContext(rule: InterpretationRule, codeContext: string
 	const next = codeContext.trim();
 	if (next === (rule.codeContext ?? "").trim()) return rule;
 	return { ...rule, codeContext: next || undefined, ruleVersion: rule.ruleVersion + 1 };
+}
+
+/** Set the observed route table; bumps the version so cached plans re-author against it. */
+export function setRuleRoutes(rule: InterpretationRule, routes: readonly RouteEntry[]): InterpretationRule {
+	const next = routes.map((r) => ({ label: r.label, path: r.path }));
+	const same =
+		next.length === (rule.routes?.length ?? 0) &&
+		next.every((r, i) => r.label === rule.routes?.[i]?.label && r.path === rule.routes?.[i]?.path);
+	if (same) return rule;
+	return { ...rule, routes: next.length ? next : undefined, ruleVersion: rule.ruleVersion + 1 };
 }
 
 /** Human-readable warnings that keep a rule interpretable: ambiguous or empty intents. */

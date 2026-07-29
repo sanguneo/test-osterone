@@ -64,8 +64,8 @@ export const api = {
 		j<{ queue: ReviewItem[] }>("/api/review/approve", post({ caseId, projectId, sheetId })),
 	reviewReject: (caseId: string, projectId: string, sheetId?: string) =>
 		j<{ queue: ReviewItem[] }>("/api/review/reject", post({ caseId, projectId, sheetId })),
-	reviewApproveAll: (projectId: string, sheetId?: string) =>
-		j<{ approved: number; queue: ReviewItem[] }>("/api/review/approve-all", post({ projectId, sheetId })),
+	// No `reviewApproveAll`: bulk-blessing golden baselines was measured turning six correctly-held
+	// defects into permanent passes in one click. Approve per case, or mark it failed.
 	xlsxConvert: (base64: string) => j<{ sheets: XlsxSheet[] }>("/api/xlsx/convert", post({ base64 })),
 
 	/** Stream a run: emits start / case / done / error events as they arrive. */

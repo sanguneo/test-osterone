@@ -21,7 +21,8 @@
 		"studio": "bun run studio:build && node --experimental-transform-types src/app/studio/server.ts",
 		"studio:build": "cd src/app/studio/web && vite build",
 		"studio:webcheck": "bun node_modules/typescript/bin/tsc -p src/app/studio/web/tsconfig.json",
-		"doctor": "npx react-doctor@latest"
+		"doctor": "npx react-doctor@latest",
+		"measure": "node --experimental-transform-types scripts/measure-sheet.ts"
 	},
 	"engines": {
 		"bun": ">=1.3.0",

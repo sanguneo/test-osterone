@@ -11,15 +11,53 @@ export interface PageSnapshot {
 	text: string;
 	/** DOM/HTML snapshot used for evidence + content-addressed refs. */
 	html: string;
+	/**
+	 * Current values of the page's form fields, keyed by the label a user sees.
+	 *
+	 * The DOM's text content never contains what someone typed — an `<input>`'s live value is a
+	 * property, not text — so a case like "12자 초과 입력 → 입력 제한되어야 한다" was unverifiable:
+	 * `textNotIncludes: <the typed string>` passed whether the app restricted the input or not. On
+	 * the sheet this engine was built for, 57 of 652 cases are exactly that shape.
+	 *
+	 * Transient on purpose: assertions read it and nothing persists it. Evidence, baselines and
+	 * review cards all use `text`, so a typed password never reaches disk or a review card.
+	 */
+	fields?: Record<string, string>;
 	/** Optional base64 PNG data URL (real browser only) — evidence for human review. */
 	screenshot?: string;
 }
 
 export interface Page {
 	goto(path: string): Promise<void>;
-	click(target: string): Promise<void>;
-	fill(target: string, value: string): Promise<void>;
-	snapshot(): Promise<PageSnapshot>;
+	/**
+	 * `timeoutMs` overrides the page's default for this one action. The runner spends a short budget
+	 * on the first try (a present element resolves immediately) and the full one after recovery, so a
+	 * target that simply does not exist costs seconds instead of tens of seconds across a batch.
+	 */
+	click(target: string, timeoutMs?: number): Promise<void>;
+	fill(target: string, value: string, timeoutMs?: number): Promise<void>;
+	/**
+	 * Current page state. Pass `{ screenshot: false }` in polling loops: the PNG is ~90% of the
+	 * cost and only the evidence snapshot (and vision) actually needs it.
+	 */
+	snapshot(opts?: { screenshot?: boolean }): Promise<PageSnapshot>;
+	/**
+	 * Optional deterministic recovery hook: close whatever is intercepting input (onboarding
+	 * modal, notice popup, overlay) so a failed action can be retried. Only the real
+	 * `BrowserPage` implements it; `FakePage` omits it, so unit tests retry immediately.
+	 */
+	dismissOverlays?(): Promise<void>;
+	/**
+	 * Optional post-navigation truth: where the browser actually ended up and the document's HTTP
+	 * status. Cheap by design (no screenshot) so the runner can verify every `goto` landed on the
+	 * route it asked for — a silent redirect to a login/error page is otherwise invisible.
+	 */
+	landing?(): Promise<{ url: string; status: number | null }>;
+	/**
+	 * Optional browser-level sign-out (clear cookies + web storage, return to the entry page) so a
+	 * login-feature case starts from a signed-out state instead of inheriting the shared session.
+	 */
+	resetSession?(): Promise<void>;
 	/**
 	 * Optional per-case Playwright trace chunk hooks. Only the real `BrowserPage`
 	 * implements them; `FakePage` omits them so unit tests are unaffected.
@@ -64,7 +102,13 @@ export class FakePage implements Page {
 		this.state = this.reducer({ kind: "fill", target, value }, this.state, this.inputs);
 	}
 
+	/**
+	 * The scripted state, plus whatever has been typed. The typed values ride along as `fields` so a
+	 * test exercises an "입력 제한" assertion exactly the way the real browser does: a reducer that
+	 * restricts the input simply clears the value, and the assertion then genuinely discriminates.
+	 * A reducer may override a field explicitly (that wins) to model the app rejecting the input.
+	 */
 	async snapshot(): Promise<PageSnapshot> {
-		return { ...this.state };
+		return { ...this.state, fields: { ...this.inputs, ...(this.state.fields ?? {}) } };
 	}
 }
