@@ -448,11 +448,26 @@ export async function attemptLogin(
 	} = {},
 ): Promise<LoginResult> {
 	const budgetRetries = Math.max(0, opts.retries ?? 1);
-	let res = await attemptLoginOnce(page, account, opts);
+	/**
+	 * A thrown navigation error is a failed attempt, not a broken contract.
+	 *
+	 * This function promises a definite ok/!ok so a caller can decide whether to abort a batch — but
+	 * `page.goto` throws, and that propagated straight past the retry and out of the batch. One
+	 * transient `net::ERR_ABORTED` on the first case destroyed a 98-case run that was 33 minutes of
+	 * model work. Turn it into a result so the retry that already exists can do its job.
+	 */
+	const once = async (): Promise<LoginResult> => {
+		try {
+			return await attemptLoginOnce(page, account, opts);
+		} catch (err) {
+			return { ok: false, note: `로그인 시도 중 오류: ${((err as Error).message ?? "").split("\n")[0]}` };
+		}
+	};
+	let res = await once();
 	for (let attempt = 0; attempt < budgetRetries && !res.ok && !res.rejected; attempt++) {
 		opts.onRetry?.(res.note);
 		await page.resetSession?.().catch(() => {});
-		res = await attemptLoginOnce(page, account, opts);
+		res = await once();
 	}
 	return res;
 }

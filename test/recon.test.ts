@@ -385,6 +385,44 @@ test("attemptLogin retries a swallowed submit and reports why, so every caller g
 	expect(page.resets).toHaveLength(1);
 });
 
+test("a thrown navigation error is a failed attempt, not an exception the caller must handle", async () => {
+	// `attemptLogin` promises a definite ok/!ok so a batch can decide whether to abort. `page.goto`
+	// throws, and that used to propagate past the retry and out of the run: one transient
+	// net::ERR_ABORTED on the first case destroyed a 98-case batch worth 33 minutes of model work.
+	let attempts = 0;
+	let signedIn = false;
+	const flaky: Page = {
+		async goto() {
+			attempts++;
+			signedIn = false;
+			if (attempts === 1) throw new Error("page.goto: net::ERR_ABORTED at https://app\nCall log:\n  - navigating");
+		},
+		async click() {
+			signedIn = true;
+		},
+		async fill() {},
+		async snapshot() {
+			return signedIn
+				? { url: "/dashboard", text: "대시보드", html: "<main>대시보드</main>" }
+				: {
+						url: "/login",
+						text: "아이디 비밀번호 로그인",
+						html: "<input placeholder='아이디' /><input placeholder='비밀번호' /><button>로그인</button>",
+					};
+		},
+	};
+	const notes: string[] = [];
+	const res = await attemptLogin(
+		flaky,
+		{ username: "u", password: "p" },
+		{ settleTimeoutMs: 1200, fieldWaitMs: 500, onRetry: (n) => notes.push(n) },
+	);
+	// The throw became a retryable failure, the retry navigated again, and the second attempt landed.
+	expect(attempts).toBe(2);
+	expect(res.ok).toBe(true);
+	expect(notes[0]).toContain("net::ERR_ABORTED");
+});
+
 test("attemptLogin never retries a credential the app refused, however many retries are allowed", async () => {
 	// A refused password re-submitted is a locked account, not a second chance.
 	const page = new SpaLoginPage(0);
