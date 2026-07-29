@@ -37,9 +37,23 @@ bun run typecheck        # tsc --noEmit (engine)
 bun run studio:webcheck  # tsc for the web app
 bun run lint             # biome check
 bun run fmt              # biome format --write (fix style before committing)
-bun test                 # 132/132 must stay green
+bun test                 # 211/211 must stay green
 bun run studio:build     # only if you touched src/app/studio/web
 ```
+
+## Measuring against human verdicts
+
+`bun test` proves the engine is deterministic; it cannot tell you whether the engine agrees with a
+person about a real app. If you touch anything that can change a verdict, score a labelled sheet:
+
+```bash
+bun run studio                                          # in one terminal
+bun run measure -- <projectId> <sheetId> [labelColumn]   # in another; default column: 검증 결과
+```
+
+It runs the sheet live and compares each verdict to the QA verdict already recorded in the sheet,
+then **exits non-zero if any case a human filed as a defect came back green**. `held` is not a miss —
+declining to judge is the engine working. Watch `false-pass` first, `false-fail` second.
 
 ## Non-negotiable invariants
 
