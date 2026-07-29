@@ -20,10 +20,13 @@ import { ingestCsv } from "../src/intake/ingest.ts";
 import { formatScorecard, scoreAgainstLabels, type ScoreInput } from "../src/report/label-scorecard.ts";
 
 const BASE = process.env.STUDIO_URL?.replace(/\/$/, "") || "http://localhost:8686";
-const [projectId, sheetId, labelColumn = "검증 결과"] = process.argv.slice(2);
+const argv = process.argv.slice(2);
+/** Score the run already in history instead of running again — a 15-minute run should not be repeated to re-score it. */
+const scoreOnly = argv.includes("--score-only");
+const [projectId, sheetId, labelColumn = "검증 결과"] = argv.filter((a) => !a.startsWith("--"));
 
 if (!projectId || !sheetId) {
-	console.error("usage: measure-sheet.ts <projectId> <sheetId> [labelColumn]");
+	console.error("usage: measure-sheet.ts <projectId> <sheetId> [labelColumn] [--score-only]");
 	process.exit(2);
 }
 
@@ -51,6 +54,7 @@ const sheet = project.sheets.find((s) => s.id === sheetId);
 if (!sheet) throw new Error(`no sheet ${sheetId} in ${projectId}`);
 
 // Run it. The server hydrates the sheet content from disk, so csvText stays empty on the wire.
+if (!scoreOnly) {
 const res = await fetch(`${BASE}/api/run`, {
 	method: "POST",
 	headers: { "content-type": "application/json" },
@@ -65,25 +69,26 @@ const res = await fetch(`${BASE}/api/run`, {
 		aiInterpret: project.aiInterpret,
 		lenientMatch: project.lenientMatch,
 	}),
-});
-if (!res.ok || !res.body) throw new Error(`POST /api/run -> ${res.status} ${await res.text()}`);
+	});
+	if (!res.ok || !res.body) throw new Error(`POST /api/run -> ${res.status} ${await res.text()}`);
 
-let buf = "";
-for await (const chunk of res.body) {
-	buf += Buffer.from(chunk as Uint8Array).toString("utf8");
-	const lines = buf.split("\n");
-	buf = lines.pop() ?? "";
-	for (const line of lines) {
-		if (!line.trim()) continue;
-		let ev: Record<string, unknown>;
-		try {
-			ev = JSON.parse(line);
-		} catch {
-			continue;
+	let buf = "";
+	for await (const chunk of res.body) {
+		buf += Buffer.from(chunk as Uint8Array).toString("utf8");
+		const lines = buf.split("\n");
+		buf = lines.pop() ?? "";
+		for (const line of lines) {
+			if (!line.trim()) continue;
+			let ev: Record<string, unknown>;
+			try {
+				ev = JSON.parse(line);
+			} catch {
+				continue;
+			}
+			if (ev.type === "start") console.log(`run: ${ev.total} cases · ${ev.baseUrl} · ${ev.interpreter}`);
+			else if (ev.type === "notice") console.log(`  · ${ev.message}`);
+			else if (ev.type === "error") console.error(`  ! ${ev.error}`);
 		}
-		if (ev.type === "start") console.log(`run: ${ev.total} cases · ${ev.baseUrl} · ${ev.interpreter}`);
-		else if (ev.type === "notice") console.log(`  · ${ev.message}`);
-		else if (ev.type === "error") console.error(`  ! ${ev.error}`);
 	}
 }
 
