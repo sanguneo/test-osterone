@@ -31,6 +31,27 @@ export interface CompleteOptions {
 	 * choice still wins over this.
 	 */
 	defaultEffort?: string;
+	/**
+	 * Hard ceiling on one request, in ms. Default `DEFAULT_REQUEST_TIMEOUT_MS`.
+	 *
+	 * Neither client bounded a request at all, so a call that never answers was left to undici's
+	 * defaults (300s headers + 300s body). Measured: one authoring call stalled a 98-case batch for
+	 * nine minutes, which alone was 27% of that run's wall clock and long enough to lose the client
+	 * watching it. A model that has stopped answering is a failure, not something to wait out.
+	 */
+	timeoutMs?: number;
+}
+
+/**
+ * Generous on purpose: high reasoning effort on a real authoring prompt legitimately takes tens of
+ * seconds, and a timeout that fires on healthy work would trade a stall for silent rule-interpretation
+ * fallbacks — a far worse failure, because it is invisible in the verdicts.
+ */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+
+/** Abort signal for one request, honouring an explicit override of the default ceiling. */
+export function requestTimeoutSignal(opts: CompleteOptions = {}): AbortSignal {
+	return AbortSignal.timeout(Math.max(1, opts.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS));
 }
 
 export interface ModelClient {
@@ -86,6 +107,7 @@ export class ApiKeyModelClient implements ModelClient {
 				messages: messages.map((m) => ({ role: m.role, content: toChatContent(m.content) })),
 				...(effort ? { reasoning_effort: effort } : {}),
 			}),
+			signal: requestTimeoutSignal(opts),
 		});
 		if (!res.ok) {
 			throw new Error(`model request failed: ${res.status} ${(await res.text()).slice(0, 200)}`);

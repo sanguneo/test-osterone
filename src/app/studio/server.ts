@@ -847,6 +847,14 @@ export async function runBatch(
 			accounts.find((a) => a.role && tc.role && a.role.trim().toLowerCase() === tc.role.trim().toLowerCase()) ??
 			defaultAccount;
 		const PLAN_PREFETCH = 4;
+		/**
+		 * How long the case loop waits for a plan before running the case on rules instead.
+		 *
+		 * Above the model client's own per-request ceiling, so a bounded-but-slow call still gets to
+		 * finish and be used; this only catches the case where waiting longer costs more than the plan
+		 * is worth to *this* run.
+		 */
+		const PLAN_BUDGET_MS = 150_000;
 		const planning = new Map<string, Promise<AuthoredPlan | undefined>>();
 		const authorAhead = (from: number): void => {
 			if (!ai || !modelClient || signal?.aborted) return;
@@ -854,22 +862,43 @@ export async function runBatch(
 				const tc = cases[i];
 				if (!tc || planning.has(tc.caseId)) continue;
 				const acct = accountFor(tc);
+				const authored = getOrAuthorPlan(tc, sheetSt.rule, sheetSt.planCache, modelClient, {
+					referenceRepo: input.referenceRepo,
+					username: acct?.username,
+					password: acct?.password,
+				});
+				/**
+				 * Stop waiting after a budget, but let the authoring finish in the background.
+				 *
+				 * The case loop awaits this exact promise, so one slow call holds the whole batch: a single
+				 * authoring request stalled a 98-case run for nine minutes, 27% of its wall clock, and the
+				 * client watching it timed out. The request itself is now bounded, but a *legitimately*
+				 * slow call must not hold 97 other cases either — so this case falls back to rule
+				 * interpretation while the model keeps working, and the plan it eventually returns still
+				 * lands in the cache for the next run rather than being thrown away.
+				 */
 				planning.set(
 					tc.caseId,
-					getOrAuthorPlan(tc, sheetSt.rule, sheetSt.planCache, modelClient, {
-						referenceRepo: input.referenceRepo,
-						username: acct?.username,
-						password: acct?.password,
-					})
-						.then((r) => r.plan)
-						.catch((err) => {
+					Promise.race([
+						authored.then((r) => r.plan),
+						new Promise<undefined>((resolve) => {
+							const t = setTimeout(() => resolve(undefined), PLAN_BUDGET_MS);
+							t.unref();
+						}).then(() => {
 							onProgress?.({
 								type: "notice",
-								message: `플랜 작성 실패(${tc.title || tc.caseId}) — 규칙 해석으로 대체: ${(err as Error).message.slice(0, 120)}`,
+								message: `플랜 작성이 ${PLAN_BUDGET_MS / 1000}초를 넘겨(${tc.title || tc.caseId}) 이 케이스는 규칙 해석으로 진행합니다 — 작성은 계속되어 다음 실행에 쓰입니다.`,
 							});
 							return undefined;
 						}),
+					]).catch(() => undefined),
 				);
+				authored.catch((err) => {
+					onProgress?.({
+						type: "notice",
+						message: `플랜 작성 실패(${tc.title || tc.caseId}) — 규칙 해석으로 대체: ${(err as Error).message.slice(0, 120)}`,
+					});
+				});
 			}
 		};
 		authorAhead(0);

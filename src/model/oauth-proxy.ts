@@ -6,7 +6,7 @@
  * Implements the same `ModelClient` seam as `ApiKeyModelClient`.
  */
 
-import type { CompleteOptions, ModelClient, ModelMessage } from "./model-client.ts";
+import { type CompleteOptions, type ModelClient, type ModelMessage, requestTimeoutSignal } from "./model-client.ts";
 
 export interface OAuthProxyOptions {
 	accessToken: string;
@@ -141,6 +141,7 @@ export class OAuthProxyModelClient implements ModelClient {
 				stream: true,
 				store: false,
 			}),
+			signal: requestTimeoutSignal(opts),
 		});
 		if (!res.ok) throw new Error(`oauth-proxy request ${res.status}: ${(await res.text()).slice(0, 200)}`);
 		return parseResponsesSse(await res.text());
