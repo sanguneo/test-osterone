@@ -9,7 +9,14 @@
 import { createHash } from "node:crypto";
 import type { NormalizedTC } from "../intake/schema.ts";
 import type { ModelClient } from "../model/model-client.ts";
-import { type Assertion, AUTHOR_VERSION, assertionCacheKey, type CharClass, type ValueAssertion } from "./assertion.ts";
+import {
+	type Assertion,
+	AUTHOR_VERSION,
+	assertionCacheKey,
+	type CharClass,
+	dedupeAssertions,
+	type ValueAssertion,
+} from "./assertion.ts";
 import { escapeRe, isProse, matchesPhrase, type PageAction } from "./interpret.ts";
 import { normLabel, type RouteEntry } from "./recon.ts";
 import { DEFAULT_CHAR_CLASSES, DEFAULT_PHRASES, extractJsonObject, type InterpretationRule } from "./rule.ts";
@@ -426,12 +433,38 @@ export async function authorPlanAI(
 				{ defaultEffort: "low" },
 			),
 		) ?? {};
-	const assertions = sanitizeAssertions(obj.assertions);
-	const actions = withRowClicks(sanitizeActions(obj.actions), { phrases: rule?.phrases });
-	// Three checks the model does not author and code can, read from ground truth rather than prose: the
-	// route table says where "…로 이동되어야 한다" lands, the step's stated limit plus the plan's own fill
-	// target say what "입력 제한되어야 한다" means for that field, and the plan's own click says which
-	// control "…라디오 버튼 선택되어야 한다" is about. None of them replaces the model's work.
+	// Only what the model wrote. The code-derived checks are applied when the plan is *read*
+	// (`withDerivedAssertions`), never baked in here — see that function for why.
+	return {
+		actions: withRowClicks(sanitizeActions(obj.actions), { phrases: rule?.phrases }),
+		assertions: sanitizeAssertions(obj.assertions),
+	};
+}
+
+/**
+ * Add the checks code can derive from ground truth, to a plan the model already wrote.
+ *
+ * Four of them now: the route table says where "…로 이동되어야 한다" lands, the step's stated limit plus
+ * the plan's own fill target say what "입력 제한되어야 한다" means for that field, the plan's own click
+ * says which control "…라디오 버튼 선택되어야 한다" is about, and the plan's own typed value says what
+ * "해당란에 반영되어야 한다" is claiming. None of them replaces the model's work; a url the model wrote
+ * is never overridden.
+ *
+ * Applied on *read*, not at authoring time, and that is the whole point. Derived checks are a pure
+ * function of (case, rule, actions), so baking them into the cache made them as stale as the day they
+ * were written: the only way to give an already-run sheet a newly added check was to bump
+ * `AUTHOR_VERSION`, which re-rolls every cached plan through the model. Measured in one session — three
+ * bumps, and each one moved the scorecard by ±2 cases for reasons that had nothing to do with the
+ * change being measured (NO 141 and 143 held a `textIncludes` under one roll and no assertion at all
+ * under the next, same case, same prompt, same pinned model). Deriving on read means a judgement change
+ * reaches every sheet immediately and a measurement compares like with like.
+ */
+export function withDerivedAssertions(
+	tc: NormalizedTC,
+	rule: InterpretationRule | undefined,
+	plan: AuthoredPlan,
+): AuthoredPlan {
+	const { actions, assertions } = plan;
 	const route = assertions.some((a) => a.kind === "urlIncludes")
 		? null
 		: deriveRouteAssertion(tc.expected, rule?.routes);
@@ -443,7 +476,15 @@ export async function authorPlanAI(
 	const reflections = deriveReflectionAssertions(tc.expected, actions, { phrases: rule?.phrases });
 	return {
 		actions,
-		assertions: [...assertions, ...(route ? [route] : []), ...restrictions, ...selections, ...reflections],
+		// Deduped because a plan cached before this moved may already carry the derived checks it was
+		// authored with, and applying them again must not double every one of them.
+		assertions: dedupeAssertions([
+			...assertions,
+			...(route ? [route] : []),
+			...restrictions,
+			...selections,
+			...reflections,
+		]),
 	};
 }
 
@@ -572,9 +613,11 @@ export async function getOrAuthorPlan(
 			actions: withRowClicks(sanitizeActions(cached.actions), { phrases: rule.phrases }),
 			assertions: sanitizeAssertions(cached.assertions),
 		};
-		return { plan, cacheHit: true, key };
+		return { plan: withDerivedAssertions(tc, rule, plan), cacheHit: true, key };
 	}
-	const plan = await authorPlanAI(tc, model, context, rule);
-	cache.set(key, plan);
-	return { plan, cacheHit: false, key };
+	const authored = await authorPlanAI(tc, model, context, rule);
+	// The cache holds the model's output. Derived checks are recomputed on every read, so improving one
+	// reaches a sheet that already ran instead of waiting for a re-author it would also be re-rolled by.
+	cache.set(key, authored);
+	return { plan: withDerivedAssertions(tc, rule, authored), cacheHit: false, key };
 }

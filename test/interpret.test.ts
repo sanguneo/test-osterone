@@ -11,6 +11,7 @@ import {
 	getOrAuthorPlan,
 	MemoryPlanCache,
 	splitEnumeratedValue,
+	withDerivedAssertions,
 	withRowClicks,
 } from "../src/interpret/author.ts";
 import {
@@ -304,17 +305,53 @@ test("deriveRouteAssertion stays silent unless the claim and the route are both 
 	expect(deriveRouteAssertion("1. 월간 화면으로 이동되어야 한다.", [{ label: "월간", path: "/" }])).toBeNull();
 });
 
-test("authorPlanAI adds the derived url assertion but never overrides one the model wrote", async () => {
+test("a plan gains the derived url assertion on read, and never overrides one the model wrote", async () => {
+	// Derivation happens where the plan is *read*, not where it is authored, so a sheet that has already
+	// run picks up a newly added check without being re-authored — and re-authoring is a dice roll that
+	// moved this sheet's scorecard by ±2 cases three times in one session.
 	const rule = { ...establishRuleFromHeaders(["분류", "소분류", "시험절차", "예상결과"]), routes: ROUTES };
+	const nav = tc({ expected: "1. 대시보드로 이동되어야 한다." });
 	const silent = new FakeModelClient(() => JSON.stringify({ actions: [], assertions: [] }));
-	const plan = await authorPlanAI(tc({ expected: "1. 대시보드로 이동되어야 한다." }), silent, {}, rule);
-	expect(plan.assertions).toEqual([{ kind: "urlIncludes", value: "/dashboard" }]);
+	const authored = await authorPlanAI(nav, silent, {}, rule);
+	// Authoring returns exactly what the model wrote.
+	expect(authored.assertions).toEqual([]);
+	expect(withDerivedAssertions(nav, rule, authored).assertions).toEqual([{ kind: "urlIncludes", value: "/dashboard" }]);
 
-	const opinionated = new FakeModelClient(() =>
-		JSON.stringify({ actions: [], assertions: [{ kind: "urlIncludes", value: "/dashboard?tab=1" }] }),
+	const opinionated = { actions: [], assertions: [{ kind: "urlIncludes", value: "/dashboard?tab=1" } as const] };
+	expect(withDerivedAssertions(nav, rule, opinionated).assertions).toEqual([
+		{ kind: "urlIncludes", value: "/dashboard?tab=1" },
+	]);
+	// A plan cached before derivation moved already carries its derived checks; applying them again on
+	// read must not double them.
+	const alreadyDerived = { actions: [], assertions: [{ kind: "urlIncludes", value: "/dashboard" } as const] };
+	expect(withDerivedAssertions(nav, rule, alreadyDerived).assertions).toEqual([
+		{ kind: "urlIncludes", value: "/dashboard" },
+	]);
+});
+
+test("a cached plan picks up a derived check it was never authored with", async () => {
+	// The reason this moved: giving an already-run sheet a new judgement used to mean bumping
+	// AUTHOR_VERSION, which re-rolls every plan through the model — so the change and the dice arrived
+	// together and the measurement could not tell them apart.
+	const rule = establishRuleFromHeaders(["분류", "소분류", "시험절차", "예상결과"]);
+	const cache = new MemoryPlanCache();
+	const radio = tc({
+		steps: ["1. 상태 항목 내 비활성 라디오 버튼 선택"],
+		expected: "1. 비활성 라디오 버튼 선택되어야 한다.",
+	});
+	const model = new FakeModelClient(() =>
+		JSON.stringify({ actions: [{ kind: "click", target: "비활성" }], assertions: [] }),
 	);
-	const kept = await authorPlanAI(tc({ expected: "1. 대시보드로 이동되어야 한다." }), opinionated, {}, rule);
-	expect(kept.assertions).toEqual([{ kind: "urlIncludes", value: "/dashboard?tab=1" }]);
+	const first = await getOrAuthorPlan(radio, rule, cache, model, {});
+	expect(first.cacheHit).toBe(false);
+	expect(first.plan.assertions).toEqual([{ kind: "controlSelected", control: "비활성" }]);
+	// Second read never calls the model, and still carries the derived check.
+	const dead = new FakeModelClient(() => {
+		throw new Error("the model must not be called for a cached plan");
+	});
+	const second = await getOrAuthorPlan(radio, rule, cache, dead, {});
+	expect(second.cacheHit).toBe(true);
+	expect(second.plan.assertions).toEqual([{ kind: "controlSelected", control: "비활성" }]);
 });
 test("derivePreparationActions navigates by route instead of clicking the sheet's prose", () => {
 	// Measured: 27 of 58 failed preparations were a click on the precondition's own words —
