@@ -164,15 +164,24 @@ export interface RequirementCoverage {
  * never about the requirement.
  *
  * Only text assertions count toward attribution: a `urlIncludes` is derived from the expectation by
- * construction, so demanding its path appear in the prose would reject every one of them.
+ * construction, so demanding its path appear in the prose would reject every one of them. A
+ * `controlSelected` counts because it is the opposite case — it is derived *only* when the expectation
+ * names that control, so its name is a literal quoted from the requirement, which is exactly what this
+ * gate asks for.
  */
 export function requirementCoverage(expected: string, assertions: readonly Assertion[]): RequirementCoverage | null {
 	const reqs = expectedRequirements(expected);
 	if (reqs.length === 0) return null;
 	const loose = (s: string) => s.replace(/\s+/g, "").toLowerCase();
 	const values = assertions
-		.filter((a) => a.kind === "textIncludes" || a.kind === "textNotIncludes")
-		.map((a) => loose(String(a.value ?? "")))
+		.map((a) =>
+			a.kind === "textIncludes" || a.kind === "textNotIncludes"
+				? a.value
+				: a.kind === "controlSelected"
+					? a.control
+					: "",
+		)
+		.map(loose)
 		.filter((v) => v.length >= 2);
 	const missing = reqs.filter((req) => {
 		const hay = loose(req);

@@ -154,6 +154,44 @@ test("describeAssertion says what a field assertion checks, since it has no valu
 	expect(describeAssertion({ kind: "textIncludes", value: "저장 완료" })).toBe("저장 완료");
 });
 
+const withControls = (controls: Record<string, boolean>): PageSnapshot => ({
+	url: "/account",
+	text: "발송자 계정 수정 상태 활성 비활성",
+	html: "<main>발송자 계정 수정</main>",
+	controls,
+});
+
+test("controlSelected reads the toggle's state, which the page's text cannot express", () => {
+	// The page reads the same either way — "활성"과 "비활성" are both on screen as labels whichever one is
+	// on — so a text assertion cannot tell a selected radio from an unselected one.
+	const off = withControls({ 활성: true, 비활성: false });
+	const on = withControls({ 활성: false, 비활성: true });
+	const a = { kind: "controlSelected", control: "비활성" } as const;
+	expect(evaluateAssertion(a, off).passed).toBe(false);
+	expect(evaluateAssertion(a, off).detail).toContain("is not selected");
+	expect(evaluateAssertion(a, on).passed).toBe(true);
+	expect(evaluateAssertion(a, on).detail).toContain("is selected");
+	// Its counterpart moves the other way in the same breath — which is what makes the check discriminate.
+	expect(evaluateAssertion({ kind: "controlSelected", control: "활성" }, on).passed).toBe(false);
+});
+
+test("controlSelected fails when the control is not on screen at all", () => {
+	// Same soundness rule as the field checks: a click that never reached the control leaves a screen
+	// with no such toggle on it, and reading that as a pass is how a missed click goes green.
+	const none = withControls({ 활성: true });
+	const missing = evaluateAssertion({ kind: "controlSelected", control: "비활성" }, none);
+	expect(missing.passed).toBe(false);
+	expect(missing.detail).toContain("not on screen");
+	// A snapshot from a page with no toggles at all (or an adapter that cannot read them) fails too.
+	expect(evaluateAssertion({ kind: "controlSelected", control: "활성" }, { url: "/", text: "", html: "" }).passed).toBe(
+		false,
+	);
+	// Spacing the app renders differently still resolves — that is the same label, not a different one.
+	expect(
+		evaluateAssertion({ kind: "controlSelected", control: "사용안함" }, withControls({ "사용 안함": true })).passed,
+	).toBe(true);
+});
+
 test("the cache key covers the authoring contract, not just its inputs", () => {
 	// Improving authoring used to reach nothing: a sheet that had already run kept its plans forever,
 	// because the key described the case and the rule but never the code that turned them into a plan.

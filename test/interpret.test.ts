@@ -6,6 +6,7 @@ import {
 	derivePreparationActions,
 	deriveRestrictionAssertions,
 	deriveRouteAssertion,
+	deriveSelectionAssertions,
 	getOrAuthorPlan,
 	MemoryPlanCache,
 	splitEnumeratedValue,
@@ -417,4 +418,48 @@ test("deriveRestrictionAssertions needs both halves and stays silent without the
 	expect(
 		deriveRestrictionAssertions("1. 입력 제한되어야 한다.", ["1. 12자 초과 입력"], [{ kind: "click", target: "저장" }]),
 	).toEqual([]);
+});
+
+test("deriveSelectionAssertions checks the control the plan clicked, not the prose around it", () => {
+	// The two measured cases: the step selects a radio, the expectation says it must end up selected, and
+	// nothing about that is text — the page reads identically either way.
+	expect(
+		deriveSelectionAssertions("1. 비활성 라디오 버튼 선택되어야 한다.", [{ kind: "click", target: "비활성" }]),
+	).toEqual([{ kind: "controlSelected", control: "비활성" }]);
+	expect(
+		deriveSelectionAssertions("1. 활성 라디오 버튼 선택되어야 한다.", [{ kind: "click", target: "활성" }]),
+	).toEqual([{ kind: "controlSelected", control: "활성" }]);
+	// English sheets say it the other way round and must derive the same check.
+	expect(
+		deriveSelectionAssertions("1. The Inactive radio must be selected.", [{ kind: "click", target: "Inactive" }]),
+	).toEqual([{ kind: "controlSelected", control: "Inactive" }]);
+});
+
+test("deriveSelectionAssertions stays silent unless the expectation is about a toggle it can name", () => {
+	const click = [{ kind: "click", target: "활성" } as const];
+	// "선택되어야 한다" without a radio/checkbox is the sheet's most common phrasing and is about text a
+	// text assertion can already see — deriving a control check there would fail cases that are fine.
+	expect(deriveSelectionAssertions("1. 계정 관리 메뉴가 선택되어야 한다.", click)).toEqual([]);
+	// Names a radio but claims something else about it.
+	expect(deriveSelectionAssertions("1. 라디오 버튼이 비활성화되어야 한다.", click)).toEqual([]);
+	// Nothing was clicked, so no control is implicated: the prose alone never authors this.
+	expect(
+		deriveSelectionAssertions("1. 활성 라디오 버튼 선택되어야 한다.", [{ kind: "fill", target: "활성", value: "x" }]),
+	).toEqual([]);
+	// The plan clicked something the requirement does not mention.
+	expect(
+		deriveSelectionAssertions("1. 활성 라디오 버튼 선택되어야 한다.", [{ kind: "click", target: "저장" }]),
+	).toEqual([]);
+});
+
+test("deriveSelectionAssertions will not let 활성 answer for 비활성", () => {
+	// "활성" is a substring of "비활성". A plan that clicked the wrong one of the pair must not be handed a
+	// check that reads as if it clicked the right one — that is a green light for the opposite outcome.
+	expect(
+		deriveSelectionAssertions("1. 비활성 라디오 버튼 선택되어야 한다.", [{ kind: "click", target: "활성" }]),
+	).toEqual([]);
+	// The reverse direction is a genuine mention, not a substring accident.
+	expect(
+		deriveSelectionAssertions("1. 활성/비활성 라디오 버튼이 선택되어야 한다.", [{ kind: "click", target: "활성" }]),
+	).toEqual([{ kind: "controlSelected", control: "활성" }]);
 });

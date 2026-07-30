@@ -51,7 +51,8 @@ export interface InterpretationRule {
 /**
  * `prose` marks a written requirement rather than page text; `navigation` and `restriction` mark what an
  * expected result claims; `uiNoun` is the trailing noun to strip from a target label; `lengthUnit` and
- * `exceed` combine to read a limit ("12자 초과", "over 12 characters") without storing a regex on disk.
+ * `exceed` combine to read a limit ("12자 초과", "over 12 characters") without storing a regex on disk;
+ * `toggleNoun` and `selected` together mark an expectation about a radio/checkbox's state.
  */
 export type PhraseKind =
 	| "prose"
@@ -63,7 +64,11 @@ export type PhraseKind =
 	/** "임의 계정 선택" — pick any one from a list. 124 of 652 cases on the measured sheet. */
 	| "anyRow"
 	/** What such a step calls the thing being picked, so "임의 항목" is a row and "임의 문자" is not. */
-	| "rowNoun";
+	| "rowNoun"
+	/** What a sheet calls a two-state control it expects to be selected ("활성 라디오 버튼"). */
+	| "toggleNoun"
+	/** How an expected result claims that control ended up chosen ("선택되어야 한다"). */
+	| "selected";
 
 /**
  * Default intent vocabulary. Korean terms are first-class, not an add-on: the sheets this tool
@@ -125,6 +130,10 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 	// `그룹`/`단지` are listed things on this app's screens too — a measured plan said "임의 그룹 선택".
 	rowNoun: ["계정", "항목", "기관", "공문", "그룹", "단지", "행", "목록", "리스트", "row", "item", "record", "entry"],
 	exceed: ["초과", "이상", "넘게", "over", "more than", "exceeding", "longer than"],
+	// Narrow on purpose: these two gate a check that reads a control's state, and every other
+	// "선택되어야 한다" on the sheet is about something a text assertion can already see.
+	toggleNoun: ["라디오", "체크박스", "radio", "checkbox"],
+	selected: ["선택되어야", "선택된", "체크되어야", "체크된", "선택되어", "selected", "checked"],
 };
 
 /** Each class's names, in both languages. `nonDigit` is "anything but digits", i.e. 숫자 외. */

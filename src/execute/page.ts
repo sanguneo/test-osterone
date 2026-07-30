@@ -23,6 +23,15 @@ export interface PageSnapshot {
 	 * review cards all use `text`, so a typed password never reaches disk or a review card.
 	 */
 	fields?: Record<string, string>;
+	/**
+	 * Whether each radio/checkbox on the page is selected, keyed by the label a user reads.
+	 *
+	 * Kept apart from `fields` because a toggle's `value` is a fixed attribute ("true", "on") that says
+	 * nothing about its state — reading it is how "활성 라디오 버튼 선택되어야 한다" would look satisfied
+	 * on a screen where nothing is selected at all. Presence in the map is meaningful the same way it is
+	 * for `fields`: a control that is absent is not a control that is off.
+	 */
+	controls?: Record<string, boolean>;
 	/** Optional base64 PNG data URL (real browser only) — evidence for human review. */
 	screenshot?: string;
 }

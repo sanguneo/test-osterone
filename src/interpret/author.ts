@@ -203,6 +203,50 @@ export function deriveRestrictionAssertions(
 }
 
 /**
+ * Derive the check for "활성 라디오 버튼 선택되어야 한다" from the control the plan actually clicked.
+ *
+ * A radio's state is not text and not a value: the page reads the same whichever option is on, so this
+ * whole class of expectation could only ever be held for review. Measured on the account editor, both
+ * cases also *failed to click at all* — the real `<input>` sits at `opacity: 0` behind a painted label —
+ * so nothing was verified twice over. Once the click lands, the state is right there to be read.
+ *
+ * Narrow on three counts, because a wrong control is a false fail and a wrong *reading* is worse:
+ *  - the expectation has to name a radio/checkbox, so the sheet's far more common "메뉴가 선택되어야
+ *    한다" (a text outcome) is left to the text assertions that can already see it;
+ *  - the control comes from the plan's own `click`, never from the prose;
+ *  - the expectation has to name that same control on a word boundary — "활성" sits inside "비활성",
+ *    and a substring match would happily assert the opposite of what the case demands.
+ */
+export function deriveSelectionAssertions(
+	expected: string,
+	actions: readonly PageAction[],
+	vocab: { phrases?: Record<string, string[]> } = {},
+): Assertion[] {
+	const phrases = { ...DEFAULT_PHRASES, ...(vocab.phrases ?? {}) };
+	if (!matchesPhrase(expected, phrases.toggleNoun) || !matchesPhrase(expected, phrases.selected)) return [];
+	const out: Assertion[] = [];
+	for (const action of actions) {
+		if (action.kind !== "click") continue;
+		const control = action.target.trim();
+		if (control.length >= 2 && namesOnWordBoundary(expected, control)) out.push({ kind: "controlSelected", control });
+	}
+	return out;
+}
+
+/** Does `text` contain `needle` as its own word — i.e. not welded to a letter or digit on either side? */
+function namesOnWordBoundary(text: string, needle: string): boolean {
+	const hay = text.toLowerCase();
+	const want = needle.toLowerCase();
+	const wordish = /[\p{L}\p{N}]/u;
+	for (let i = hay.indexOf(want); i >= 0; i = hay.indexOf(want, i + 1)) {
+		const before = hay[i - 1];
+		const after = hay[i + want.length];
+		if (!(before && wordish.test(before)) && !(after && wordish.test(after))) return true;
+	}
+	return false;
+}
+
+/**
  * Which route, if any, a piece of prose unambiguously names.
  *
  * Shared by the assertion above and by preparation, because both need the same question answered from
@@ -239,8 +283,12 @@ export function matchRoute(text: string, routes: readonly RouteEntry[] = []): Ro
  */
 const CHAR_CLASSES = new Set<CharClass>(["hangul", "upper", "symbol", "nonDigit"]);
 
-/** Validate a field assertion off the wire (or off disk); null when it is not one, or is malformed. */
-function sanitizeFieldAssertion(kind: Assertion["kind"], o: Record<string, unknown>): Assertion | null {
+/** Validate a code-derived (non string-valued) assertion off the wire or off disk; null when malformed. */
+function sanitizeStructuredAssertion(kind: Assertion["kind"], o: Record<string, unknown>): Assertion | null {
+	if (kind === "controlSelected") {
+		const control = typeof o.control === "string" ? o.control.trim() : "";
+		return control ? { kind, control } : null;
+	}
 	if (typeof o.field !== "string" || !o.field.trim()) return null;
 	if (kind === "fieldAtMost") {
 		const max = typeof o.max === "number" ? o.max : Number.NaN;
@@ -263,14 +311,14 @@ function sanitizeAssertions(raw: unknown): Assertion[] {
 		if (!item || typeof item !== "object") continue;
 		const o = item as Record<string, unknown>;
 		const kind = o.kind as Assertion["kind"];
-		// Field assertions are derived by code, never written by the model — but cached plans are
-		// re-sanitized on read, so they have to survive this or they vanish from every sheet that has run.
-		const field = sanitizeFieldAssertion(kind, o);
-		if (field) {
-			const key = JSON.stringify(field);
+		// Field and control assertions are derived by code, never written by the model — but cached plans
+		// are re-sanitized on read, so they have to survive this or they vanish from every sheet that ran.
+		const structured = sanitizeStructuredAssertion(kind, o);
+		if (structured) {
+			const key = JSON.stringify(structured);
 			if (!seen.has(key)) {
 				seen.add(key);
-				out.push(field);
+				out.push(structured);
 			}
 			continue;
 		}
@@ -349,14 +397,19 @@ export async function authorPlanAI(
 		) ?? {};
 	const assertions = sanitizeAssertions(obj.assertions);
 	const actions = withRowClicks(sanitizeActions(obj.actions), { phrases: rule?.phrases });
-	// Two checks the model does not author and code can, read from ground truth rather than prose: the
-	// route table says where "…로 이동되어야 한다" lands, and the step's stated limit plus the plan's own
-	// fill target say what "입력 제한되어야 한다" means for that field. Neither replaces the model's work.
+	// Three checks the model does not author and code can, read from ground truth rather than prose: the
+	// route table says where "…로 이동되어야 한다" lands, the step's stated limit plus the plan's own fill
+	// target say what "입력 제한되어야 한다" means for that field, and the plan's own click says which
+	// control "…라디오 버튼 선택되어야 한다" is about. None of them replaces the model's work.
 	const route = assertions.some((a) => a.kind === "urlIncludes")
 		? null
 		: deriveRouteAssertion(tc.expected, rule?.routes);
-	const restrictions = deriveRestrictionAssertions(tc.expected, tc.steps, actions);
-	return { actions, assertions: [...assertions, ...(route ? [route] : []), ...restrictions] };
+	const restrictions = deriveRestrictionAssertions(tc.expected, tc.steps, actions, {
+		phrases: rule?.phrases,
+		charClasses: rule?.charClasses,
+	});
+	const selections = deriveSelectionAssertions(tc.expected, actions, { phrases: rule?.phrases });
+	return { actions, assertions: [...assertions, ...(route ? [route] : []), ...restrictions, ...selections] };
 }
 
 /**

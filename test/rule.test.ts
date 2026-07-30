@@ -49,6 +49,8 @@ test("serializeRule -> parseRule round-trips every field, including the optional
 			exceed: ["beyond"],
 			anyRow: ["whichever"],
 			rowNoun: ["line"],
+			toggleNoun: ["switch"],
+			selected: ["ends up chosen"],
 		},
 		charClasses: { hangul: ["hangeul"], upper: ["caps"], symbol: ["punct"], nonDigit: ["not numeric"] },
 	};

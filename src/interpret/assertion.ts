@@ -23,7 +23,14 @@ export type Assertion =
 	/** The named field holds at most `max` characters — "12자 초과 입력 → 입력 제한되어야 한다". */
 	| { kind: "fieldAtMost"; field: string; max: number }
 	/** The named field holds none of these character classes — "특수문자 입력 → 입력 제한되어야 한다". */
-	| { kind: "fieldExcludes"; field: string; classes: readonly CharClass[] };
+	| { kind: "fieldExcludes"; field: string; classes: readonly CharClass[] }
+	/**
+	 * The named radio/checkbox is selected — "활성 라디오 버튼 선택되어야 한다".
+	 *
+	 * The state of a toggle is nowhere in the page's text, and its `value` attribute is the same
+	 * whichever one is chosen, so this class of expectation could only ever be held for review.
+	 */
+	| { kind: "controlSelected"; control: string };
 
 /** The string-valued kinds — the only ones the model is allowed to author. */
 export type ValueAssertion = Extract<Assertion, { value: string }>;
@@ -46,6 +53,8 @@ export function describeAssertion(a: Assertion): string {
 			return `${a.field} ≤ ${a.max}자`;
 		case "fieldExcludes":
 			return `${a.field} 제외: ${a.classes.join(", ")}`;
+		case "controlSelected":
+			return `${a.control} 선택됨`;
 		default:
 			return a.value;
 	}
@@ -75,23 +84,24 @@ const CHAR_CLASS: Record<CharClass, RegExp> = {
 };
 
 /**
- * Find a field by the label the plan used, tolerating the spacing the app renders.
+ * Find an entry by the label the plan used, tolerating the spacing the app renders.
  *
  * Returns the live label too, so a reviewer reads the app's wording rather than the plan's. Absence is
- * meaningful: `fields` carries every field including the empty ones, so "not found" means there is no
- * such field — not that the app cleared it.
+ * meaningful: the snapshot carries every field and every toggle, including the empty and the unselected
+ * ones, so "not found" means there is no such control — not that the app cleared or deselected it.
+ *
+ * Exact, then whitespace/punctuation-insensitive — and deliberately no looser than that. A stem match
+ * on "아이디 입력란" resolved to a *different* box whose placeholder shares the noun, one the case had
+ * never typed into, and its emptiness read as a working restriction: two cases whose recorded defect
+ * is "the limit does not work" passed that way. Not finding it fails instead, which is the safe
+ * answer — if the case's target is not what the check is looking at, the check has learned nothing.
  */
-function lookupField(snap: PageSnapshot, label: string): { label: string; value: string } | null {
-	const fields = snap.fields ?? {};
-	const direct = fields[label];
+function lookupLabelled<T>(map: Record<string, T> | undefined, label: string): { label: string; value: T } | null {
+	const entries = map ?? {};
+	const direct = entries[label];
 	if (direct !== undefined) return { label, value: direct };
-	// Exact, then whitespace/punctuation-insensitive — and deliberately no looser than that. A stem match
-	// on "아이디 입력란" resolved to a *different* box whose placeholder shares the noun, one the case had
-	// never typed into, and its emptiness read as a working restriction: two cases whose recorded defect
-	// is "the limit does not work" passed that way. Not finding the field fails instead, which is the safe
-	// answer — if the typed value did not land where the check is looking, the check has learned nothing.
 	const want = looseText(label);
-	for (const [key, value] of Object.entries(fields)) {
+	for (const [key, value] of Object.entries(entries)) {
 		if (looseText(key) === want) return { label: key, value };
 	}
 	return null;
@@ -124,7 +134,7 @@ export function evaluateAssertion(a: Assertion, snap: PageSnapshot, opts: { leni
 			};
 		}
 		case "fieldAtMost": {
-			const found = lookupField(snap, a.field);
+			const found = lookupLabelled(snap.fields, a.field);
 			// Cannot see the field → cannot verify the limit. Passing here is exactly the unsound shortcut
 			// that let "입력 제한되어야 한다" go green on two cases whose recorded defect is that the limit
 			// does not work: if the typed value never landed anywhere, nothing was ever restricted.
@@ -140,7 +150,7 @@ export function evaluateAssertion(a: Assertion, snap: PageSnapshot, opts: { leni
 			};
 		}
 		case "fieldExcludes": {
-			const found = lookupField(snap, a.field);
+			const found = lookupLabelled(snap.fields, a.field);
 			if (!found) return { assertion: a, passed: false, detail: `field "${a.field}" not on screen` };
 			const violated = a.classes.filter((c) => CHAR_CLASS[c].test(found.value));
 			const passed = violated.length === 0;
@@ -152,6 +162,18 @@ export function evaluateAssertion(a: Assertion, snap: PageSnapshot, opts: { leni
 					: `field "${found.label}" accepted ${violated.join(", ")}: "${found.value.slice(0, 24)}"`,
 			};
 		}
+		case "controlSelected": {
+			const found = lookupLabelled(snap.controls, a.control);
+			// Cannot see the control → cannot verify the selection. Same reasoning as the field checks:
+			// a case that says "활성 라디오 버튼 선택되어야 한다" learns nothing from a screen with no such
+			// toggle on it, and calling that a pass is how a click that never landed goes green.
+			if (!found) return { assertion: a, passed: false, detail: `control "${a.control}" not on screen` };
+			return {
+				assertion: a,
+				passed: found.value,
+				detail: found.value ? `control "${found.label}" is selected` : `control "${found.label}" is not selected`,
+			};
+		}
 	}
 }
 
@@ -159,8 +181,9 @@ export function dedupeAssertions(assertions: Assertion[]): Assertion[] {
 	const seen = new Set<string>();
 	const out: Assertion[] = [];
 	for (const a of assertions) {
-		// Field assertions have no `value`; key on their own shape so two of them are not collapsed.
-		const key = a.kind === "fieldAtMost" || a.kind === "fieldExcludes" ? JSON.stringify(a) : `${a.kind}:${a.value}`;
+		// Only the string kinds have a `value`; the structured ones key on their own shape so two of
+		// them are not collapsed into one.
+		const key = "value" in a ? `${a.kind}:${a.value}` : JSON.stringify(a);
 		if (!seen.has(key)) {
 			seen.add(key);
 			out.push(a);
@@ -178,7 +201,7 @@ export function dedupeAssertions(assertions: Assertion[]): Assertion[] {
  * filter only landed because plans are re-sanitized on read; a prompt change has no such escape
  * hatch. Making it part of the key is what lets authoring be fixed at all.
  */
-export const AUTHOR_VERSION = 4;
+export const AUTHOR_VERSION = 5;
 
 /** Cache key: any change to the case, the rule, or the authoring contract forces a miss -> re-author. */
 export function assertionCacheKey(caseId: string, ruleId: string, ruleVersion: number, caseHash: string): string {
