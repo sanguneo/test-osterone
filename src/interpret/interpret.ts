@@ -6,7 +6,7 @@
 
 import type { NormalizedTC } from "../intake/schema.ts";
 import { type Assertion, type AssertionCache, assertionCacheKey, dedupeAssertions } from "./assertion.ts";
-import type { InterpretationRule } from "./rule.ts";
+import { DEFAULT_PHRASES, type InterpretationRule } from "./rule.ts";
 
 export type PageAction =
 	| { kind: "goto"; path: string }
@@ -29,12 +29,27 @@ function extractQuoted(step: string): string[] {
 }
 
 /** Regex-escape a user-supplied intent keyword before splicing it into a pattern. */
-function escapeRe(value: string): string {
+export function escapeRe(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** UI nouns a step appends to a label ("로그인 버튼", "Save button") that the DOM's own label omits. */
-const UI_NOUN_RE = /\s*(버튼|링크|메뉴|탭|아이콘|영역|필드|입력란|체크박스|button|link|menu|tab|icon|field|checkbox)$/i;
+/**
+ * Does the text contain any of these phrases?
+ *
+ * Case-insensitive so an English entry needs no capitalisation variants, and phrases are matched as
+ * literals — a vocabulary that arrives off disk or out of a model must never act as a regex.
+ */
+export function matchesPhrase(text: string, phrases: readonly string[]): boolean {
+	const hay = text.toLowerCase();
+	return phrases.some((p) => p.trim() && hay.includes(p.trim().toLowerCase()));
+}
+
+/** Strip a trailing UI noun a step appends to a label ("로그인 버튼", "Save button") that the DOM omits. */
+function stripUiNoun(s: string, uiNouns: readonly string[]): string {
+	const nouns = uiNouns.filter((n) => n.trim()).sort((a, b) => b.length - a.length);
+	if (nouns.length === 0) return s;
+	return s.replace(new RegExp(`\\s*(?:${nouns.map(escapeRe).join("|")})\\s*$`, "i"), "");
+}
 
 /**
  * Reduce a natural-language step to the element label it names.
@@ -43,7 +58,7 @@ const UI_NOUN_RE = /\s*(버튼|링크|메뉴|탭|아이콘|영역|필드|입력�
  * particle before it ("1. 로그인 버튼을 클릭한다" → "로그인"). Handing that whole sentence to a
  * locator matches nothing, which is why an English-only cleanup made every Korean click a miss.
  */
-export function stepTarget(step: string, verbs: string[]): string {
+export function stepTarget(step: string, verbs: string[], uiNouns: readonly string[] = DEFAULT_PHRASES.uiNoun): string {
 	let s = step
 		.replace(/^\s*\d+[.)]\s*/, "")
 		.replace(/^\s*[-*·•]\s*/, "")
@@ -56,7 +71,7 @@ export function stepTarget(step: string, verbs: string[]): string {
 		s = s.replace(new RegExp(`\\s*\\S*(?:${korean.join("|")})\\S*\\s*$`), "");
 		s = s.replace(/\s*(을|를|이|가|은|는|에|에서|으로|로)$/, "");
 	}
-	return s.replace(UI_NOUN_RE, "").replace(/\s+/g, " ").trim();
+	return stripUiNoun(s, uiNouns).replace(/\s+/g, " ").trim();
 }
 
 /** Deterministic NL-step -> page action, using the rule's intent keywords. */
@@ -90,8 +105,16 @@ export function parseStep(step: string, rule: InterpretationRule): PageAction {
  * (with lenient matching on) a `pass` from a near-miss against unrelated copy. Both authoring paths
  * stay silent instead: the case lands in review, where a human decides.
  */
-export function isProse(text: string): boolean {
-	return /(되어야|해야|하여야|한다\.?$|합니다\.?$|바랍니다|should|must)/.test(text.trim());
+/**
+ * Is this a written requirement rather than something the page says?
+ *
+ * The vocabulary lives on the rule so a sheet can teach it, and defaults to the built-in list so the
+ * call sites with no rule to hand (a cached-plan sanitizer, an enumeration splitter) behave as before.
+ */
+export function isProse(text: string, phrases: readonly string[] = DEFAULT_PHRASES.prose): boolean {
+	const t = text.trim();
+	// A sentence-final ending only counts at the end — "한다." mid-sentence is prose by other markers.
+	return matchesPhrase(t, phrases) || /(한다|합니다)\.?$/.test(t);
 }
 
 /**

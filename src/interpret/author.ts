@@ -10,9 +10,9 @@ import { createHash } from "node:crypto";
 import type { NormalizedTC } from "../intake/schema.ts";
 import type { ModelClient } from "../model/model-client.ts";
 import { type Assertion, AUTHOR_VERSION, assertionCacheKey, type CharClass, type ValueAssertion } from "./assertion.ts";
-import { isProse, type PageAction } from "./interpret.ts";
+import { escapeRe, isProse, matchesPhrase, type PageAction } from "./interpret.ts";
 import { normLabel, type RouteEntry } from "./recon.ts";
-import { extractJsonObject, type InterpretationRule } from "./rule.ts";
+import { DEFAULT_CHAR_CLASSES, DEFAULT_PHRASES, extractJsonObject, type InterpretationRule } from "./rule.ts";
 
 export interface AuthoredPlan {
 	actions: PageAction[];
@@ -97,9 +97,6 @@ export function splitEnumeratedValue(value: string): string[] {
 	return parts;
 }
 
-/** Wording that makes an expected result a claim about *where the app ended up*. */
-const NAVIGATION_RE = /이동|전환|redirect|navigat|moves? to/i;
-
 /**
  * Derive the url assertion a navigation expectation deserves, from the routes recon actually saw.
  *
@@ -113,23 +110,34 @@ const NAVIGATION_RE = /이동|전환|redirect|navigat|moves? to/i;
  *  - the route label has to appear in that text (longest label wins — `routeTable` is pre-sorted);
  *  - two different paths matching equally well means the case is ambiguous, and nothing is authored.
  */
-export function deriveRouteAssertion(expected: string, routes: readonly RouteEntry[] = []): Assertion | null {
-	if (!NAVIGATION_RE.test(expected)) return null;
+export function deriveRouteAssertion(
+	expected: string,
+	routes: readonly RouteEntry[] = [],
+	phrases: readonly string[] = DEFAULT_PHRASES.navigation,
+): Assertion | null {
+	if (!matchesPhrase(expected, phrases)) return null;
 	const best = matchRoute(expected, routes);
 	return best ? { kind: "urlIncludes", value: best.path } : null;
 }
 
-/** An expectation that the app must refuse what was typed, however the sheet words it. */
-const RESTRICTION_RE = /입력\s*제한|제한되어야|입력되지\s*않아야|허용되지\s*않아야|막혀야|입력\s*불가|must not accept/i;
-/** "12자 초과 입력" — the limit the field is supposed to enforce. */
-const LENGTH_LIMIT_RE = /(\d+)\s*자\s*(?:초과|이상)/;
-/** How the sheet names a character class it expects to be refused. */
-const CLASS_MARKERS: [RegExp, CharClass][] = [
-	[/한글/, "hangul"],
-	[/영문\s*대문자|대문자/, "upper"],
-	[/특수\s*문자/, "symbol"],
-	[/숫자\s*외/, "nonDigit"],
-];
+/**
+ * Read "12자 초과", "over 12 characters" — a number next to a unit word, with an exceed marker nearby.
+ *
+ * Word order differs by language, so the number may sit on either side of the unit. Built from the
+ * rule's vocabulary rather than a regex literal: the old `(\d+)\s*자\s*(?:초과|이상)` had no English at
+ * all, so an English sheet derived nothing and said nothing about it.
+ */
+function readLengthLimit(text: string, units: readonly string[], exceed: readonly string[]): number | null {
+	if (!matchesPhrase(text, exceed)) return null;
+	for (const unit of units) {
+		const u = escapeRe(unit.trim());
+		if (!u) continue;
+		const m = new RegExp(`(\\d+)\\s*${u}|${u}\\s*(\\d+)`, "i").exec(text);
+		const n = Number(m?.[1] ?? m?.[2]);
+		if (Number.isInteger(n) && n > 0) return n;
+	}
+	return null;
+}
 
 /**
  * Derive the check for "입력 제한되어야 한다" from the limit the case describes and the field it typed into.
@@ -151,19 +159,19 @@ export function deriveRestrictionAssertions(
 	expected: string,
 	steps: readonly string[],
 	actions: readonly PageAction[],
+	vocab: { phrases?: Record<string, string[]>; charClasses?: Record<CharClass, string[]> } = {},
 ): Assertion[] {
-	if (!RESTRICTION_RE.test(expected)) return [];
+	const phrases = { ...DEFAULT_PHRASES, ...(vocab.phrases ?? {}) };
+	const charClasses = { ...DEFAULT_CHAR_CLASSES, ...(vocab.charClasses ?? {}) };
+	if (!matchesPhrase(expected, phrases.restriction)) return [];
 	const fields = actions.filter((a): a is PageAction & { kind: "fill" } => a.kind === "fill").map((a) => a.target);
 	if (fields.length === 0) return [];
 	const text = steps.join("\n");
 	const out: Assertion[] = [];
-	const limit = LENGTH_LIMIT_RE.exec(text);
-	if (limit?.[1]) {
-		const max = Number(limit[1]);
-		// "12자 초과 입력" means 12 is allowed and 13 is not.
-		if (Number.isInteger(max) && max > 0) for (const field of fields) out.push({ kind: "fieldAtMost", field, max });
-	}
-	const classes = CLASS_MARKERS.filter(([re]) => re.test(text)).map(([, c]) => c);
+	// "12자 초과 입력" means 12 is allowed and 13 is not.
+	const max = readLengthLimit(text, phrases.lengthUnit, phrases.exceed);
+	if (max !== null) for (const field of fields) out.push({ kind: "fieldAtMost", field, max });
+	const classes = (Object.keys(charClasses) as CharClass[]).filter((c) => matchesPhrase(text, charClasses[c]));
 	if (classes.length > 0) for (const field of fields) out.push({ kind: "fieldExcludes", field, classes });
 	return out;
 }

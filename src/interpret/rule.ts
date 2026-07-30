@@ -11,6 +11,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { mapColumns } from "../intake/ingest.ts";
 import type { TcField } from "../intake/schema.ts";
 import type { ModelClient, ModelMessage } from "../model/model-client.ts";
+import type { CharClass } from "./assertion.ts";
 import type { RouteEntry } from "./recon.ts";
 
 export const INTENT_KINDS = ["navigate", "click", "input", "verify", "wait"] as const;
@@ -31,7 +32,28 @@ export interface InterpretationRule {
 	 * derives a url assertion for a navigation expectation, which a paragraph cannot support.
 	 */
 	routes?: RouteEntry[];
+	/**
+	 * Vocabulary the *judgement* side reads, alongside `intents` for the action side.
+	 *
+	 * These phrases used to be regex literals in `interpret.ts` and `author.ts`, which split one concern
+	 * across two homes: a sheet could teach the engine new words for "click" but not for "must be
+	 * restricted". Worse, two of them had no English at all — `12자 초과`, `특수문자` — so an English sheet
+	 * silently derived nothing, which is the kind of failure that surfaces last.
+	 */
+	phrases: Record<PhraseKind, string[]>;
+	/**
+	 * Words naming a character class an input is expected to refuse ("특수문자", "uppercase"). Structured
+	 * per class because each maps to a different check, not to a different phrasing of one check.
+	 */
+	charClasses: Record<CharClass, string[]>;
 }
+
+/**
+ * `prose` marks a written requirement rather than page text; `navigation` and `restriction` mark what an
+ * expected result claims; `uiNoun` is the trailing noun to strip from a target label; `lengthUnit` and
+ * `exceed` combine to read a limit ("12자 초과", "over 12 characters") without storing a regex on disk.
+ */
+export type PhraseKind = "prose" | "navigation" | "restriction" | "uiNoun" | "lengthUnit" | "exceed";
 
 /**
  * Default intent vocabulary. Korean terms are first-class, not an add-on: the sheets this tool
@@ -48,6 +70,55 @@ const DEFAULT_INTENTS: Record<IntentKind, string[]> = {
 
 const DEFAULT_DESTRUCTIVE = ["delete", "remove", "drop", "purge", "wipe", "reset", "destroy"];
 
+/**
+ * Defaults are exactly the literals these phrases replaced, so no existing sheet changes behaviour —
+ * and English is now present in every list, including the two that had none.
+ */
+export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
+	prose: ["되어야", "해야", "하여야", "한다.", "합니다.", "바랍니다", "should", "must"],
+	navigation: ["이동", "전환", "redirect", "navigat", "moves to", "move to"],
+	restriction: [
+		"입력 제한",
+		"입력제한",
+		"제한되어야",
+		"입력되지 않아야",
+		"허용되지 않아야",
+		"막혀야",
+		"입력 불가",
+		"must not accept",
+		"must be rejected",
+		"not allowed",
+	],
+	uiNoun: [
+		"버튼",
+		"링크",
+		"메뉴",
+		"탭",
+		"아이콘",
+		"영역",
+		"필드",
+		"입력란",
+		"체크박스",
+		"button",
+		"link",
+		"menu",
+		"tab",
+		"icon",
+		"field",
+		"checkbox",
+	],
+	lengthUnit: ["자", "글자", "characters", "chars", "letters"],
+	exceed: ["초과", "이상", "넘게", "over", "more than", "exceeding", "longer than"],
+};
+
+/** Each class's names, in both languages. `nonDigit` is "anything but digits", i.e. 숫자 외. */
+export const DEFAULT_CHAR_CLASSES: Record<CharClass, string[]> = {
+	hangul: ["한글", "hangul", "korean"],
+	upper: ["영문 대문자", "영문대문자", "대문자", "uppercase", "capital"],
+	symbol: ["특수문자", "특수 문자", "기호", "special character", "symbol", "punctuation"],
+	nonDigit: ["숫자 외", "숫자외", "비숫자", "non-digit", "non digit", "not a number"],
+};
+
 /** Deterministic baseline rule derived from a sheet's headers. */
 export function establishRuleFromHeaders(headers: string[], ruleId = "default"): InterpretationRule {
 	return {
@@ -56,6 +127,8 @@ export function establishRuleFromHeaders(headers: string[], ruleId = "default"):
 		mapping: mapColumns(headers),
 		intents: structuredClone(DEFAULT_INTENTS),
 		destructiveKeywords: [...DEFAULT_DESTRUCTIVE],
+		phrases: structuredClone(DEFAULT_PHRASES),
+		charClasses: structuredClone(DEFAULT_CHAR_CLASSES),
 	};
 }
 
@@ -82,6 +155,8 @@ export function parseRule(text: string): InterpretationRule {
 		appContext: typeof raw.appContext === "string" ? raw.appContext : undefined,
 		codeContext: typeof raw.codeContext === "string" ? raw.codeContext : undefined,
 		routes: sanitizeRoutes((raw as Record<string, unknown>).routes),
+		phrases: sanitizeKeyed((raw as Record<string, unknown>).phrases, DEFAULT_PHRASES),
+		charClasses: sanitizeKeyed((raw as Record<string, unknown>).charClasses, DEFAULT_CHAR_CLASSES),
 	};
 }
 
@@ -153,6 +228,9 @@ export async function refineRule(
 		destructiveKeywords: sanitizeStrings(obj.destructiveKeywords, rule.destructiveKeywords),
 		appContext: rule.appContext,
 		codeContext: rule.codeContext,
+		routes: rule.routes,
+		phrases: sanitizeKeyed(obj.phrases, rule.phrases),
+		charClasses: sanitizeKeyed(obj.charClasses, rule.charClasses),
 	};
 	const changed = ruleShapeKey(next) !== ruleShapeKey(rule);
 	return { rule: changed ? bumpRuleVersion(next) : next, message: String(obj.message ?? ""), changed };
@@ -219,11 +297,21 @@ function sanitizeMapping(value: unknown, fallback: Partial<Record<TcField, strin
 }
 
 function sanitizeIntents(value: unknown, fallback: Record<IntentKind, string[]>): Record<IntentKind, string[]> {
+	return sanitizeKeyed(value, fallback);
+}
+
+/**
+ * Keep a keyed set of phrase lists, falling back per key. Untrusted input: a rule arrives off disk or
+ * out of a model, so a missing or malformed key must leave the default in place rather than empty the
+ * vocabulary — an empty list silently stops matching anything, which is invisible in the verdicts.
+ */
+function sanitizeKeyed<K extends string>(value: unknown, fallback: Record<K, string[]>): Record<K, string[]> {
 	const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-	const out = {} as Record<IntentKind, string[]>;
-	for (const k of INTENT_KINDS) {
+	const out = {} as Record<K, string[]>;
+	for (const k of Object.keys(fallback) as K[]) {
 		const v = raw[k];
-		out[k] = Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [...fallback[k]];
+		const kept = Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim().length > 0) : [];
+		out[k] = kept.length > 0 ? kept : [...fallback[k]];
 	}
 	return out;
 }

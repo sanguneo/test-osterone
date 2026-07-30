@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { deriveRestrictionAssertions } from "../src/interpret/author.ts";
+import { isProse } from "../src/interpret/interpret.ts";
 import {
 	bumpRuleVersion,
 	establishRuleFromHeaders,
@@ -27,6 +29,9 @@ test("serializeRule -> parseRule round-trips every field, including the optional
 	// had no optional fields set at all. `parseRule` rebuilds field by field, so anything not listed there
 	// is silently dropped — recon wrote six routes, the state file kept them, the next server start lost
 	// them, and everything downstream behaved as if app analysis had never run. Populate everything.
+	// The same trap twice: `phrases`/`charClasses` fall back to defaults when absent, so a rule carrying
+	// *default* vocabulary round-trips even when the field is dropped. They must differ from the defaults
+	// for this to detect anything.
 	const full: InterpretationRule = {
 		...establishRuleFromHeaders(HEADERS),
 		appContext: "공문 발송 시스템 — 관리자 콘솔",
@@ -35,6 +40,15 @@ test("serializeRule -> parseRule round-trips every field, including the optional
 			{ label: "계정 관리", path: "/account" },
 			{ label: "대시보드", path: "/dashboard" },
 		],
+		phrases: {
+			prose: ["must", "필요하다"],
+			navigation: ["jumps to"],
+			restriction: ["blocked"],
+			uiNoun: ["widget"],
+			lengthUnit: ["signs"],
+			exceed: ["beyond"],
+		},
+		charClasses: { hangul: ["hangeul"], upper: ["caps"], symbol: ["punct"], nonDigit: ["not numeric"] },
 	};
 	expect(parseRule(serializeRule(full))).toEqual(full);
 });
@@ -124,4 +138,62 @@ test("ruleLint flags ambiguous phrases across intents and empty intents", () => 
 
 test("ruleLint is clean for the default rule", () => {
 	expect(ruleLint(establishRuleFromHeaders(HEADERS))).toEqual([]);
+});
+
+test("an English sheet derives the same checks a Korean one does", () => {
+	// The point of moving this vocabulary onto the rule: `(\d+)\s*자\s*(?:초과|이상)` and 특수문자 had no
+	// English at all, so an English sheet derived nothing — and said nothing about deriving nothing.
+	const rule = establishRuleFromHeaders(["ID", "Title", "Steps", "Expected Result"]);
+	const typed = [{ kind: "fill", target: "Username", value: "abcdefghijklm" } as const];
+	expect(
+		deriveRestrictionAssertions(
+			"1. Input must not accept it.",
+			["1. Type over 12 characters into Username"],
+			typed,
+			rule,
+		),
+	).toEqual([{ kind: "fieldAtMost", field: "Username", max: 12 }]);
+	expect(
+		deriveRestrictionAssertions("1. Input is not allowed.", ["1. Type uppercase and special characters"], typed, rule),
+	).toEqual([{ kind: "fieldExcludes", field: "Username", classes: ["upper", "symbol"] }]);
+	// The Korean wording still works from the same defaults — this is an addition, not a swap.
+	expect(
+		deriveRestrictionAssertions("1. 입력 제한되어야 한다.", ["1. 아이디 입력란 내 12자 초과 입력"], typed, rule),
+	).toEqual([{ kind: "fieldAtMost", field: "Username", max: 12 }]);
+	expect(isProse("The badge should turn green", rule.phrases.prose)).toBe(true);
+	expect(isProse("팝업이 표출되어야 한다", rule.phrases.prose)).toBe(true);
+	expect(isProse("Signed in as viewer", rule.phrases.prose)).toBe(false);
+});
+
+test("a sheet can teach the judgement vocabulary, and a bad one cannot empty it", () => {
+	const rule = establishRuleFromHeaders(["ID", "Title", "Steps", "Expected Result"]);
+	// A sheet that words its limits differently: teach it, and the derivation follows.
+	const taught: InterpretationRule = {
+		...rule,
+		phrases: { ...rule.phrases, restriction: ["blocked"], lengthUnit: ["signs"], exceed: ["beyond"] },
+	};
+	expect(
+		deriveRestrictionAssertions(
+			"Must be blocked.",
+			["Type beyond 8 signs"],
+			[{ kind: "fill", target: "Code", value: "x" }],
+			taught,
+		),
+	).toEqual([{ kind: "fieldAtMost", field: "Code", max: 8 }]);
+	// An empty or malformed list falls back rather than silently matching nothing ever again — an empty
+	// vocabulary stops matching everything, and that never shows up in a verdict.
+	const wiped = parseRule(JSON.stringify({ ...rule, phrases: { restriction: [], prose: "nope", lengthUnit: [""] } }));
+	expect(wiped.phrases.restriction).toEqual(rule.phrases.restriction);
+	expect(wiped.phrases.prose).toEqual(rule.phrases.prose);
+	expect(wiped.phrases.lengthUnit).toEqual(rule.phrases.lengthUnit);
+	// A phrase is matched literally: a vocabulary entry off disk must never act as a regex.
+	const injected: InterpretationRule = { ...rule, phrases: { ...rule.phrases, restriction: [".*"] } };
+	expect(
+		deriveRestrictionAssertions(
+			"anything",
+			["Type over 5 characters"],
+			[{ kind: "fill", target: "A", value: "x" }],
+			injected,
+		),
+	).toEqual([]);
 });
