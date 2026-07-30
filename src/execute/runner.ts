@@ -694,7 +694,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		 * `fieldHolds` is exempt for the same reason the restriction checks are, stated more plainly by
 		 * its own requirement: "해당란에 반영되어야 한다" points at whatever box the *step* named, so there
 		 * is no literal in the expectation for any assertion to quote. Measured on NO 223 — the value
-		 * landed, the check passed, and the case was held because "테스트 발송 그룹" appears nowhere in the
+		 * landed, the check passed, and the case was held because "테스트 소속 그룹" appears nowhere in the
 		 * sentence demanding it. The exemption is narrow: it reads that field's value, and it fails when
 		 * the field is missing or holds something else.
 		 */

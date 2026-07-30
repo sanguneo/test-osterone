@@ -259,8 +259,8 @@ export class BrowserPage implements Page {
 			.or(this.pwPage.getByPlaceholder(target))
 			.first();
 		const named = (await clickable.count().catch(() => 0)) > 0 ? clickable : this.locate(target);
-		// A sheet names a control by its kind where the app paints only the noun: "발송 그룹 필터" for a
-		// section the app labels 발송그룹, "이메일 입력란" for a box labelled 이메일. Strictly a later
+		// A sheet names a control by its kind where the app paints only the noun: "소속 그룹 필터" for a
+		// section the app labels 소속그룹, "이메일 입력란" for a box labelled 이메일. Strictly a later
 		// candidate — used only when *nothing* matched the target as written, so a real label always wins.
 		// (`withoutUiNoun` documented itself as exactly this and was wired to nothing.)
 		const stripped = withoutUiNoun(target, { phrases: this.phrases });
@@ -630,8 +630,8 @@ export class BrowserPage implements Page {
 					 * Stopping where a second writable control appears is what keeps the name unambiguous.
 					 *
 					 * Only a *direct-child*, bare label that comes *before* the control counts. Measured on the
-					 * 발송그룹 row: the bare "전체" heading sits nested inside an inner wrapper while
-					 * `<label>발송그룹</label>` is a direct child of the row, so a plain descendant search named
+					 * 소속그룹 row: the bare "전체" heading sits nested inside an inner wrapper while
+					 * `<label>소속그룹</label>` is a direct child of the row, so a plain descendant search named
 					 * the search box "전체" and the AI repair had to re-point every fill at "그룹명을 검색해
 					 * 주세요." — three model round trips a run, each a heal event capping the case at
 					 * needs_review. A label nested inside another component belongs to that component, one

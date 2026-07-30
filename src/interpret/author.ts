@@ -87,9 +87,9 @@ const ENUM_PART_MAX = 24;
 /**
  * An enumerated expectation is one assertion per item, not one assertion per comma-joined string.
  *
- * Sheets list the contents of a filter or a table header inline: "필터 리스트 표출되어야 한다 - 이지스,
+ * Sheets list the contents of a filter or a table header inline: "필터 리스트 표출되어야 한다 - 가온,
  * 지자체, 공공기관, 위탁관리, 일반업체". The model faithfully copies that into a single
- * `textIncludes: "이지스, 지자체, 공공기관, 위탁관리, 일반업체"`, and the page never contains that
+ * `textIncludes: "가온, 지자체, 공공기관, 위탁관리, 일반업체"`, and the page never contains that
  * string — it contains the five labels separately. Measured on the live app: all five were on screen,
  * the joined literal was not, and the case was unfalsifiable (it could only ever miss).
  *
@@ -245,7 +245,7 @@ export function deriveSelectionAssertions(
  *
  * The requirement is anaphoric — "해당란" is whatever box the *step* named — so there is no literal in
  * the expectation to quote, and the two gates that ask "does an assertion quote the requirement?" can
- * never be satisfied by one. Measured: NO 223 typed "테스트 발송 그룹", the field held it, a model-written
+ * never be satisfied by one. Measured: NO 223 typed "테스트 소속 그룹", the field held it, a model-written
  * `textIncludes` even passed on it, and the case was still held because that string appears nowhere in
  * "해당란에 반영되어야 한다". The check that belongs here reads the field, and its value comes from the
  * plan's own `fill` rather than from a guess at the prose.

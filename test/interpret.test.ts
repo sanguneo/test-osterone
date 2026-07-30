@@ -58,10 +58,10 @@ test("stepTarget reduces a Korean step to the label the DOM actually carries", (
 test("parseStep understands Korean action steps (the default vocabulary is bilingual)", () => {
 	expect(parseStep("1. 개인정보처리방침 선택", RULE)).toEqual({ kind: "click", target: "개인정보처리방침" });
 	expect(parseStep("2. 로그인 버튼을 클릭한다", RULE)).toEqual({ kind: "click", target: "로그인" });
-	expect(parseStep('3. 아이디 입력란에 "superadmin" 입력', RULE)).toEqual({
+	expect(parseStep('3. 아이디 입력란에 "tester" 입력', RULE)).toEqual({
 		kind: "fill",
 		target: "아이디",
-		value: "superadmin",
+		value: "tester",
 	});
 	expect(parseStep("4. 로그인 화면이 표출되는지 확인", RULE).kind).toBe("verify");
 	// No concrete value to type → honestly uninterpretable rather than a guessed fill.
@@ -83,7 +83,7 @@ test("authorAssertions refuses to assert a written requirement it cannot check",
 });
 
 test("authorPlanAI drops a prose assertion the model returned despite being told not to", async () => {
-	// Observed on a live run of the 공문발송 sheet: the model echoed the requirement sentence back as
+	// Observed on a live run of the 샘플관리 sheet: the model echoed the requirement sentence back as
 	// an assertion value. With lenient matching on, that near-missed its way to `pass` on a case a
 	// human had marked Fail — so the model path enforces the same prose rule the rule path does.
 	const model = new FakeModelClient(() =>
@@ -144,7 +144,7 @@ test("getOrAuthorPlan re-sanitizes a cached plan so a stale prose assertion cann
 test("expectedRequirements splits numbered outcomes and keeps their detail lines attached", () => {
 	const expected = [
 		"1. 로고 표출되어야 하며 로고 하단에 타이틀 문구 표출되어야 한다.",
-		"- 공문 발송 시스템",
+		"- 샘플 관리 시스템",
 		"2. 아이디 입력란, 비밀번호 입력란 표출되어야 한다.",
 		"* 아이디 입력란 플레이스 홀더 : 아이디를 입력해주세요.",
 		"  비밀번호 입력란 플레이스 홀더 : 비밀번호를 입력해주세요.",
@@ -153,7 +153,7 @@ test("expectedRequirements splits numbered outcomes and keeps their detail lines
 	const reqs = expectedRequirements(expected);
 	// Three requirements, not six: `-` / `*` / continuation lines describe the item above them.
 	expect(reqs).toHaveLength(3);
-	expect(reqs[0]).toContain("공문 발송 시스템");
+	expect(reqs[0]).toContain("샘플 관리 시스템");
 	expect(reqs[1]).toContain("플레이스 홀더");
 	expect(reqs[2]).toBe("3. 로그인 버튼 표출되어야 한다.");
 	expect(expectedRequirements("1. 팝업이 종료되어야 한다.")).toHaveLength(1);
@@ -216,11 +216,11 @@ test("requirementCoverage reports full coverage, and for one outcome asks only w
 });
 
 test("an enumerated expectation becomes one assertion per item", () => {
-	// Measured on the live app: the page showed 기관 유형 전체 공공기관 이지스 지자체 위탁관리 일반업체 —
+	// Measured on the live app: the page showed 기관 유형 전체 공공기관 가온 지자체 위탁관리 일반업체 —
 	// all five labels present, the comma-joined string absent. As one assertion the case could only
 	// ever miss; as five it actually discriminates.
-	expect(splitEnumeratedValue("이지스, 지자체, 공공기관, 위탁관리, 일반업체")).toEqual([
-		"이지스",
+	expect(splitEnumeratedValue("가온, 지자체, 공공기관, 위탁관리, 일반업체")).toEqual([
+		"가온",
 		"지자체",
 		"공공기관",
 		"위탁관리",
@@ -246,7 +246,7 @@ test("authorPlanAI splits an enumerated assertion and leaves textNotIncludes int
 		JSON.stringify({
 			actions: [{ kind: "click", target: "기관 유형" }],
 			assertions: [
-				{ kind: "textIncludes", value: "이지스, 지자체, 공공기관, 위탁관리, 일반업체" },
+				{ kind: "textIncludes", value: "가온, 지자체, 공공기관, 위탁관리, 일반업체" },
 				// A typed string that happens to contain commas must stay one value.
 				{ kind: "textNotIncludes", value: "a,b,c" },
 			],
@@ -260,7 +260,7 @@ test("authorPlanAI splits an enumerated assertion and leaves textNotIncludes int
 });
 /** The route table recon produced for the live app. */
 const ROUTES = [
-	{ label: "공문 발송 현황", path: "/document" },
+	{ label: "문서 현황", path: "/document" },
 	{ label: "개인정보처리방침", path: "/privacy" },
 	{ label: "계정 관리", path: "/account" },
 	{ label: "기관 관리", path: "/agency" },
@@ -279,7 +279,7 @@ test("deriveRouteAssertion turns a navigation expectation into a url check", () 
 		kind: "urlIncludes",
 		value: "/account",
 	});
-	expect(deriveRouteAssertion("1. 공문 발송 현황 목록으로 이동되어야 한다.", ROUTES)).toEqual({
+	expect(deriveRouteAssertion("1. 문서 현황 목록으로 이동되어야 한다.", ROUTES)).toEqual({
 		kind: "urlIncludes",
 		value: "/document",
 	});
@@ -378,10 +378,10 @@ test("derivePreparationActions navigates by route instead of clicking the sheet'
 });
 
 test("derivePreparationActions leaves a precondition it cannot place alone", () => {
-	// "발송완료 상태 공문 상세페이지" names no route: a record has to be found, and inventing a goto
+	// "처리완료 상태 문서 상세페이지" names no route: a record has to be found, and inventing a goto
 	// would send every such case to the wrong screen and then report it as reached.
-	const actions = [{ kind: "click", target: "발송완료" } as const];
-	expect(derivePreparationActions("1. 발송완료 상태 공문 상세페이지 진입된 상태", actions, ROUTES)).toEqual(actions);
+	const actions = [{ kind: "click", target: "처리완료" } as const];
+	expect(derivePreparationActions("1. 처리완료 상태 문서 상세페이지 진입된 상태", actions, ROUTES)).toEqual(actions);
 	// No table at all (app analysis never ran) → nothing to derive, the model's plan is untouched.
 	expect(derivePreparationActions("1. 계정 관리 페이지 진입된 상태", actions, [])).toEqual(actions);
 });
@@ -508,9 +508,9 @@ test("deriveReflectionAssertions reads back the value the plan typed, not a gues
 	// literal in the expectation to quote — the case passed its check and was held anyway.
 	expect(
 		deriveReflectionAssertions("1. 해당란에 반영되어야 한다.", [
-			{ kind: "fill", target: "발송 그룹", value: "테스트 발송 그룹" },
+			{ kind: "fill", target: "소속 그룹", value: "테스트 소속 그룹" },
 		]),
-	).toEqual([{ kind: "fieldHolds", field: "발송 그룹", value: "테스트 발송 그룹" }]);
+	).toEqual([{ kind: "fieldHolds", field: "소속 그룹", value: "테스트 소속 그룹" }]);
 	expect(
 		deriveReflectionAssertions("1. The value must be reflected in the field.", [
 			{ kind: "fill", target: "Phone", value: "01012345678" },
@@ -537,12 +537,10 @@ test("deriveQuotedAssertions reads the copy the requirement writes out under its
 		deriveQuotedAssertions("1. 입력란 하단에 안내문구가 붉은색으로 출력되어야 한다.\n- 이메일 형식, 최대 255자 ", []),
 	).toEqual([{ kind: "textIncludes", value: "이메일 형식, 최대 255자" }]);
 	// Four names on one line are four things the screen must show; the comma-joined string is on no page.
-	expect(
-		deriveQuotedAssertions("1. 필터 리스트 표출되어야 한다.\n- 이지스엔터프라이즈, 한국환경공단, 소방청", []),
-	).toEqual([
-		{ kind: "textIncludes", value: "이지스엔터프라이즈" },
-		{ kind: "textIncludes", value: "한국환경공단" },
-		{ kind: "textIncludes", value: "소방청" },
+	expect(deriveQuotedAssertions("1. 필터 리스트 표출되어야 한다.\n- 가온기관, 나래공단, 다솜청", [])).toEqual([
+		{ kind: "textIncludes", value: "가온기관" },
+		{ kind: "textIncludes", value: "나래공단" },
+		{ kind: "textIncludes", value: "다솜청" },
 	]);
 	expect(deriveQuotedAssertions("1. The banner must show.\n- Accounts", [])).toEqual([
 		{ kind: "textIncludes", value: "Accounts" },

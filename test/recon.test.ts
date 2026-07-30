@@ -29,7 +29,7 @@ const HOME_HTML = `<!doctype html><html><head><title>acme 홈</title></head><bod
 		<a href="/orders">주문 관리</a>
 	</nav>
 	<h1>대시보드</h1>
-	<h2>단지 95001</h2>
+	<h2>구역 95001</h2>
 	<button>새 결재 요청</button>
 	<span role="button">알림</span>
 </body></html>`;
@@ -75,7 +75,7 @@ test("extractStructure parses title, headings, links, fields, buttons, table hea
 	const p = extractStructure(HOME_HTML, "/home");
 	expect(p.url).toBe("/home");
 	expect(p.title).toBe("acme 홈");
-	expect(p.headings).toEqual(["대시보드", "단지 95001"]);
+	expect(p.headings).toEqual(["대시보드", "구역 95001"]);
 	expect(p.links.map((l) => `${l.label}|${l.href}`)).toEqual([
 		"주문 관리|/orders",
 		"환경 설정|/settings?tab=1#top",
@@ -205,12 +205,12 @@ test("attemptLogin fails when no login fields are found on the page", async () =
 });
 
 /**
- * Real-world client-rendered login (dev-aptpaper.xperp.co.kr): the first navigation returns an
+ * Real-world client-rendered login (the app under test): the first navigation returns an
  * empty app shell, the app then client-redirects to /auth/login, and its copy differs from the
  * authored hints by spacing + a trailing period ("아이디를 입력해 주세요.").
  */
-const SPA_SHELL_HTML = `<!doctype html><html><head><title>공문 발송 서비스</title></head><body><div id="__nuxt"></div></body></html>`;
-const SPA_LOGIN_HTML = `<!doctype html><html><head><title>공문 발송 서비스</title></head><body>
+const SPA_SHELL_HTML = `<!doctype html><html><head><title>샘플 관리 서비스</title></head><body><div id="__nuxt"></div></body></html>`;
+const SPA_LOGIN_HTML = `<!doctype html><html><head><title>샘플 관리 서비스</title></head><body>
 	<form>
 		<label for="loginId">아이디</label>
 		<input id="loginId" name="loginId" type="text" placeholder="아이디를 입력해 주세요." />
@@ -219,7 +219,7 @@ const SPA_LOGIN_HTML = `<!doctype html><html><head><title>공문 발송 서비�
 		<button type="submit">로그인</button>
 	</form>
 </body></html>`;
-const SPA_HOME_HTML = `<!doctype html><html><head><title>대시보드</title></head><body><h1>공문 발송</h1></body></html>`;
+const SPA_HOME_HTML = `<!doctype html><html><head><title>대시보드</title></head><body><h1>문서 발송</h1></body></html>`;
 const SPA_LIVE_TARGETS = ["아이디를 입력해 주세요.", "비밀번호를 입력해 주세요.", "아이디", "비밀번호"];
 
 class SpaLoginPage implements Page {
@@ -261,7 +261,7 @@ class SpaLoginPage implements Page {
 		const refused = this.showsRejection
 			? "아이디\n비밀번호\n로그인\n로그인 안내\n아이디 또는 비밀번호를 확인해 주세요."
 			: "아이디\n비밀번호\n로그인";
-		this.text = ok ? "공문 발송" : refused;
+		this.text = ok ? "문서 발송" : refused;
 	}
 }
 

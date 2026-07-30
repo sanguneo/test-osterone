@@ -117,7 +117,7 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 		"탭",
 		"아이콘",
 		"영역",
-		// A sheet names a whole region as if it were a control ("발송 그룹 필터 선택") where the app paints
+		// A sheet names a whole region as if it were a control ("소속 그룹 필터 선택") where the app paints
 		// a section label and the list under it. Stripping is only ever a later candidate, so a real
 		// button labelled 필터 still wins as itself.
 		"필터",
@@ -138,8 +138,10 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 	],
 	lengthUnit: ["자", "글자", "characters", "chars", "letters"],
 	anyRow: ["임의", "아무", "첫 번째", "첫번째", "any", "arbitrary", "first"],
-	// `그룹`/`단지` are listed things on this app's screens too — a measured plan said "임의 그룹 선택".
-	rowNoun: ["계정", "항목", "기관", "공문", "그룹", "단지", "행", "목록", "리스트", "row", "item", "record", "entry"],
+	// Common Korean nouns for a thing that appears in a list. Domain words a particular sheet uses
+	// ("단지", "공문") belong on that sheet's rule, not in the engine's defaults — teaching one is a
+	// vocabulary edit, and shipping every industry's nouns here would make "임의 X 선택" match prose.
+	rowNoun: ["계정", "항목", "기관", "문서", "그룹", "행", "목록", "리스트", "row", "item", "record", "entry"],
 	exceed: ["초과", "이상", "넘게", "over", "more than", "exceeding", "longer than"],
 	// Narrow on purpose: these two gate a check that reads a control's state, and every other
 	// "선택되어야 한다" on the sheet is about something a text assertion can already see.
@@ -177,7 +179,7 @@ export const DEFAULT_CHAR_CLASSES: Record<CharClass, string[]> = {
  * Used strictly as a *later* candidate than the exact ones, so a real label always wins. It lives here,
  * next to the vocabulary it reads, because three different layers need the same answer: the click
  * ranking, the fill ranking, and — measured on NO 222 — the field a check looks up. There the plan
- * filled "발송 그룹 입력란" (which resolves, by stripping) and the derived check then asked the snapshot
+ * filled "소속 그룹 입력란" (which resolves, by stripping) and the derived check then asked the snapshot
  * for that same unstripped string and was told "not on screen", failing a case the app had handled.
  */
 export function withoutUiNoun(label: string, vocab: { phrases?: Record<string, string[]> } = {}): string | null {

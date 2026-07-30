@@ -15,7 +15,7 @@ const LOGOUT_RE = /로그아웃|log\s?out|sign\s?out|세션\s?종료/i;
 
 /**
  * Text that classifies a case. Both the category and the title count: a spreadsheet tab is often
- * the *file's* name ("TestCase_공문발송 시스템_관리자") while the feature lives in the title
+ * the *file's* name ("TestCase_샘플관리 시스템_관리자") while the feature lives in the title
  * column ("로그인"), so reading only the category would classify a whole login suite as ordinary.
  */
 function caseLabel(tc: { category?: string | null; title?: string | null }): string {

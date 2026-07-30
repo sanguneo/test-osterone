@@ -55,7 +55,7 @@ test("startsSignedOut: an auth-feature case must meet a real login form, so it s
 	expect(startsSignedOut({ category: "로그인", title: "대시보드 진입" })).toBe(true);
 	expect(startsSignedOut({ category: null, title: "Sign in with a valid account" })).toBe(true);
 	// The spreadsheet tab is often the file's name, not the feature — the title still classifies it.
-	expect(startsSignedOut({ category: "TestCase_공문발송 시스템_관리자", title: "로그인" })).toBe(true);
+	expect(startsSignedOut({ category: "TestCase_샘플관리 시스템_관리자", title: "로그인" })).toBe(true);
 	expect(startsSignedOut({ category: "   ", title: "로그인 실패 3회 시 안내" })).toBe(true);
 	// Password/ID recovery is reachable only while signed out — same contract.
 	expect(startsSignedOut({ category: "TestCase_관리자", title: "아이디/비밀번호 찾기" })).toBe(true);

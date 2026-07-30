@@ -113,7 +113,7 @@ const CHAR_CLASS: Record<CharClass, RegExp> = {
  * looking at, the check has learned nothing.
  *
  * The noun strip is the same later candidate the click and fill rankings use, and it belongs here for
- * the same reason it belongs there. Measured on NO 222: the plan filled "발송 그룹 입력란" — which lands,
+ * the same reason it belongs there. Measured on NO 222: the plan filled "소속 그룹 입력란" — which lands,
  * by stripping — and the derived check then asked the snapshot for that unstripped string and was told
  * "not on screen", failing a case the app had handled correctly.
  */

@@ -1797,7 +1797,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 	 * reaches this queue now means "the engine could not confirm this — look at it": the text was not
 	 * there, the check does not discriminate, only some of the written outcomes were tested, an AI
 	 * repaired an action. A button that blesses all of them at once is a false-pass factory, and it was
-	 * measured as one on the 공문발송 sheet: one click took a run that correctly held 15 of 20 cases
+	 * measured as one on the 샘플관리 sheet: one click took a run that correctly held 15 of 20 cases
 	 * (false-pass 1) to 12 passes and false-pass 7 — six screens a human had already filed as defects,
 	 * green from then on, because approvals outlive "Clear runs".
 	 *

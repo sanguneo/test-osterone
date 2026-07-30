@@ -444,11 +444,11 @@ test("the non-discriminating check settles the screen first, so paint timing can
 		caseId: "TC-paint",
 		contentHash: "h-paint",
 		steps: ["1. 기관 유형 필터 선택"],
-		expected: "이지스",
+		expected: "가온",
 	});
 	const run = (settleMs: number) =>
 		runScenario(tc, {
-			page: new PaintingPage("이지스"),
+			page: new PaintingPage("가온"),
 			rule: RULE,
 			cache: new MemoryAssertionCache(),
 			env: ENV,
@@ -456,7 +456,7 @@ test("the non-discriminating check settles the screen first, so paint timing can
 			executionId: "fixed",
 			settleMs,
 		});
-	// Unsettled: the first read misses 이지스, so the check believes the click revealed it → pass.
+	// Unsettled: the first read misses 가온, so the check believes the click revealed it → pass.
 	expect((await run(0)).verdict).toBe("pass");
 	// Settled: the label was already there before the click, so the check cannot attribute it → held.
 	const settled = await run(1);
@@ -478,7 +478,7 @@ class TwoScreenPage implements Page {
 	async fill(): Promise<void> {}
 	async snapshot(): Promise<PageSnapshot> {
 		// Both pages list the same filter labels; only opening the filter adds the option row.
-		const base = `${this.url === "/agency" ? "기관 관리" : "계정 관리"} 기관유형 이지스 지자체`;
+		const base = `${this.url === "/agency" ? "기관 관리" : "계정 관리"} 기관유형 가온 지자체`;
 		const text = this.opened ? `${base} 옵션열림` : base;
 		return { url: this.url, text, html: `<main>${text}</main>` };
 	}
@@ -488,7 +488,7 @@ test("a nav click rebases the baseline, so getting to a screen is not mistaken f
 	// The live divergence: one case was already on its page (`click 기관유형`) and passed; the identical
 	// case reached the page first (`click 기관 관리` then `click 기관유형`) and was held, because the
 	// baseline stayed on a different page that carried the same labels.
-	const tc = loginTC({ caseId: "TC-nav", contentHash: "h-nav", steps: [], expected: "이지스" });
+	const tc = loginTC({ caseId: "TC-nav", contentHash: "h-nav", steps: [], expected: "가온" });
 	const r = await runScenario(tc, {
 		page: new TwoScreenPage(),
 		rule: RULE,
@@ -501,10 +501,10 @@ test("a nav click rebases the baseline, so getting to a screen is not mistaken f
 				{ kind: "click", target: "기관 관리" },
 				{ kind: "click", target: "기관유형" },
 			],
-			assertions: [{ kind: "textIncludes", value: "이지스" }],
+			assertions: [{ kind: "textIncludes", value: "가온" }],
 		},
 	});
-	// 이지스 is on both screens, so with the baseline left on /account it looked like the filter click
+	// 가온 is on both screens, so with the baseline left on /account it looked like the filter click
 	// revealed it. Rebased onto /agency, the check correctly reports it cannot attribute the label.
 	expect(r.verdict).toBe("needs_review");
 	expect(r.vacuousNote).toContain("동작 전 화면에서도");
@@ -603,7 +603,7 @@ class FlickerPage implements Page {
 	async snapshot(): Promise<PageSnapshot> {
 		this.reads++;
 		// Read 2 (the post-action read) catches the page mid-re-render; every other read has the label.
-		const text = this.reads === 2 ? "기관 유형 상태" : "기관 유형 이지스 상태";
+		const text = this.reads === 2 ? "기관 유형 상태" : "기관 유형 가온 상태";
 		return { url: "/agency", text, html: `<main>${text}</main>` };
 	}
 }
@@ -612,7 +612,7 @@ test("re-render flicker is not evidence that an action revealed anything", async
 	// The trap in reading the whole timeline: "anything varied anywhere" counts a label blinking out
 	// mid-re-render as a change, and an always-visible filter label passes as if the click revealed it.
 	// Only absent-at-both-ends-present-in-between is a real appearance.
-	const tc = loginTC({ caseId: "TC-flicker", contentHash: "h-flicker", steps: [], expected: "이지스" });
+	const tc = loginTC({ caseId: "TC-flicker", contentHash: "h-flicker", steps: [], expected: "가온" });
 	const r = await runScenario(tc, {
 		page: new FlickerPage(),
 		rule: RULE,
@@ -622,7 +622,7 @@ test("re-render flicker is not evidence that an action revealed anything", async
 		executionId: "fixed",
 		plan: {
 			actions: [{ kind: "click", target: "기관유형" }],
-			assertions: [{ kind: "textIncludes", value: "이지스" }],
+			assertions: [{ kind: "textIncludes", value: "가온" }],
 		},
 	});
 	expect(r.verdict).toBe("needs_review");

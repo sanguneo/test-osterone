@@ -34,7 +34,7 @@ test("serializeRule -> parseRule round-trips every field, including the optional
 	// for this to detect anything.
 	const full: InterpretationRule = {
 		...establishRuleFromHeaders(HEADERS),
-		appContext: "공문 발송 시스템 — 관리자 콘솔",
+		appContext: "샘플 관리 시스템 — 관리자 콘솔",
 		codeContext: "React SPA, routes under /src/pages",
 		routes: [
 			{ label: "계정 관리", path: "/account" },
