@@ -1,6 +1,45 @@
 import { expect, test } from "bun:test";
 
-import { browserInstallHint, flexTextRe, looksLikeCss, withoutUiNoun } from "../src/execute/browser-page.ts";
+import {
+	bestFieldMatch,
+	browserInstallHint,
+	type FieldEntry,
+	flexTextRe,
+	looksLikeCss,
+	withoutUiNoun,
+} from "../src/execute/browser-page.ts";
+
+/** The account editor as the page actually describes itself: a visible row label, an instructional placeholder. */
+const EDITOR: FieldEntry[] = [
+	{ index: 0, key: "기관명", names: ["기관명"] },
+	{ index: 1, key: "이메일", names: ["이메일", "이메일을 입력해 주세요.", "email"] },
+	{ index: 2, key: "연락처", names: ["연락처", "'-' 를 제외한 번호를 입력해 주세요.", "contact"] },
+];
+
+test("bestFieldMatch resolves the sheet's word for a box the app labels with instructions", () => {
+	// Measured: three cases typed into "연락처" and every candidate missed, because the app's own label
+	// sits a level above the input and the placeholder shares no character with the word the sheet uses.
+	expect(bestFieldMatch("연락처", EDITOR)?.index).toBe(2);
+	expect(bestFieldMatch("이메일", EDITOR)?.index).toBe(1);
+	// The app's own wording resolves to the same field — that is the point of carrying every alias.
+	expect(bestFieldMatch("이메일을 입력해주세요", EDITOR)?.index).toBe(1);
+	expect(bestFieldMatch("contact", EDITOR)?.index).toBe(2);
+});
+
+test("bestFieldMatch refuses what it cannot pin to one box", () => {
+	// A target no field answers to fails, rather than settling for the nearest thing: a fill that lands
+	// somewhere else leaves the case checking a box it never typed into.
+	expect(bestFieldMatch("비밀번호", EDITOR)).toBeNull();
+	// Too short to anchor — "no" would match half the placeholders on any page.
+	expect(bestFieldMatch("x", EDITOR)).toBeNull();
+	expect(bestFieldMatch("연락처", [])).toBeNull();
+	// The shortest matching name wins: the row label, not the sentence that happens to contain it.
+	const noisy: FieldEntry[] = [
+		{ index: 0, key: "이메일 인증번호", names: ["이메일 인증번호"] },
+		{ index: 1, key: "이메일", names: ["이메일"] },
+	];
+	expect(bestFieldMatch("이메일", noisy)?.index).toBe(1);
+});
 
 test("browserInstallHint: maps Playwright's missing-executable error to an actionable install hint", () => {
 	const pwError = [

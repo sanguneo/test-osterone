@@ -94,6 +94,42 @@ export function looksLikeCss(target: string): boolean {
 const FILLABLE_CSS =
 	'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="checkbox"]):not([type="radio"]), textarea, [contenteditable="true"], [contenteditable=""]';
 
+/** One writable field as the page describes itself: the key a snapshot uses, plus every name it answers to. */
+export interface FieldEntry {
+	index: number;
+	key: string;
+	names: string[];
+}
+
+/**
+ * Which field a fill target names, out of the names each field answers to.
+ *
+ * The rule is the one this used to run inside the browser, lifted out so it can be tested: a name
+ * matches when either string contains the other once spacing is ignored — a sheet writes "이메일" where
+ * the app renders "이메일을 입력해 주세요." — and the *shortest* matching name across all fields wins,
+ * because a longer name that merely contains the target has the weaker claim on it.
+ *
+ * Kept pure on purpose. This is the exact spot where a too-generous match answers for the wrong box: a
+ * stem match once resolved "아이디 입력란" to a field the case had never typed into, and its emptiness
+ * read as a working input limit on two cases whose recorded defect was that the limit does not work.
+ */
+export function bestFieldMatch(target: string, fields: readonly FieldEntry[]): FieldEntry | null {
+	const want = target.replace(/\s+/g, "");
+	if (want.length < 2) return null;
+	let best: FieldEntry | null = null;
+	let bestLen = Number.POSITIVE_INFINITY;
+	for (const field of fields) {
+		for (const raw of field.names) {
+			const name = raw.replace(/\s+/g, "");
+			if (name.length < 2 || name.length >= bestLen) continue;
+			if (!name.includes(want) && !want.includes(name)) continue;
+			best = field;
+			bestLen = name.length;
+		}
+	}
+	return best;
+}
+
 /**
  * Playwright is loaded on demand, not at import time. `chromium.launch` is this file's only
  * runtime use of the package — everything else is types — so a dynamic import keeps the ~0.5s
@@ -408,64 +444,29 @@ export class BrowserPage implements Page {
 	}
 
 	/**
-	 * Find the visible writable field whose own metadata or nearby label text matches the target
-	 * (spacing-insensitive), tag it, and let Playwright fill it so real input/change events still fire.
+	 * Find the writable field the target names, tag it, and let Playwright fill it so real
+	 * input/change events still fire.
+	 *
+	 * Reads the page through the same `readForm` the snapshot uses, so the field a fill writes to and
+	 * the field a `fieldAtMost`/`fieldExcludes` check later looks up are one and the same by
+	 * construction. They used to be resolved by two separate rules, and on the account editor they
+	 * disagreed: the fill landed on `input[name=email]` (matched through its placeholder) while the
+	 * check asked for "이메일" and was told `field "이메일" not on screen`.
 	 */
 	private async fillByProximity(target: string, value: string): Promise<boolean> {
-		const squished = target.replace(/\s+/g, "");
-		if (squished.length < 2) return false;
-		const marked = await this.pwPage
-			.evaluate(
-				({ sq, fillable }) => {
-					const norm = (s: string | null | undefined) => (s || "").replace(/\s+/g, "");
-					for (const stale of document.querySelectorAll("[data-osteron-fill]"))
-						stale.removeAttribute("data-osteron-fill");
-					const labelsOf = (el: Element): string[] => {
-						const out: (string | null | undefined)[] = [
-							el.getAttribute("placeholder"),
-							el.getAttribute("aria-label"),
-							el.getAttribute("name"),
-							el.getAttribute("title"),
-							el.id,
-						];
-						if (el.id) out.push(document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent);
-						out.push(el.closest("label")?.textContent);
-						for (const id of (el.getAttribute("aria-labelledby") || "").split(/\s+/).filter(Boolean))
-							out.push(document.getElementById(id)?.textContent);
-						const group = el.closest("div,li,td,fieldset,form");
-						if (group) for (const l of group.querySelectorAll("label,legend")) out.push(l.textContent);
-						return out.map(norm).filter((s) => s.length >= 2);
-					};
-					let best: HTMLElement | null = null;
-					let bestLen = Number.POSITIVE_INFINITY;
-					for (const el of document.querySelectorAll(fillable)) {
-						const r = el.getBoundingClientRect();
-						if (!r.width || !r.height) continue;
-						for (const label of labelsOf(el)) {
-							if (!label.includes(sq) && !sq.includes(label)) continue;
-							if (label.length >= bestLen) continue;
-							best = el as HTMLElement;
-							bestLen = label.length;
-						}
-					}
-					if (!best) return false;
-					best.setAttribute("data-osteron-fill", "1");
-					return true;
-				},
-				{ sq: squished, fillable: FILLABLE_CSS },
-			)
-			.catch(() => false);
-		if (!marked) return false;
-		const hit = this.pwPage.locator("[data-osteron-fill]").first();
+		if (target.replace(/\s+/g, "").length < 2) return false;
+		const form = await this.readForm(true);
+		const hit = bestFieldMatch(target, form.writable);
 		try {
-			await hit.fill(value, { timeout: this.timeoutMs });
+			if (!hit) return false;
+			await this.pwPage.locator(`[data-osteron-field="${hit.index}"]`).fill(value, { timeout: this.timeoutMs });
 			return true;
 		} catch {
 			return false;
 		} finally {
 			await this.pwPage
 				.evaluate(() => {
-					for (const el of document.querySelectorAll("[data-osteron-fill]")) el.removeAttribute("data-osteron-fill");
+					for (const el of document.querySelectorAll("[data-osteron-field]")) el.removeAttribute("data-osteron-field");
 				})
 				.catch(() => {});
 		}
@@ -485,69 +486,127 @@ export class BrowserPage implements Page {
 						.screenshot({ type: "png" })
 						.then((buf) => `data:image/png;base64,${buf.toString("base64")}`)
 						.catch(() => undefined);
-		const form = await this.formState();
+		const form = await this.readForm(false);
 		return {
 			url: this.pwPage.url(),
 			text,
 			html: await this.pwPage.content(),
 			fields: form.fields,
 			controls: form.controls,
+			fieldLimits: form.limits,
 			screenshot,
 		};
 	}
 
 	/**
-	 * Live state of the page's form controls, keyed by the label a user would read.
+	 * Read every form control the page shows: what is typed, what is selected, and every name each
+	 * writable field answers to.
 	 *
 	 * `fields` carries what is typed: text is a DOM *property*, so it appears in neither `innerText` nor
 	 * `content()` — which made every "입력 제한되어야 한다" case unfalsifiable. `controls` carries what is
 	 * selected, which the same read cannot express: a radio's `value` is a fixed attribute, identical
-	 * whether or not it is the chosen one.
+	 * whether or not it is the chosen one. `writable` carries the aliases a fill target may use, so the
+	 * fill and the later field check resolve the same element instead of disagreeing about its name.
 	 *
-	 * One evaluate for both, so a snapshot still costs a single round trip and both maps describe the
-	 * same instant. Best effort: a detached node mid-render must not fail the snapshot the verdict
+	 * One evaluate for all three, so a snapshot costs a single round trip and every map describes the
+	 * same instant. `tag` marks each writable field with its index for the fill path, and the caller
+	 * removes the marks. Best effort: a detached node mid-render must not fail the snapshot the verdict
 	 * depends on.
 	 */
-	private async formState(): Promise<{ fields: Record<string, string>; controls: Record<string, boolean> }> {
+	private async readForm(tag: boolean): Promise<{
+		fields: Record<string, string>;
+		controls: Record<string, boolean>;
+		limits: Record<string, number>;
+		writable: FieldEntry[];
+	}> {
 		return await this.pwPage
-			.evaluate(() => {
-				const fields: Record<string, string> = {};
-				const controls: Record<string, boolean> = {};
-				const labelOf = (el: Element): string => {
-					const id = el.getAttribute("id");
-					const byFor = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent : null;
-					const wrapping = el.closest("label")?.textContent;
-					return (
-						byFor?.trim() ||
-						wrapping?.trim() ||
-						el.getAttribute("aria-label")?.trim() ||
-						el.getAttribute("placeholder")?.trim() ||
-						el.getAttribute("name")?.trim() ||
-						el.tagName.toLowerCase()
+			.evaluate(
+				({ mark, fillable }) => {
+					const fields: Record<string, string> = {};
+					const controls: Record<string, boolean> = {};
+					const limits: Record<string, number> = {};
+					const writable: { index: number; key: string; names: string[] }[] = [];
+					const text = (s: string | null | undefined) => (s ?? "").trim();
+					/**
+					 * The label of the form row that owns this control — and only when it owns exactly this
+					 * one writable control.
+					 *
+					 * Measured on the account editor: `<label class="form-label">연락처</label>` sits in
+					 * `div.form-item`, while the input's own `closest("div")` is `div.form-input-wrap`, which
+					 * holds no label at all — so "연락처" matched nothing and three cases failed to type into a
+					 * box that was on screen. Climbing further is not the answer either: one level up,
+					 * `div.form-group-modal` carries all nine labels of the dialog, and letting 연락처 answer
+					 * for 이메일 is exactly the wrong-box match this engine has already had to revert twice.
+					 * Stopping where a second writable control appears is what keeps the name unambiguous.
+					 */
+					const rowLabel = (el: Element): string => {
+						for (let row = el.parentElement; row && row !== document.body; row = row.parentElement) {
+							if (row.querySelectorAll(fillable).length > 1) return "";
+							const label = text(row.querySelector("label,legend")?.textContent);
+							if (label) return label;
+						}
+						return "";
+					};
+					const nodes = document.querySelectorAll<HTMLElement>(
+						'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea, [contenteditable="true"]',
 					);
-				};
-				const nodes = document.querySelectorAll<HTMLElement>(
-					'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), textarea, [contenteditable="true"]',
-				);
-				let i = 0;
-				for (const el of nodes) {
-					const v =
-						el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : (el.innerText ?? "");
-					// Empty values are kept on purpose: a field assertion has to tell "the app cleared what I
-					// typed" from "there is no such field", and only presence in this map answers that. Text
-					// assertions filter the empties out themselves.
-					// Distinct keys for repeated labels so one field never masks another's value.
-					const key = labelOf(el);
-					fields[key in fields ? `${key}#${++i}` : key] = v;
-					if (el instanceof HTMLInputElement && (el.type === "radio" || el.type === "checkbox")) {
-						// A styled toggle is an invisible input plus a painted label, so the label is both the
-						// only thing a reader sees and the only name the sheet can be quoting.
-						controls[key in controls ? `${key}#${++i}` : key] = el.checked;
+					let i = 0;
+					for (const el of nodes) {
+						const id = el.getAttribute("id");
+						const byFor = id ? text(document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent) : "";
+						const wrapping = text(el.closest("label")?.textContent);
+						const row = rowLabel(el);
+						// A visible <label> beats instructional text: the sheet writes "연락처", the app renders
+						// "'-' 를 제외한 번호를 입력해 주세요." as the placeholder, and only one of those is a name.
+						const key =
+							byFor ||
+							wrapping ||
+							row ||
+							text(el.getAttribute("aria-label")) ||
+							text(el.getAttribute("placeholder")) ||
+							text(el.getAttribute("name")) ||
+							el.tagName.toLowerCase();
+						const v =
+							el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : (el.innerText ?? "");
+						// Empty values are kept on purpose: a field assertion has to tell "the app cleared what I
+						// typed" from "there is no such field", and only presence in this map answers that. Text
+						// assertions filter the empties out themselves.
+						// Distinct keys for repeated labels so one field never masks another's value.
+						fields[key in fields ? `${key}#${++i}` : key] = v;
+						// `maxLength` is -1 unless the control declares one, and a declared one decides a length
+						// check before the case runs — the verdict layer has to know it was not free to fail.
+						if (el instanceof HTMLInputElement && el.maxLength >= 0) limits[key] = el.maxLength;
+						if (el instanceof HTMLInputElement && (el.type === "radio" || el.type === "checkbox")) {
+							// A styled toggle is an invisible input plus a painted label, so the label is both the
+							// only thing a reader sees and the only name the sheet can be quoting.
+							controls[key in controls ? `${key}#${++i}` : key] = el.checked;
+							continue;
+						}
+						if (!el.matches(fillable)) continue;
+						const r = el.getBoundingClientRect();
+						if (!r.width || !r.height) continue;
+						const index = writable.length;
+						if (mark) el.setAttribute("data-osteron-field", String(index));
+						writable.push({
+							index,
+							key,
+							names: [
+								byFor,
+								wrapping,
+								row,
+								text(el.getAttribute("aria-label")),
+								text(el.getAttribute("placeholder")),
+								text(el.getAttribute("name")),
+								text(el.getAttribute("title")),
+								text(id),
+							].filter(Boolean),
+						});
 					}
-				}
-				return { fields, controls };
-			})
-			.catch(() => ({ fields: {}, controls: {} }));
+					return { fields, controls, limits, writable };
+				},
+				{ mark: tag, fillable: FILLABLE_CSS },
+			)
+			.catch(() => ({ fields: {}, controls: {}, limits: {}, writable: [] }));
 	}
 
 	/** Self-heal candidate ranking: try the most specific locator first, widen to raw css last. */
