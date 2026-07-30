@@ -268,7 +268,13 @@ export class BrowserPage implements Page {
 			.or(this.pwPage.getByLabel(target))
 			.or(this.pwPage.getByPlaceholder(target))
 			.first();
-		const locator = (await clickable.count().catch(() => 0)) > 0 ? clickable : this.locate(target);
+		const named = (await clickable.count().catch(() => 0)) > 0 ? clickable : this.locate(target);
+		// A sheet names a control by its kind where the app paints only the noun: "발송 그룹 필터" for a
+		// section the app labels 발송그룹, "이메일 입력란" for a box labelled 이메일. Strictly a later
+		// candidate — used only when *nothing* matched the target as written, so a real label always wins.
+		// (`withoutUiNoun` documented itself as exactly this and was wired to nothing.)
+		const stripped = withoutUiNoun(target);
+		const locator = stripped && (await named.count().catch(() => 0)) === 0 ? this.locate(stripped) : named;
 		try {
 			await locator.click({ timeout: timeoutMs });
 			return;
@@ -278,7 +284,7 @@ export class BrowserPage implements Page {
 			// layers, which on this app means closing the very dialog the radio lives in.
 			if (await this.clickControlLabel(target, timeoutMs)) return;
 			// A popup/overlay may be intercepting pointer events — clear it and retry.
-			await this.dismissOverlays();
+			await this.dismissOverlays(target);
 			try {
 				await locator.click({ timeout: timeoutMs });
 				return;
@@ -354,8 +360,21 @@ export class BrowserPage implements Page {
 			.catch(() => false);
 	}
 
-	/** Close/hide blocking onboarding & notice popups so they don't intercept clicks. */
-	async dismissOverlays(): Promise<void> {
+	/**
+	 * Close/hide blocking onboarding & notice popups so they don't intercept clicks.
+	 *
+	 * `target` is what the caller was trying to reach, and it is what keeps this from eating the app.
+	 * Measured on the account editor: the sweep's own rule (large, fixed, high z, covers the centre)
+	 * describes `div.modal-dim` — the dialog's backdrop — exactly, so hiding it took the dialog with it
+	 * ("발송자 계정 수정" present before the sweep, gone after). Every failed click inside a dialog was
+	 * destroying the screen it was about to retry on, which made step ① of the recovery ladder
+	 * guarantee its own failure.
+	 *
+	 * So the sweep only runs when it could actually uncover something: the target has to be on the page
+	 * *and* outside the layer being hidden. A target that is nowhere has nothing to uncover, and a
+	 * target inside the layer means the layer is not in the way — it is where the case is working.
+	 */
+	async dismissOverlays(target?: string): Promise<void> {
 		for (const name of ["오늘 하루 보지 않기", "다시 보지 않기", "닫기", "건너뛰기", "Skip", "Close"]) {
 			const closer = this.pwPage
 				.getByRole("button", { name })
@@ -365,7 +384,19 @@ export class BrowserPage implements Page {
 		}
 		// Hide any remaining large fixed/absolute high-z overlay that covers the page center.
 		await this.pwPage
-			.evaluate(() => {
+			.evaluate((wanted) => {
+				const norm = (s: string | null | undefined) => (s || "").replace(/\s+/g, "");
+				const want = norm(wanted);
+				const reachable = (el: Element): boolean => {
+					if (!want) return false;
+					if (norm(el.textContent).includes(want)) return true;
+					for (const a of ["placeholder", "aria-label", "title", "name"]) {
+						if ([...el.querySelectorAll(`[${a}]`)].some((n) => norm(n.getAttribute(a)).includes(want))) return true;
+					}
+					return false;
+				};
+				// Nothing on the page answers to the target, so there is nothing under an overlay to reveal.
+				if (want && !reachable(document.body)) return;
 				for (let i = 0; i < 6; i++) {
 					let node: Element | null = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
 					let overlay: HTMLElement | null = null;
@@ -380,9 +411,11 @@ export class BrowserPage implements Page {
 						node = node.parentElement;
 					}
 					if (!overlay) break;
+					// The target lives in here: this is the case's own screen, not something in front of it.
+					if (reachable(overlay)) break;
 					overlay.style.setProperty("display", "none", "important");
 				}
-			})
+			}, target)
 			.catch(() => {});
 	}
 
@@ -393,24 +426,87 @@ export class BrowserPage implements Page {
 	 * list item. Rows that are visibly a header or an empty-state message are excluded — clicking "조회
 	 * 결과가 없습니다" would report a reached state that was never reached.
 	 *
+	 * Scoped to the frontmost layer when a dialog is up. Measured on the 기관 생성 dialog: its group list
+	 * is `ul > li`, but so is the sidebar nav behind the backdrop, and the nav comes first in document
+	 * order — so "임의 항목 선택" spent its whole budget trying to click a menu item nobody could reach.
+	 * A list the user cannot even see is not the list the case is talking about.
+	 *
 	 * Fails when no row matches rather than falling back to something clickable: "임의 계정 선택" that
 	 * silently clicked a filter chip would be worse than the miss it replaced.
 	 */
 	async clickRow(nth: number, timeoutMs = this.timeoutMs): Promise<void> {
 		const p = this.pwPage;
-		const candidates = [p.locator("table tbody tr"), p.locator('[role="row"]'), p.locator("ul > li, ol > li")];
-		for (const group of candidates) {
-			const rows = group.filter({ hasNot: p.locator("th") });
-			const count = await rows.count().catch(() => 0);
-			if (count < nth) continue;
-			const row = rows.nth(nth - 1);
-			// A row with no text is a spacer; one with a single cell is usually the "no results" line.
-			const text = ((await row.innerText().catch(() => "")) ?? "").trim();
-			if (!text) continue;
-			await row.click({ timeout: timeoutMs });
-			return;
+		const scope = (await this.markFrontmostLayer()) ? "[data-osteron-layer] " : "";
+		try {
+			// The frontmost layer first, then the whole page. Preferring the dialog is what stops the nav
+			// from answering; falling back keeps every page without one behaving exactly as before, so a
+			// layer detected where there is no dialog can cost nothing.
+			for (const within of scope ? [scope, ""] : [""]) {
+				const candidates = [
+					p.locator(`${within}table tbody tr`),
+					p.locator(`${within}[role="row"]`),
+					p.locator(`${within}ul > li, ${within}ol > li`),
+				];
+				for (const group of candidates) {
+					const rows = group.filter({ hasNot: p.locator("th") });
+					const count = await rows.count().catch(() => 0);
+					if (count < nth) continue;
+					const row = rows.nth(nth - 1);
+					// A row with no text is a spacer; one with a single cell is usually the "no results" line.
+					const text = ((await row.innerText().catch(() => "")) ?? "").trim();
+					if (!text) continue;
+					if (
+						await row.click({ timeout: timeoutMs }).then(
+							() => true,
+							() => false,
+						)
+					)
+						return;
+				}
+			}
+			throw new Error(`no data row #${nth} on this page (looked for table rows, ARIA rows, list items)`);
+		} finally {
+			if (scope) await this.clearLayerMark();
 		}
-		throw new Error(`no data row #${nth} on this page (looked for table rows, ARIA rows, list items)`);
+	}
+
+	/**
+	 * Mark the dialog/overlay the user is looking at, so a search can be scoped to it; false when the
+	 * page has no such layer and the whole document is the scope.
+	 *
+	 * Same structural signal the overlay sweep uses — a large, fixed, high-z element covering the
+	 * centre — because that is what "in front of everything else" means without an app-specific class
+	 * list. `[role=dialog]`/`aria-modal` would be nicer and this app carries neither.
+	 */
+	private async markFrontmostLayer(): Promise<boolean> {
+		return await this.pwPage
+			.evaluate(() => {
+				for (const stale of document.querySelectorAll("[data-osteron-layer]"))
+					stale.removeAttribute("data-osteron-layer");
+				let node: Element | null = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2);
+				let layer: HTMLElement | null = null;
+				while (node && node !== document.body) {
+					const cs = getComputedStyle(node);
+					const z = Number.parseInt(cs.zIndex || "0", 10) || 0;
+					if ((cs.position === "fixed" || cs.position === "absolute") && z >= 10) {
+						const r = node.getBoundingClientRect();
+						if (r.width > window.innerWidth * 0.3 && r.height > window.innerHeight * 0.2) layer = node as HTMLElement;
+					}
+					node = node.parentElement;
+				}
+				if (!layer) return false;
+				layer.setAttribute("data-osteron-layer", "1");
+				return true;
+			})
+			.catch(() => false);
+	}
+
+	private async clearLayerMark(): Promise<void> {
+		await this.pwPage
+			.evaluate(() => {
+				for (const el of document.querySelectorAll("[data-osteron-layer]")) el.removeAttribute("data-osteron-layer");
+			})
+			.catch(() => {});
 	}
 
 	async fill(target: string, value: string, timeoutMs = this.timeoutMs): Promise<void> {
@@ -456,7 +552,11 @@ export class BrowserPage implements Page {
 	private async fillByProximity(target: string, value: string): Promise<boolean> {
 		if (target.replace(/\s+/g, "").length < 2) return false;
 		const form = await this.readForm(true);
-		const hit = bestFieldMatch(target, form.writable);
+		// Same "later candidate" rule as the click path: the target as written first, and only if nothing
+		// answers to it, the target with a trailing UI noun removed — a sheet writes "이메일 입력란" where
+		// the app renders only "이메일".
+		const stripped = withoutUiNoun(target);
+		const hit = bestFieldMatch(target, form.writable) ?? (stripped ? bestFieldMatch(stripped, form.writable) : null);
 		try {
 			if (!hit) return false;
 			await this.pwPage.locator(`[data-osteron-field="${hit.index}"]`).fill(value, { timeout: this.timeoutMs });
@@ -538,12 +638,28 @@ export class BrowserPage implements Page {
 					 * `div.form-group-modal` carries all nine labels of the dialog, and letting 연락처 answer
 					 * for 이메일 is exactly the wrong-box match this engine has already had to revert twice.
 					 * Stopping where a second writable control appears is what keeps the name unambiguous.
+					 *
+					 * Only a *direct-child*, bare label that comes *before* the control counts. Measured on the
+					 * 발송그룹 row: the bare "전체" heading sits nested inside an inner wrapper while
+					 * `<label>발송그룹</label>` is a direct child of the row, so a plain descendant search named
+					 * the search box "전체" and the AI repair had to re-point every fill at "그룹명을 검색해
+					 * 주세요." — three model round trips a run, each a heal event capping the case at
+					 * needs_review. A label nested inside another component belongs to that component, one
+					 * that belongs to a control is that control's name, and one rendered below the box is a
+					 * heading for what follows rather than a name for what precedes it.
 					 */
 					const rowLabel = (el: Element): string => {
 						for (let row = el.parentElement; row && row !== document.body; row = row.parentElement) {
 							if (row.querySelectorAll(fillable).length > 1) return "";
-							const label = text(row.querySelector("label,legend")?.textContent);
-							if (label) return label;
+							let found = "";
+							for (const l of row.children) {
+								if (l.tagName !== "LABEL" && l.tagName !== "LEGEND") continue;
+								if (l.getAttribute("for") || l.querySelector("input,select,textarea")) continue;
+								if (!(l.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+								// Keep the closest preceding one.
+								found = text(l.textContent) || found;
+							}
+							if (found) return found;
 						}
 						return "";
 					};

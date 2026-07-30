@@ -70,6 +70,10 @@ test("withoutUiNoun bridges the sheet's wording and the app's placeholder", () =
 	expect(withoutUiNoun("이메일 입력란")).toBe("이메일");
 	expect(withoutUiNoun("비고란")).toBe("비고");
 	expect(withoutUiNoun("Save button")).toBe("Save");
+	// A region named as if it were a control: the app paints `<label>발송그룹</label>` and the list under
+	// it, and there is no "발송 그룹 필터" anywhere — the four cases that start with this step all abort.
+	expect(withoutUiNoun("발송 그룹 필터")).toBe("발송 그룹");
+	expect(withoutUiNoun("Group filter")).toBe("Group");
 	// Nothing to strip, or nothing left worth locating by → null, so no extra candidate is added.
 	expect(withoutUiNoun("기관명")).toBeNull();
 	expect(withoutUiNoun("입력란")).toBeNull();

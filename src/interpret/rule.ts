@@ -111,6 +111,10 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 		"탭",
 		"아이콘",
 		"영역",
+		// A sheet names a whole region as if it were a control ("발송 그룹 필터 선택") where the app paints
+		// a section label and the list under it. Stripping is only ever a later candidate, so a real
+		// button labelled 필터 still wins as itself.
+		"필터",
 		"필드",
 		"입력란",
 		// Bare `란` is "field/column" by itself ("비고란" → "비고"), which a measured fill missed. `입력란`
@@ -124,6 +128,7 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 		"icon",
 		"field",
 		"checkbox",
+		"filter",
 	],
 	lengthUnit: ["자", "글자", "characters", "chars", "letters"],
 	anyRow: ["임의", "아무", "첫 번째", "첫번째", "any", "arbitrary", "first"],
