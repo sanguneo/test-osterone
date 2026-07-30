@@ -36,6 +36,7 @@ import {
 	derivePreparationActions,
 	getOrAuthorPlan,
 	preparationCacheKey,
+	withRowClicks,
 } from "../../interpret/author.ts";
 import type { PageAction } from "../../interpret/interpret.ts";
 import {
@@ -926,11 +927,16 @@ export async function runBatch(
 			// Derived on the way out, not only at author time: navigating by route is a rule about what a
 			// preparation may be, so tightening it has to reach the sheets already cached — the same
 			// reason plans are re-sanitized on read.
-			if (cached) return derivePreparationActions(text, cached.actions, sheetSt.rule.routes);
+			// Row clicks belong here too: "임의 계정 선택된 상태" is a precondition far more often than it is
+			// a step, and without this the setup clicked a label that has never existed, left the popup shut,
+			// and the case's own steps then failed on fields inside it.
+			const prep = (a: PageAction[]) =>
+				derivePreparationActions(text, withRowClicks(a, { phrases: sheetSt.rule.phrases }), sheetSt.rule.routes);
+			if (cached) return prep(cached.actions);
 			try {
 				const actions = await authorPreparation(text, modelClient, sheetSt.rule);
 				sheetSt.planCache.set(key, { actions, assertions: [] });
-				return actions;
+				return prep(actions);
 			} catch (err) {
 				onProgress?.({
 					type: "notice",

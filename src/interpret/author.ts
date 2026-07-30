@@ -431,15 +431,28 @@ export function derivePreparationActions(
 	precondition: string,
 	modelActions: readonly PageAction[],
 	routes: readonly RouteEntry[] = [],
+	phrases: Record<string, string[]> = DEFAULT_PHRASES,
 ): PageAction[] {
+	/**
+	 * "임의 계정 선택된 상태" is a precondition far more often than a step, and there is no label to click.
+	 * Measured, the model's preparation for it was `click "1"` — a pagination number — or nothing at all,
+	 * so the edit popup stayed shut and the case's own steps then failed on fields inside it. A numeric
+	 * click is dropped: it never selects a row, and clicking page 2 moves the list instead.
+	 */
+	const vocab = { ...DEFAULT_PHRASES, ...phrases };
+	const needsRow = matchesPhrase(precondition, vocab.anyRow) && matchesPhrase(precondition, vocab.rowNoun);
+	const isPageNumber = (a: PageAction): boolean => a.kind === "click" && /^\d+$/.test(a.target.trim());
+	const kept = modelActions.filter((a) => !(needsRow && isPageNumber(a)));
+	const rowClick: PageAction[] =
+		needsRow && !kept.some((a) => a.kind === "clickRow") ? [{ kind: "clickRow", nth: 1 }] : [];
 	const route = matchRoute(precondition, routes);
-	if (!route) return [...modelActions];
+	if (!route) return [...kept, ...rowClick];
 	const coversRoute = (a: PageAction): boolean =>
 		(a.kind === "click" && matchRoute(a.target, routes)?.path === route.path) ||
 		(a.kind === "goto" && (a.path.split(/[?#]/)[0] ?? "").replace(/\/+$/, "") === route.path);
 	// The precondition names the screen; navigating straight there is both the correct reading and
 	// idempotent, where a menu click depends on where the previous case happened to leave us.
-	return [{ kind: "goto", path: route.path }, ...modelActions.filter((a) => !coversRoute(a))];
+	return [{ kind: "goto", path: route.path }, ...kept.filter((a) => !coversRoute(a)), ...rowClick];
 }
 
 export interface AuthoredPlanResult {
