@@ -500,17 +500,33 @@ async function attemptLoginOnce(
 	// Wait for the login form to disappear (server auth + redirect / SPA transition can take a few seconds).
 	// Poll rather than a fixed delay so a fast login returns immediately and a slow one isn't a false failure.
 	const normPassHints = passHints.map(normLabel).filter((h) => h.length >= 2);
-	const stillOnLoginForm = (html: string, url: string): boolean =>
-		extractStructure(html, url)
-			.formFields.map(normLabel)
-			.some((f) => normPassHints.some((h) => f.includes(h)));
+	/**
+	 * Is the login form still the screen we are on?
+	 *
+	 * Parsed HTML alone is not enough: an SPA that signs in by swapping views leaves every login input in
+	 * the markup, so a login that plainly worked — url `/#/accounts`, the account table on screen — was
+	 * reported as stuck and the batch aborted.
+	 *
+	 * The submit button's *visible* label is the reliable signal. `snapshot().text` is `innerText`, so a
+	 * form that is gone or hidden contributes nothing to it, while a rejected credential leaves the button
+	 * right there. Checking the password label instead would be weaker: a placeholder-only form shows no
+	 * such text even while it is the only thing on screen, and reading that as success is far worse than
+	 * reading a slow login as failure.
+	 */
+	const loginHints = (opts.loginHints ?? DEFAULT_LOGIN_HINTS).map(normLabel).filter((h) => h.length >= 2);
+	const stillOnLoginForm = (snap: { html: string; url: string; text: string }): boolean => {
+		const fields = extractStructure(snap.html, snap.url).formFields.map(normLabel);
+		if (!fields.some((f) => normPassHints.some((h) => f.includes(h)))) return false;
+		const visible = normLabel(snap.text);
+		return loginHints.some((h) => visible.includes(h));
+	};
 	const budgetMs = opts.settleTimeoutMs ?? 6000;
 	let lastText = "";
 	for (let waited = 0; waited < budgetMs; waited += 500) {
 		await new Promise((resolve) => setTimeout(resolve, 500));
 		const snap = await page.snapshot({ screenshot: false });
 		lastText = snap.text;
-		if (!stillOnLoginForm(snap.html, snap.url)) return { ok: true, note: "로그인 완료" };
+		if (!stillOnLoginForm(snap)) return { ok: true, note: "로그인 완료(로그인 폼 이탈 확인)" };
 	}
 	const shown = loginErrorMessage(lastText);
 	return {
