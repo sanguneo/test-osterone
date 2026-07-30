@@ -434,7 +434,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				// 1. Deterministic recovery: the target *is* on screen, so it is blocked or still
 				// settling — clear whatever intercepts input and give it the full budget this time.
 				if (opts.page.dismissOverlays) {
-					await opts.page.dismissOverlays().catch(() => {});
+					await opts.page.dismissOverlays(targetOf(action)).catch(() => {});
 					await new Promise((r) => setTimeout(r, opts.recoveryDelayMs ?? 400));
 				}
 				err = await perform(action);

@@ -79,8 +79,12 @@ export interface Page {
 	 * Optional deterministic recovery hook: close whatever is intercepting input (onboarding
 	 * modal, notice popup, overlay) so a failed action can be retried. Only the real
 	 * `BrowserPage` implements it; `FakePage` omits it, so unit tests retry immediately.
+	 *
+	 * `target` is what the caller was about to click. An implementation must not hide a layer that
+	 * *contains* the target: measured, the sweep's own rule matches a dialog's backdrop exactly, so a
+	 * failed click inside a dialog was closing the dialog it was about to retry in.
 	 */
-	dismissOverlays?(): Promise<void>;
+	dismissOverlays?(target?: string): Promise<void>;
 	/**
 	 * Optional post-navigation truth: where the browser actually ended up and the document's HTTP
 	 * status. Cheap by design (no screenshot) so the runner can verify every `goto` landed on the
