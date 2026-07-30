@@ -10,8 +10,7 @@
  */
 
 import type { Browser, BrowserContext, Locator, Page as PwPage } from "playwright";
-import { escapeRe } from "../interpret/interpret.ts";
-import { DEFAULT_PHRASES } from "../interpret/rule.ts";
+import { withoutUiNoun } from "../interpret/rule.ts";
 
 import type { Page, PageSnapshot } from "./page.ts";
 
@@ -56,23 +55,6 @@ export function flexTextRe(target: string): RegExp | null {
 			.map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
 			.join("\\s*"),
 	);
-}
-
-/**
- * The target with a trailing UI noun removed, or null when that changes nothing.
- *
- * A sheet names a box "이메일 입력란" while the app's only accessible name is its placeholder,
- * "이메일을 입력해주세요." — two conventions, neither a substring of the other, so every candidate
- * missed and six fills failed on fields that were right there. Stripping the noun leaves "이메일",
- * which `getByPlaceholder` matches as a substring.
- *
- * Used strictly as a *later* candidate than the exact ones, so a real label always wins; the vocabulary
- * is the same list the rule carries, not a second copy.
- */
-export function withoutUiNoun(target: string): string | null {
-	const nouns = [...DEFAULT_PHRASES.uiNoun].sort((a, b) => b.length - a.length).map(escapeRe);
-	const stripped = target.replace(new RegExp(`\\s*(?:${nouns.join("|")})\\s*$`, "i"), "").trim();
-	return stripped && stripped !== target.trim() && stripped.length >= 2 ? stripped : null;
 }
 
 /**

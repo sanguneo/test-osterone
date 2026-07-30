@@ -68,7 +68,9 @@ export type PhraseKind =
 	/** What a sheet calls a two-state control it expects to be selected ("활성 라디오 버튼"). */
 	| "toggleNoun"
 	/** How an expected result claims that control ended up chosen ("선택되어야 한다"). */
-	| "selected";
+	| "selected"
+	/** How an expected result says the box kept what was typed ("해당란에 반영되어야 한다"). */
+	| "reflected";
 
 /**
  * Default intent vocabulary. Korean terms are first-class, not an add-on: the sheets this tool
@@ -139,6 +141,9 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 	// "선택되어야 한다" on the sheet is about something a text assertion can already see.
 	toggleNoun: ["라디오", "체크박스", "radio", "checkbox"],
 	selected: ["선택되어야", "선택된", "체크되어야", "체크된", "선택되어", "selected", "checked"],
+	// "반영" is the sheet's word for "the box kept it". Held to that one idea: "표시"/"출력" also describe
+	// text appearing anywhere on the page, and a text assertion already reads that.
+	reflected: ["반영", "reflect"],
 };
 
 /** Each class's names, in both languages. `nonDigit` is "anything but digits", i.e. 숫자 외. */
@@ -148,6 +153,28 @@ export const DEFAULT_CHAR_CLASSES: Record<CharClass, string[]> = {
 	symbol: ["특수문자", "특수 문자", "기호", "special character", "symbol", "punctuation"],
 	nonDigit: ["숫자 외", "숫자외", "비숫자", "non-digit", "non digit", "not a number"],
 };
+
+/**
+ * A label with a trailing UI noun removed, or null when that changes nothing.
+ *
+ * A sheet names a box "이메일 입력란" while the app's only name for it is a placeholder,
+ * "이메일을 입력해주세요." — two conventions, neither a substring of the other, so every candidate
+ * missed and six fills failed on fields that were right there. Stripping the noun leaves what the two
+ * conventions share.
+ *
+ * Used strictly as a *later* candidate than the exact ones, so a real label always wins. It lives here,
+ * next to the vocabulary it reads, because three different layers need the same answer: the click
+ * ranking, the fill ranking, and — measured on NO 222 — the field a check looks up. There the plan
+ * filled "발송 그룹 입력란" (which resolves, by stripping) and the derived check then asked the snapshot
+ * for that same unstripped string and was told "not on screen", failing a case the app had handled.
+ */
+export function withoutUiNoun(label: string): string | null {
+	const nouns = [...DEFAULT_PHRASES.uiNoun]
+		.sort((a, b) => b.length - a.length)
+		.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+	const stripped = label.replace(new RegExp(`\\s*(?:${nouns.join("|")})\\s*$`, "i"), "").trim();
+	return stripped && stripped !== label.trim() && stripped.length >= 2 ? stripped : null;
+}
 
 /** Deterministic baseline rule derived from a sheet's headers. */
 export function establishRuleFromHeaders(headers: string[], ruleId = "default"): InterpretationRule {

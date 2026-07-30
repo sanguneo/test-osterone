@@ -6,8 +6,8 @@ import {
 	type FieldEntry,
 	flexTextRe,
 	looksLikeCss,
-	withoutUiNoun,
 } from "../src/execute/browser-page.ts";
+import { withoutUiNoun } from "../src/interpret/rule.ts";
 
 /** The account editor as the page actually describes itself: a visible row label, an instructional placeholder. */
 const EDITOR: FieldEntry[] = [

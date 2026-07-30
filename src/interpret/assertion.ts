@@ -7,6 +7,7 @@
  */
 
 import type { PageSnapshot } from "../execute/page.ts";
+import { withoutUiNoun } from "./rule.ts";
 
 /**
  * Character classes a field must not end up containing, named by what is forbidden.
@@ -30,10 +31,22 @@ export type Assertion =
 	 * The state of a toggle is nowhere in the page's text, and its `value` attribute is the same
 	 * whichever one is chosen, so this class of expectation could only ever be held for review.
 	 */
-	| { kind: "controlSelected"; control: string };
+	| { kind: "controlSelected"; control: string }
+	/**
+	 * The named field holds what the case typed into it — "텍스트 입력 → 해당란에 반영되어야 한다".
+	 *
+	 * The requirement is anaphoric: "해당란" is whatever field the *step* named, so there is no literal
+	 * in the expectation to quote and a text assertion could only ever guess at one.
+	 */
+	| { kind: "fieldHolds"; field: string; value: string };
 
-/** The string-valued kinds — the only ones the model is allowed to author. */
-export type ValueAssertion = Extract<Assertion, { value: string }>;
+/**
+ * The string-valued kinds — the only ones the model is allowed to author.
+ *
+ * Listed by name rather than by shape: a code-derived kind that happens to carry a `value` (like
+ * `fieldHolds`) must not become authorable just because it has the same field name.
+ */
+export type ValueAssertion = Extract<Assertion, { kind: "urlIncludes" | "textIncludes" | "textNotIncludes" }>;
 
 export interface AssertionResult {
 	assertion: Assertion;
@@ -55,6 +68,8 @@ export function describeAssertion(a: Assertion): string {
 			return `${a.field} 제외: ${a.classes.join(", ")}`;
 		case "controlSelected":
 			return `${a.control} 선택됨`;
+		case "fieldHolds":
+			return `${a.field}에 "${a.value}"`;
 		default:
 			return a.value;
 	}
@@ -90,21 +105,31 @@ const CHAR_CLASS: Record<CharClass, RegExp> = {
  * meaningful: the snapshot carries every field and every toggle, including the empty and the unselected
  * ones, so "not found" means there is no such control — not that the app cleared or deselected it.
  *
- * Exact, then whitespace/punctuation-insensitive — and deliberately no looser than that. A stem match
- * on "아이디 입력란" resolved to a *different* box whose placeholder shares the noun, one the case had
- * never typed into, and its emptiness read as a working restriction: two cases whose recorded defect
- * is "the limit does not work" passed that way. Not finding it fails instead, which is the safe
- * answer — if the case's target is not what the check is looking at, the check has learned nothing.
+ * Exact, then whitespace/punctuation-insensitive, then the same name minus a trailing UI noun — and
+ * deliberately no looser than that. A stem match on "아이디 입력란" resolved to a *different* box whose
+ * placeholder shares the noun, one the case had never typed into, and its emptiness read as a working
+ * restriction: two cases whose recorded defect is "the limit does not work" passed that way. Not
+ * finding it fails instead, which is the safe answer — if the case's target is not what the check is
+ * looking at, the check has learned nothing.
+ *
+ * The noun strip is the same later candidate the click and fill rankings use, and it belongs here for
+ * the same reason it belongs there. Measured on NO 222: the plan filled "발송 그룹 입력란" — which lands,
+ * by stripping — and the derived check then asked the snapshot for that unstripped string and was told
+ * "not on screen", failing a case the app had handled correctly.
  */
 function lookupLabelled<T>(map: Record<string, T> | undefined, label: string): { label: string; value: T } | null {
 	const entries = map ?? {};
-	const direct = entries[label];
-	if (direct !== undefined) return { label, value: direct };
-	const want = looseText(label);
-	for (const [key, value] of Object.entries(entries)) {
-		if (looseText(key) === want) return { label: key, value };
-	}
-	return null;
+	const hit = (want: string): { label: string; value: T } | null => {
+		const direct = entries[want];
+		if (direct !== undefined) return { label: want, value: direct };
+		const loose = looseText(want);
+		for (const [key, value] of Object.entries(entries)) {
+			if (looseText(key) === loose) return { label: key, value };
+		}
+		return null;
+	};
+	const stripped = withoutUiNoun(label);
+	return hit(label) ?? (stripped ? hit(stripped) : null);
 }
 
 /**
@@ -186,6 +211,22 @@ export function evaluateAssertion(a: Assertion, snap: PageSnapshot, opts: { leni
 				detail: found.value ? `control "${found.label}" is selected` : `control "${found.label}" is not selected`,
 			};
 		}
+		case "fieldHolds": {
+			const found = lookupLabelled(snap.fields, a.field);
+			if (!found) return { assertion: a, passed: false, detail: `field "${a.field}" not on screen` };
+			// Punctuation-insensitive on purpose, and only here: an app that reflects "01012345678" as
+			// "010-1234-5678" *did* reflect it, and separators it adds itself are not a rejection. The
+			// check still fails on an empty box, a truncated value, or anything else — which is the whole
+			// class of defect "해당란에 반영되어야 한다" is written to catch.
+			const passed = looseText(found.value).includes(looseText(a.value));
+			return {
+				assertion: a,
+				passed,
+				detail: passed
+					? `field "${found.label}" holds "${a.value.slice(0, 24)}"`
+					: `field "${found.label}" holds "${found.value.slice(0, 24)}", not "${a.value.slice(0, 24)}"`,
+			};
+		}
 	}
 }
 
@@ -193,9 +234,12 @@ export function dedupeAssertions(assertions: Assertion[]): Assertion[] {
 	const seen = new Set<string>();
 	const out: Assertion[] = [];
 	for (const a of assertions) {
-		// Only the string kinds have a `value`; the structured ones key on their own shape so two of
-		// them are not collapsed into one.
-		const key = "value" in a ? `${a.kind}:${a.value}` : JSON.stringify(a);
+		// A string kind is fully described by its value; every structured kind keys on its own shape, so
+		// two checks about different fields are never collapsed into one just because they read alike.
+		const key =
+			a.kind === "urlIncludes" || a.kind === "textIncludes" || a.kind === "textNotIncludes"
+				? `${a.kind}:${a.value}`
+				: JSON.stringify(a);
 		if (!seen.has(key)) {
 			seen.add(key);
 			out.push(a);
@@ -213,7 +257,7 @@ export function dedupeAssertions(assertions: Assertion[]): Assertion[] {
  * filter only landed because plans are re-sanitized on read; a prompt change has no such escape
  * hatch. Making it part of the key is what lets authoring be fixed at all.
  */
-export const AUTHOR_VERSION = 5;
+export const AUTHOR_VERSION = 6;
 
 /** Cache key: any change to the case, the rule, or the authoring contract forces a miss -> re-author. */
 export function assertionCacheKey(caseId: string, ruleId: string, ruleVersion: number, caseHash: string): string {

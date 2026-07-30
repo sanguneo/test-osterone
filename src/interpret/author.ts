@@ -233,6 +233,34 @@ export function deriveSelectionAssertions(
 	return out;
 }
 
+/**
+ * Derive the check for "해당란에 반영되어야 한다" from the value the plan actually typed.
+ *
+ * The requirement is anaphoric — "해당란" is whatever box the *step* named — so there is no literal in
+ * the expectation to quote, and the two gates that ask "does an assertion quote the requirement?" can
+ * never be satisfied by one. Measured: NO 223 typed "테스트 발송 그룹", the field held it, a model-written
+ * `textIncludes` even passed on it, and the case was still held because that string appears nowhere in
+ * "해당란에 반영되어야 한다". The check that belongs here reads the field, and its value comes from the
+ * plan's own `fill` rather than from a guess at the prose.
+ *
+ * Narrow the same way as the restriction checks: the expectation has to claim the input was kept, and
+ * the plan has to have typed something. Prose alone derives nothing.
+ */
+export function deriveReflectionAssertions(
+	expected: string,
+	actions: readonly PageAction[],
+	vocab: { phrases?: Record<string, string[]> } = {},
+): Assertion[] {
+	const phrases = { ...DEFAULT_PHRASES, ...(vocab.phrases ?? {}) };
+	if (!matchesPhrase(expected, phrases.reflected)) return [];
+	const out: Assertion[] = [];
+	for (const action of actions) {
+		if (action.kind !== "fill" || !action.target.trim() || !action.value) continue;
+		out.push({ kind: "fieldHolds", field: action.target.trim(), value: action.value });
+	}
+	return out;
+}
+
 /** Does `text` contain `needle` as its own word — i.e. not welded to a letter or digit on either side? */
 function namesOnWordBoundary(text: string, needle: string): boolean {
 	const hay = text.toLowerCase();
@@ -290,6 +318,9 @@ function sanitizeStructuredAssertion(kind: Assertion["kind"], o: Record<string, 
 		return control ? { kind, control } : null;
 	}
 	if (typeof o.field !== "string" || !o.field.trim()) return null;
+	if (kind === "fieldHolds") {
+		return typeof o.value === "string" && o.value ? { kind, field: o.field.trim(), value: o.value } : null;
+	}
 	if (kind === "fieldAtMost") {
 		const max = typeof o.max === "number" ? o.max : Number.NaN;
 		return Number.isInteger(max) && max >= 0 ? { kind, field: o.field.trim(), max } : null;
@@ -409,7 +440,11 @@ export async function authorPlanAI(
 		charClasses: rule?.charClasses,
 	});
 	const selections = deriveSelectionAssertions(tc.expected, actions, { phrases: rule?.phrases });
-	return { actions, assertions: [...assertions, ...(route ? [route] : []), ...restrictions, ...selections] };
+	const reflections = deriveReflectionAssertions(tc.expected, actions, { phrases: rule?.phrases });
+	return {
+		actions,
+		assertions: [...assertions, ...(route ? [route] : []), ...restrictions, ...selections, ...reflections],
+	};
 }
 
 /**

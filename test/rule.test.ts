@@ -51,6 +51,7 @@ test("serializeRule -> parseRule round-trips every field, including the optional
 			rowNoun: ["line"],
 			toggleNoun: ["switch"],
 			selected: ["ends up chosen"],
+			reflected: ["is kept"],
 		},
 		charClasses: { hangul: ["hangeul"], upper: ["caps"], symbol: ["punct"], nonDigit: ["not numeric"] },
 	};

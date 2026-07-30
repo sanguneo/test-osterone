@@ -1,7 +1,13 @@
 import { expect, test } from "bun:test";
 
 import type { PageSnapshot } from "../src/execute/page.ts";
-import { AUTHOR_VERSION, assertionCacheKey, describeAssertion, evaluateAssertion } from "../src/interpret/assertion.ts";
+import {
+	AUTHOR_VERSION,
+	assertionCacheKey,
+	dedupeAssertions,
+	describeAssertion,
+	evaluateAssertion,
+} from "../src/interpret/assertion.ts";
 
 const snap = (text: string, url = "/"): PageSnapshot => ({ url, text, html: `<body>${text}</body>` });
 
@@ -136,10 +142,21 @@ test("a field is resolved exactly, never by a noun two boxes happen to share", (
 	const two = withFields({ "아이디를 입력해 주세요.": "", 아이디: "abcdefghijklm" });
 	// The box actually typed into answers, and it is over the limit.
 	expect(evaluateAssertion({ kind: "fieldAtMost", field: "아이디", max: 12 }, two).passed).toBe(false);
-	// The sheet's wording for a field the app labels differently is not guessed at — it fails closed.
+	// The sheet's wording resolves by dropping the trailing UI noun — onto a field of exactly that name,
+	// which here is the box that was actually typed into.
 	const r = evaluateAssertion({ kind: "fieldAtMost", field: "아이디 입력란", max: 12 }, two);
 	expect(r.passed).toBe(false);
-	expect(r.detail).toContain("not on screen");
+	expect(r.detail).toContain("over the 12 limit");
+	// What must never come back is the *other* box. Stripping resolves exactly, never by stem: with only
+	// the placeholder-named field on screen, "아이디 입력란" finds nothing rather than answering with an
+	// empty box the case never touched — the emptiness that read as a working restriction on two cases
+	// whose recorded defect is that the limit does not work.
+	const elsewhere = evaluateAssertion(
+		{ kind: "fieldAtMost", field: "아이디 입력란", max: 12 },
+		withFields({ "아이디를 입력해 주세요.": "" }),
+	);
+	expect(elsewhere.passed).toBe(false);
+	expect(elsewhere.detail).toContain("not on screen");
 	// Spacing the app renders differently still resolves, because that is the same label.
 	expect(
 		evaluateAssertion({ kind: "fieldAtMost", field: "기관유형", max: 5 }, withFields({ "기관 유형": "전체" })).passed,
@@ -190,6 +207,35 @@ test("controlSelected fails when the control is not on screen at all", () => {
 	expect(
 		evaluateAssertion({ kind: "controlSelected", control: "사용안함" }, withControls({ "사용 안함": true })).passed,
 	).toBe(true);
+});
+
+test("fieldHolds asks whether the box kept what the case typed", () => {
+	const kept = withFields({ 연락처: "01012345678" });
+	const a = { kind: "fieldHolds", field: "연락처", value: "01012345678" } as const;
+	expect(evaluateAssertion(a, kept).passed).toBe(true);
+	// Separators the app adds itself are the app reflecting the input, not refusing it.
+	expect(evaluateAssertion(a, withFields({ 연락처: "010-1234-5678" })).passed).toBe(true);
+	// The defects this is written to catch: the box stayed empty, or kept only part of it.
+	const empty = evaluateAssertion(a, withFields({ 연락처: "" }));
+	expect(empty.passed).toBe(false);
+	expect(empty.detail).toContain('not "01012345678"');
+	expect(evaluateAssertion(a, withFields({ 연락처: "0101234567" })).passed).toBe(false);
+	// And the same soundness rule as every other field check: no field, no verdict.
+	expect(evaluateAssertion(a, withFields({ 이메일: "a@b.c" })).detail).toContain("not on screen");
+});
+
+test("dedupeAssertions keeps two field checks that differ only by field", () => {
+	// `fieldHolds` carries a `value` like the string kinds do; keying on it alone would collapse two
+	// checks about different boxes into one and silently drop half the case's verification.
+	const a = { kind: "fieldHolds", field: "이메일", value: "x" } as const;
+	const b = { kind: "fieldHolds", field: "연락처", value: "x" } as const;
+	expect(dedupeAssertions([a, b, a])).toEqual([a, b]);
+	expect(
+		dedupeAssertions([
+			{ kind: "textIncludes", value: "x" },
+			{ kind: "textIncludes", value: "x" },
+		]),
+	).toEqual([{ kind: "textIncludes", value: "x" }]);
 });
 
 test("the cache key covers the authoring contract, not just its inputs", () => {

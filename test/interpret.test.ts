@@ -4,6 +4,7 @@ import { assertionCacheKey } from "../src/interpret/assertion.ts";
 import {
 	authorPlanAI,
 	derivePreparationActions,
+	deriveReflectionAssertions,
 	deriveRestrictionAssertions,
 	deriveRouteAssertion,
 	deriveSelectionAssertions,
@@ -462,4 +463,31 @@ test("deriveSelectionAssertions will not let 활성 answer for 비활성", () =>
 	expect(
 		deriveSelectionAssertions("1. 활성/비활성 라디오 버튼이 선택되어야 한다.", [{ kind: "click", target: "활성" }]),
 	).toEqual([{ kind: "controlSelected", control: "활성" }]);
+});
+
+test("deriveReflectionAssertions reads back the value the plan typed, not a guess at the prose", () => {
+	// Measured on NO 223: "해당란에 반영되어야 한다" points at whatever box the step named, so there is no
+	// literal in the expectation to quote — the case passed its check and was held anyway.
+	expect(
+		deriveReflectionAssertions("1. 해당란에 반영되어야 한다.", [
+			{ kind: "fill", target: "발송 그룹", value: "테스트 발송 그룹" },
+		]),
+	).toEqual([{ kind: "fieldHolds", field: "발송 그룹", value: "테스트 발송 그룹" }]);
+	expect(
+		deriveReflectionAssertions("1. The value must be reflected in the field.", [
+			{ kind: "fill", target: "Phone", value: "01012345678" },
+		]),
+	).toEqual([{ kind: "fieldHolds", field: "Phone", value: "01012345678" }]);
+});
+
+test("deriveReflectionAssertions needs both halves and stays silent without them", () => {
+	const typed = [{ kind: "fill", target: "연락처", value: "01012345678" } as const];
+	// The expectation is about something else entirely.
+	expect(deriveReflectionAssertions("1. 입력 제한되어야 한다.", typed)).toEqual([]);
+	expect(deriveReflectionAssertions("1. 목록이 표출되어야 한다.", typed)).toEqual([]);
+	// Nothing was typed, so no field is implicated and the prose alone derives nothing.
+	expect(deriveReflectionAssertions("1. 해당란에 반영되어야 한다.", [{ kind: "click", target: "저장" }])).toEqual([]);
+	expect(
+		deriveReflectionAssertions("1. 해당란에 반영되어야 한다.", [{ kind: "fill", target: "연락처", value: "" }]),
+	).toEqual([]);
 });
