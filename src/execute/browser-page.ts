@@ -219,8 +219,8 @@ export class BrowserPage implements Page {
 	}
 
 	async click(target: string, timeoutMs = this.timeoutMs): Promise<void> {
-		// Prefer an interactive element (button/link/menuitem/tab/checkbox/label/placeholder) over a
-		// plain text match — otherwise a heading that shares the label (e.g. an <h1>로그인</h1> above a
+		// Prefer an interactive element (button/link/menuitem/tab/radio/checkbox/label/placeholder) over
+		// a plain text match — otherwise a heading that shares the label (e.g. an <h1>로그인</h1> above a
 		// 로그인 button) wins by DOM order and the click hits dead text.
 		const clickable = this.pwPage
 			.getByRole("button", { name: target })
@@ -228,6 +228,7 @@ export class BrowserPage implements Page {
 			.or(this.pwPage.getByRole("menuitem", { name: target }))
 			.or(this.pwPage.getByRole("tab", { name: target }))
 			.or(this.pwPage.getByRole("checkbox", { name: target }))
+			.or(this.pwPage.getByRole("radio", { name: target }))
 			.or(this.pwPage.getByLabel(target))
 			.or(this.pwPage.getByPlaceholder(target))
 			.first();
@@ -236,6 +237,10 @@ export class BrowserPage implements Page {
 			await locator.click({ timeout: timeoutMs });
 			return;
 		} catch (err) {
+			// A styled radio/checkbox hides its real <input>; its <label> is the only clickable surface.
+			// Tried before the overlay sweep on purpose: that sweep presses "닫기" and hides big fixed
+			// layers, which on this app means closing the very dialog the radio lives in.
+			if (await this.clickControlLabel(target, timeoutMs)) return;
 			// A popup/overlay may be intercepting pointer events — clear it and retry.
 			await this.dismissOverlays();
 			try {
@@ -247,6 +252,39 @@ export class BrowserPage implements Page {
 				if (!(await this.clickByText(target))) throw err;
 			}
 		}
+	}
+
+	/**
+	 * Click the surface that actually operates a radio/checkbox when the control itself refuses clicks.
+	 *
+	 * A styled radio keeps the real `<input>` in the DOM at `opacity: 0` and paints its `<label>` on top.
+	 * The input owns the accessible name, so every name-based candidate resolves to it — and Playwright
+	 * then refuses to click an invisible element. Measured on the account editor (`상태` = 활성/비활성):
+	 * `getByRole("radio", { name: "비활성" })` resolves, both `click()` and `check()` time out, and
+	 * clicking `label[for="radio-1"]` flips the control. Two cases died on a control that was right there.
+	 *
+	 * Only the label of the *exactly* named control is used — no text search, no nearest neighbour. A
+	 * radio we cannot name is a radio we would be guessing at, and a guessed click answers for the wrong
+	 * control, which is always the false-pass direction. No label, no click: the caller keeps failing.
+	 */
+	private async clickControlLabel(target: string, timeoutMs: number): Promise<boolean> {
+		const p = this.pwPage;
+		const control = p
+			.getByRole("radio", { name: target, exact: true })
+			.or(p.getByRole("checkbox", { name: target, exact: true }))
+			.first();
+		if ((await control.count().catch(() => 0)) === 0) return false;
+		const id = await control.getAttribute("id").catch(() => null);
+		// `label[for=…]` names the control from outside; a wrapping label contains it. Nothing else counts.
+		const label = id
+			? p.locator(`label[for="${id.replace(/["\\]/g, "\\$&")}"]`)
+			: control.locator("xpath=ancestor::label[1]");
+		if ((await label.count().catch(() => 0)) === 0) return false;
+		return await label
+			.first()
+			.click({ timeout: timeoutMs })
+			.then(() => true)
+			.catch(() => false);
 	}
 
 	/** Grounded fallback: click the smallest visible element whose text matches the target. */
@@ -447,26 +485,34 @@ export class BrowserPage implements Page {
 						.screenshot({ type: "png" })
 						.then((buf) => `data:image/png;base64,${buf.toString("base64")}`)
 						.catch(() => undefined);
+		const form = await this.formState();
 		return {
 			url: this.pwPage.url(),
 			text,
 			html: await this.pwPage.content(),
-			fields: await this.fieldValues(),
+			fields: form.fields,
+			controls: form.controls,
 			screenshot,
 		};
 	}
 
 	/**
-	 * Live values of the page's form fields, keyed by the label a user would read.
+	 * Live state of the page's form controls, keyed by the label a user would read.
 	 *
-	 * Typed text is a DOM *property*, so it appears in neither `innerText` nor `content()` — which
-	 * made every "입력 제한되어야 한다" case unfalsifiable. Read from the live page instead. Best
-	 * effort: a detached node mid-render must not fail the snapshot the verdict depends on.
+	 * `fields` carries what is typed: text is a DOM *property*, so it appears in neither `innerText` nor
+	 * `content()` — which made every "입력 제한되어야 한다" case unfalsifiable. `controls` carries what is
+	 * selected, which the same read cannot express: a radio's `value` is a fixed attribute, identical
+	 * whether or not it is the chosen one.
+	 *
+	 * One evaluate for both, so a snapshot still costs a single round trip and both maps describe the
+	 * same instant. Best effort: a detached node mid-render must not fail the snapshot the verdict
+	 * depends on.
 	 */
-	private async fieldValues(): Promise<Record<string, string>> {
+	private async formState(): Promise<{ fields: Record<string, string>; controls: Record<string, boolean> }> {
 		return await this.pwPage
 			.evaluate(() => {
-				const out: Record<string, string> = {};
+				const fields: Record<string, string> = {};
+				const controls: Record<string, boolean> = {};
 				const labelOf = (el: Element): string => {
 					const id = el.getAttribute("id");
 					const byFor = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent : null;
@@ -492,11 +538,16 @@ export class BrowserPage implements Page {
 					// assertions filter the empties out themselves.
 					// Distinct keys for repeated labels so one field never masks another's value.
 					const key = labelOf(el);
-					out[key in out ? `${key}#${++i}` : key] = v;
+					fields[key in fields ? `${key}#${++i}` : key] = v;
+					if (el instanceof HTMLInputElement && (el.type === "radio" || el.type === "checkbox")) {
+						// A styled toggle is an invisible input plus a painted label, so the label is both the
+						// only thing a reader sees and the only name the sheet can be quoting.
+						controls[key in controls ? `${key}#${++i}` : key] = el.checked;
+					}
 				}
-				return out;
+				return { fields, controls };
 			})
-			.catch(() => ({}));
+			.catch(() => ({ fields: {}, controls: {} }));
 	}
 
 	/** Self-heal candidate ranking: try the most specific locator first, widen to raw css last. */
@@ -508,6 +559,7 @@ export class BrowserPage implements Page {
 			.or(p.getByRole("menuitem", { name: target }))
 			.or(p.getByRole("tab", { name: target }))
 			.or(p.getByRole("checkbox", { name: target }))
+			.or(p.getByRole("radio", { name: target }))
 			.or(p.getByLabel(target))
 			.or(p.getByPlaceholder(target))
 			.or(p.getByText(target, { exact: false }));
