@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test";
 import { type FakeAction, FakePage, type Page, type PageSnapshot } from "../src/execute/page.ts";
-import { determinismView, landingProblem, type RunEnv, type RunOptions, runScenario } from "../src/execute/runner.ts";
+import {
+	determinismView,
+	landingProblem,
+	type RunEnv,
+	type RunOptions,
+	runScenario,
+	withoutRestatedSetup,
+} from "../src/execute/runner.ts";
 import type { NormalizedTC } from "../src/intake/schema.ts";
 import { MemoryAssertionCache } from "../src/interpret/assertion.ts";
 import { getOrAuthorAssertions, type PageAction } from "../src/interpret/interpret.ts";
@@ -789,6 +796,173 @@ test("a field assertion whose field is nowhere on screen fails rather than passi
 	});
 	expect(r.verdict).toBe("fail");
 	expect(r.assertions[0]?.detail).toContain("not on screen");
+});
+
+/** The account editor's 상태 radios: clicking one selects it, and only one is ever on. */
+class RadioPage implements Page {
+	private selected: string;
+	constructor(initial: "활성" | "비활성") {
+		this.selected = initial;
+	}
+	async goto(): Promise<void> {}
+	async click(target: string): Promise<void> {
+		if (target !== "활성" && target !== "비활성") throw new Error(`no control "${target}"`);
+		this.selected = target;
+	}
+	async fill(): Promise<void> {}
+	async snapshot(): Promise<PageSnapshot> {
+		// The visible text is identical either way — both labels are painted whichever one is on. That is
+		// the whole reason this class of expectation needed a check that is not about text.
+		return {
+			url: "/account",
+			text: "발송자 계정 수정 상태 활성 비활성",
+			html: "<main>발송자 계정 수정</main>",
+			controls: { 활성: this.selected === "활성", 비활성: this.selected === "비활성" },
+		};
+	}
+}
+
+test("selecting a radio the case names passes on the control's own state", async () => {
+	// Measured: "1. 비활성 라디오 버튼 선택되어야 한다." had no assertion at all, because nothing about a
+	// radio's state is text. Reading the control is what makes the outcome verifiable.
+	const tc = loginTC({
+		caseId: "TC-radio",
+		contentHash: "h-radio",
+		steps: ["1. 상태 항목 내 비활성 라디오 버튼 선택"],
+		expected: "1. 비활성 라디오 버튼 선택되어야 한다.",
+	});
+	const r = await runScenario(tc, {
+		page: new RadioPage("활성"),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "click", target: "비활성" }],
+			assertions: [{ kind: "controlSelected", control: "비활성" }],
+		},
+	});
+	expect(r.verdict).toBe("pass");
+	expect(r.assertions[0]?.detail).toContain("is selected");
+	// Attribution is satisfied by the control's name, which is a literal quoted from the requirement.
+	expect(r.coverage).toEqual({ total: 1, covered: 1, missing: [] });
+});
+
+test("a radio that was already selected holds for review instead of passing", async () => {
+	// The app opens the editor with 활성 on, so "활성 라디오 버튼 선택되어야 한다" is satisfied whether or
+	// not the click ever landed. The check cannot discriminate, so a human decides — unlike the field
+	// checks, this one gets no exemption, because a working selection *does* change the screen.
+	const tc = loginTC({
+		caseId: "TC-radio2",
+		contentHash: "h-radio2",
+		steps: ["1. 상태 항목 내 활성 라디오 버튼 선택"],
+		expected: "1. 활성 라디오 버튼 선택되어야 한다.",
+	});
+	const r = await runScenario(tc, {
+		page: new RadioPage("활성"),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "click", target: "활성" }],
+			assertions: [{ kind: "controlSelected", control: "활성" }],
+		},
+	});
+	expect(r.verdict).toBe("needs_review");
+	expect(r.vacuousNote).toContain("동작 전 화면에서도");
+});
+
+test("a selection check fails when the click never reached the control", async () => {
+	// The failure this pairs with: the real <input> sits at opacity 0 behind a painted label, so the
+	// click can miss while everything still looks fine. A missing control is a failure to verify.
+	const tc = loginTC({
+		caseId: "TC-radio3",
+		contentHash: "h-radio3",
+		steps: ["1. 상태 항목 내 비활성 라디오 버튼 선택"],
+		expected: "1. 비활성 라디오 버튼 선택되어야 한다.",
+	});
+	const r = await runScenario(tc, {
+		page: new RadioPage("활성"),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "click", target: "비활성" }],
+			assertions: [{ kind: "controlSelected", control: "사용 안함" }],
+		},
+	});
+	expect(r.verdict).toBe("fail");
+	expect(r.assertions[0]?.detail).toContain("not on screen");
+});
+
+test("a plan that restates the preparation does not undo it", () => {
+	// Measured: the precondition clicked a row to open the account editor, then the plan's own first
+	// action reloaded the same page — closing it — and the case failed on the radio it was about to click.
+	const prep: PageAction[] = [
+		{ kind: "goto", path: "/account" },
+		{ kind: "clickRow", nth: 1 },
+	];
+	expect(
+		withoutRestatedSetup(
+			[
+				{ kind: "goto", path: "/account" },
+				{ kind: "click", target: "비활성" },
+			],
+			prep,
+		),
+	).toEqual([{ kind: "click", target: "비활성" }]);
+	// The whole restated run goes, not just the navigation: re-opening a dialog that is already open
+	// fails just as surely as reloading past it.
+	expect(
+		withoutRestatedSetup(
+			[
+				{ kind: "goto", path: "/account" },
+				{ kind: "click", target: "신규 계정 생성" },
+				{ kind: "click", target: "소속기관 필터" },
+			],
+			[
+				{ kind: "goto", path: "/account" },
+				{ kind: "click", target: "신규 계정 생성" },
+			],
+		),
+	).toEqual([{ kind: "click", target: "소속기관 필터" }]);
+});
+
+test("restated-setup trimming keeps anything the plan does differently", () => {
+	const prep: PageAction[] = [
+		{ kind: "goto", path: "/account" },
+		{ kind: "clickRow", nth: 1 },
+	];
+	// A different destination is the case's own business, never a restatement.
+	const elsewhere: PageAction[] = [
+		{ kind: "goto", path: "/agency" },
+		{ kind: "click", target: "저장" },
+	];
+	expect(withoutRestatedSetup(elsewhere, prep)).toEqual(elsewhere);
+	// No preparation at all: nothing to be redundant with.
+	expect(withoutRestatedSetup(elsewhere, [])).toEqual(elsewhere);
+	// A plan that is entirely the preparation keeps its actions. Running nothing would leave the verdict
+	// with no before-screen to compare against, which is the one shape that can pass without acting.
+	const same: PageAction[] = [
+		{ kind: "goto", path: "/account" },
+		{ kind: "clickRow", nth: 1 },
+	];
+	expect(withoutRestatedSetup(same, prep)).toEqual(same);
+	// Same page, different second action → only the navigation is shared.
+	expect(
+		withoutRestatedSetup(
+			[
+				{ kind: "goto", path: "/account" },
+				{ kind: "fill", target: "이메일", value: "a@b.c" },
+			],
+			prep,
+		),
+	).toEqual([{ kind: "fill", target: "이메일", value: "a@b.c" }]);
 });
 
 /** Page that records trace-chunk calls, delegating page actions to a scripted FakePage. */

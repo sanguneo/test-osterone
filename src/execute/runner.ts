@@ -211,6 +211,38 @@ function evidenceRef(kind: string, content: string): string {
 	return `evidence/${kind}-${(h >>> 0).toString(16)}`;
 }
 
+/**
+ * Drop the part of a case's plan that merely restates the preparation that just ran.
+ *
+ * The preparation and the plan are authored from the same case by two independent calls, so the plan
+ * routinely opens with the setup all over again. Replaying it is not just wasted work — a `goto` is a
+ * reload, and a reload closes whatever the preparation opened. Measured: the precondition "임의 계정
+ * 선택된 상태" clicks a row to open the account editor, the plan then said `goto /account` before
+ * clicking the 비활성 radio, and the case failed on a control the preparation had put on screen one
+ * action earlier. Four more cases in the same run were the same shape, holding on a `fill` into a
+ * dialog that had just been navigated away.
+ *
+ * Narrow by construction:
+ *  - both must open with the *same* `goto`, which is the unambiguous signature of a restated setup —
+ *    a plan that navigates somewhere else is expressing something the preparation did not;
+ *  - only the identical leading run is dropped, so the first action the plan does differently survives;
+ *  - never dropped to nothing. A case that performs no action of its own reaches the verdict with no
+ *    screen to compare against, and that is the one shape that could pass without exercising anything.
+ */
+export function withoutRestatedSetup(actions: PageAction[], preparation: readonly PageAction[]): PageAction[] {
+	const first = actions[0];
+	const prepFirst = preparation[0];
+	if (first?.kind !== "goto" || prepFirst?.kind !== "goto" || first.path !== prepFirst.path) return actions;
+	let shared = 0;
+	while (shared < actions.length && shared < preparation.length) {
+		const a = actions[shared];
+		const p = preparation[shared];
+		if (!a || !p || JSON.stringify(a) !== JSON.stringify(p)) break;
+		shared++;
+	}
+	return shared === 0 || shared === actions.length ? actions : actions.slice(shared);
+}
+
 export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<StructuredResult> {
 	const now = opts.now ?? Date.now;
 	const start = now();
@@ -350,7 +382,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		}
 		// A case whose starting state was never reached must not run its own steps: performing them
 		// against the wrong screen manufactures evidence about something that was never exercised.
-		const actionsToRun = preparationFailure ? [] : actions;
+		const actionsToRun = preparationFailure ? [] : withoutRestatedSetup(actions, opts.preparation ?? []);
 		for (let i = 0; i < actionsToRun.length; i++) {
 			let action = actionsToRun[i];
 			if (!action) continue;
