@@ -4,6 +4,7 @@ import { assertionCacheKey } from "../src/interpret/assertion.ts";
 import {
 	authorPlanAI,
 	derivePreparationActions,
+	deriveQuotedAssertions,
 	deriveReflectionAssertions,
 	deriveRestrictionAssertions,
 	deriveRouteAssertion,
@@ -527,4 +528,47 @@ test("deriveReflectionAssertions needs both halves and stays silent without them
 	expect(
 		deriveReflectionAssertions("1. 해당란에 반영되어야 한다.", [{ kind: "fill", target: "연락처", value: "" }]),
 	).toEqual([]);
+});
+
+test("deriveQuotedAssertions reads the copy the requirement writes out under itself", () => {
+	// 278 of this sheet's 652 expected results carry the exact words the screen must show, one line
+	// under the sentence demanding them — and whether the model quotes that line is a coin flip.
+	expect(
+		deriveQuotedAssertions("1. 입력란 하단에 안내문구가 붉은색으로 출력되어야 한다.\n- 이메일 형식, 최대 255자 ", []),
+	).toEqual([{ kind: "textIncludes", value: "이메일 형식, 최대 255자" }]);
+	// Four names on one line are four things the screen must show; the comma-joined string is on no page.
+	expect(
+		deriveQuotedAssertions("1. 필터 리스트 표출되어야 한다.\n- 이지스엔터프라이즈, 한국환경공단, 소방청", []),
+	).toEqual([
+		{ kind: "textIncludes", value: "이지스엔터프라이즈" },
+		{ kind: "textIncludes", value: "한국환경공단" },
+		{ kind: "textIncludes", value: "소방청" },
+	]);
+	expect(deriveQuotedAssertions("1. The banner must show.\n- Accounts", [])).toEqual([
+		{ kind: "textIncludes", value: "Accounts" },
+	]);
+});
+
+test("deriveQuotedAssertions fills a gap and never competes with the model", () => {
+	const quoted = "1. 문구 표출되어야 한다.\n- 검색된 목록이 없습니다.";
+	// The model made a choice; this does not second-guess it. A second check could only lower the pass
+	// ratio of a case the model already described.
+	expect(deriveQuotedAssertions(quoted, [{ kind: "textIncludes", value: "검색 결과 없음" }])).toEqual([]);
+	// A url or a field check is not a text choice, so the gap is still a gap.
+	expect(deriveQuotedAssertions(quoted, [{ kind: "urlIncludes", value: "/agency" }])).toEqual([
+		{ kind: "textIncludes", value: "검색된 목록이 없습니다." },
+	]);
+});
+
+test("deriveQuotedAssertions refuses the lines that describe rather than quote", () => {
+	// `*` introduces a note *about* the requirement on this sheet, and asserting it as page text fails a
+	// case the app handled correctly — measured on NO 112's "* 기관 생성 시 작성한 유형값 반영".
+	expect(deriveQuotedAssertions("1. 자동반영되어야 한다.\n* 기관 생성 시 작성한 유형값 반영", [])).toEqual([]);
+	// "라벨 : 값" is an annotation, not the app's copy.
+	expect(deriveQuotedAssertions("1. 타이틀 출력되어야 한다.\n- 기본값 : 전체", [])).toEqual([]);
+	// Prose is another sentence of requirement, and asserting the requirement verbatim is the false pass
+	// this engine has refused since 2026-07-27.
+	expect(deriveQuotedAssertions("1. 팝업 표출되어야 한다.\n- 팝업이 종료되어야 한다.", [])).toEqual([]);
+	// Nothing written under the requirement at all.
+	expect(deriveQuotedAssertions("1. 수정 팝업 종료되어야 한다.", [])).toEqual([]);
 });

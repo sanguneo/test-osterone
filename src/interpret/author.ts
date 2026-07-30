@@ -17,7 +17,7 @@ import {
 	dedupeAssertions,
 	type ValueAssertion,
 } from "./assertion.ts";
-import { escapeRe, isProse, matchesPhrase, type PageAction } from "./interpret.ts";
+import { escapeRe, expectedRequirements, isProse, matchesPhrase, type PageAction } from "./interpret.ts";
 import { normLabel, type RouteEntry } from "./recon.ts";
 import { DEFAULT_CHAR_CLASSES, DEFAULT_PHRASES, extractJsonObject, type InterpretationRule } from "./rule.ts";
 
@@ -268,6 +268,47 @@ export function deriveReflectionAssertions(
 	return out;
 }
 
+/**
+ * Quote the copy a requirement writes out under itself, when the model quoted nothing at all.
+ *
+ * 278 of this sheet's 652 expected results carry a line like `- 검색된 목록이 없습니다.` — the exact
+ * words the screen is supposed to show, sitting right under the sentence demanding them. Whether the
+ * model picks that line up is a coin flip: NO 141 and 143 were authored with `textIncludes "이메일
+ * 형식, 최대 255자"` under one roll and with no assertion at all under the next, and the English
+ * fixture's EN-1 quoted the prose ("Welcome") instead of the literal beneath it ("Accounts"). The line
+ * is right there; reading it is code's job, not a dice roll.
+ *
+ * Narrow on three counts, because a wrong quote is a false fail:
+ *  - only when the model authored no text assertion at all — this fills a gap, it never competes with
+ *    a choice the model actually made;
+ *  - only lines opened by a quote marker. `*` is not one: on this sheet it introduces a note *about*
+ *    the requirement ("* 기본값 : 전체", "* 기관 생성 시 작성한 유형값 반영"), which is not on screen;
+ *  - and never a `라벨 : 값` annotation or a prose sentence — both describe the requirement rather
+ *    than quoting the app.
+ */
+export function deriveQuotedAssertions(
+	expected: string,
+	authored: readonly Assertion[],
+	vocab: { phrases?: Record<string, string[]> } = {},
+): Assertion[] {
+	if (authored.some((a) => a.kind === "textIncludes" || a.kind === "textNotIncludes")) return [];
+	const markers = { ...DEFAULT_PHRASES, ...(vocab.phrases ?? {}) }.quotedLine;
+	const out: Assertion[] = [];
+	for (const requirement of expectedRequirements(expected)) {
+		for (const line of requirement.split("\n").slice(1)) {
+			const text = line.trim();
+			const marker = markers.find((m) => m && text.startsWith(m));
+			if (!marker) continue;
+			const literal = text.slice(marker.length).trim();
+			if (literal.length < 2 || literal.includes(":") || isProse(literal)) continue;
+			// Split the same way a model-written enumeration is: four names on one line are four things
+			// the screen must show, and the comma-joined string is on no page anywhere.
+			for (const value of splitEnumeratedValue(literal)) out.push({ kind: "textIncludes", value });
+		}
+	}
+	return out;
+}
+
 /** Does `text` contain `needle` as its own word — i.e. not welded to a letter or digit on either side? */
 function namesOnWordBoundary(text: string, needle: string): boolean {
 	const hay = text.toLowerCase();
@@ -474,6 +515,7 @@ export function withDerivedAssertions(
 	});
 	const selections = deriveSelectionAssertions(tc.expected, actions, { phrases: rule?.phrases });
 	const reflections = deriveReflectionAssertions(tc.expected, actions, { phrases: rule?.phrases });
+	const quoted = deriveQuotedAssertions(tc.expected, assertions, { phrases: rule?.phrases });
 	return {
 		actions,
 		// Deduped because a plan cached before this moved may already carry the derived checks it was
@@ -484,6 +526,7 @@ export function withDerivedAssertions(
 			...restrictions,
 			...selections,
 			...reflections,
+			...quoted,
 		]),
 	};
 }

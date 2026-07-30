@@ -72,7 +72,9 @@ export type PhraseKind =
 	/** How an expected result says the box kept what was typed ("해당란에 반영되어야 한다"). */
 	| "reflected"
 	/** What a dismissable onboarding/notice overlay calls its close control ("오늘 하루 보지 않기"). */
-	| "overlayCloser";
+	| "overlayCloser"
+	/** What marks a line that quotes the app's own copy, under a written requirement ("- 검색된 목록이 없습니다."). */
+	| "quotedLine";
 
 /**
  * Default intent vocabulary. Korean terms are first-class, not an add-on: the sheets this tool
@@ -150,6 +152,10 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 	// notice says "확인" is teachable instead of needing a code change — and, like every other list here,
 	// visible where a human can see what the engine will press.
 	overlayCloser: ["오늘 하루 보지 않기", "다시 보지 않기", "닫기", "건너뛰기", "Skip", "Close"],
+	// `-` introduces the copy a requirement is about; `*` is deliberately absent, because on the measured
+	// sheet it introduces a note *about* the requirement ("* 기본값 : 전체", "* 기관 생성 시 작성한 유형값
+	// 반영") and asserting those as page text fails cases the app handled correctly.
+	quotedLine: ["-", "•", "‧"],
 };
 
 /** Each class's names, in both languages. `nonDigit` is "anything but digits", i.e. 숫자 외. */
