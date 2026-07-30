@@ -65,7 +65,10 @@ function sanitizeActions(raw: unknown): PageAction[] {
 		if (o.kind === "goto" && typeof o.path === "string" && o.path) out.push({ kind: "goto", path: o.path });
 		else if (o.kind === "click" && typeof o.target === "string" && o.target)
 			out.push({ kind: "click", target: o.target });
-		else if (o.kind === "fill" && typeof o.target === "string" && typeof o.value === "string" && o.target)
+		else if (o.kind === "clickRow") {
+			const nth = typeof o.nth === "number" ? o.nth : 1;
+			if (Number.isInteger(nth) && nth >= 1) out.push({ kind: "clickRow", nth });
+		} else if (o.kind === "fill" && typeof o.target === "string" && typeof o.value === "string" && o.target)
 			out.push({ kind: "fill", target: o.target, value: o.value });
 	}
 	return out;
@@ -137,6 +140,29 @@ function readLengthLimit(text: string, units: readonly string[], exceed: readonl
 		if (Number.isInteger(n) && n > 0) return n;
 	}
 	return null;
+}
+
+/**
+ * Turn "임의 계정 선택" into a row click, because there is no label to click.
+ *
+ * The most common instruction on the measured sheet — 124 of 652 cases say "pick any account / any
+ * item" — and thirty times more common than every ordinal put together. A label-only action vocabulary
+ * cannot express it, so the model authored `click "임의 계정"`, a target that has never existed on any
+ * page, and the case failed before reaching whatever it was meant to verify.
+ *
+ * Both halves must be present: an "any/첫 번째" word *and* a noun that names a listed thing. "임의의
+ * 문자를 입력" is not a row, and quietly clicking one would send the case somewhere it never asked to go.
+ */
+export function withRowClicks(
+	actions: readonly PageAction[],
+	vocab: { phrases?: Record<string, string[]> } = {},
+): PageAction[] {
+	const phrases = { ...DEFAULT_PHRASES, ...(vocab.phrases ?? {}) };
+	return actions.map((a) => {
+		if (a.kind !== "click") return a;
+		const isAnyRow = matchesPhrase(a.target, phrases.anyRow) && matchesPhrase(a.target, phrases.rowNoun);
+		return isAnyRow ? { kind: "clickRow", nth: 1 } : a;
+	});
 }
 
 /**
@@ -322,7 +348,7 @@ export async function authorPlanAI(
 			),
 		) ?? {};
 	const assertions = sanitizeAssertions(obj.assertions);
-	const actions = sanitizeActions(obj.actions);
+	const actions = withRowClicks(sanitizeActions(obj.actions), { phrases: rule?.phrases });
 	// Two checks the model does not author and code can, read from ground truth rather than prose: the
 	// route table says where "…로 이동되어야 한다" lands, and the step's stated limit plus the plan's own
 	// fill target say what "입력 제한되어야 한다" means for that field. Neither replaces the model's work.
@@ -441,7 +467,10 @@ export async function getOrAuthorPlan(
 	const key = assertionCacheKey(tc.caseId, rule.ruleId, rule.ruleVersion, tc.contentHash);
 	const cached = cache.get(key);
 	if (cached) {
-		const plan = { actions: sanitizeActions(cached.actions), assertions: sanitizeAssertions(cached.assertions) };
+		const plan = {
+			actions: withRowClicks(sanitizeActions(cached.actions), { phrases: rule.phrases }),
+			assertions: sanitizeAssertions(cached.assertions),
+		};
 		return { plan, cacheHit: true, key };
 	}
 	const plan = await authorPlanAI(tc, model, context, rule);

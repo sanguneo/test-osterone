@@ -11,6 +11,8 @@ import { DEFAULT_PHRASES, type InterpretationRule } from "./rule.ts";
 export type PageAction =
 	| { kind: "goto"; path: string }
 	| { kind: "click"; target: string }
+	/** Click the nth row of the page's primary data list, 1-based — "임의 계정 선택" has no label. */
+	| { kind: "clickRow"; nth: number }
 	| { kind: "fill"; target: string; value: string }
 	| { kind: "verify"; text: string }
 	| { kind: "unknown"; text: string };

@@ -47,6 +47,8 @@ test("serializeRule -> parseRule round-trips every field, including the optional
 			uiNoun: ["widget"],
 			lengthUnit: ["signs"],
 			exceed: ["beyond"],
+			anyRow: ["whichever"],
+			rowNoun: ["line"],
 		},
 		charClasses: { hangul: ["hangeul"], upper: ["caps"], symbol: ["punct"], nonDigit: ["not numeric"] },
 	};

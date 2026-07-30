@@ -312,6 +312,33 @@ export class BrowserPage implements Page {
 			.catch(() => {});
 	}
 
+	/**
+	 * Click the nth row of the page's primary data list.
+	 *
+	 * Candidates in order of how certain they are to be a row: a real `tbody tr`, an ARIA row, then a
+	 * list item. Rows that are visibly a header or an empty-state message are excluded — clicking "조회
+	 * 결과가 없습니다" would report a reached state that was never reached.
+	 *
+	 * Fails when no row matches rather than falling back to something clickable: "임의 계정 선택" that
+	 * silently clicked a filter chip would be worse than the miss it replaced.
+	 */
+	async clickRow(nth: number, timeoutMs = this.timeoutMs): Promise<void> {
+		const p = this.pwPage;
+		const candidates = [p.locator("table tbody tr"), p.locator('[role="row"]'), p.locator("ul > li, ol > li")];
+		for (const group of candidates) {
+			const rows = group.filter({ hasNot: p.locator("th") });
+			const count = await rows.count().catch(() => 0);
+			if (count < nth) continue;
+			const row = rows.nth(nth - 1);
+			// A row with no text is a spacer; one with a single cell is usually the "no results" line.
+			const text = ((await row.innerText().catch(() => "")) ?? "").trim();
+			if (!text) continue;
+			await row.click({ timeout: timeoutMs });
+			return;
+		}
+		throw new Error(`no data row #${nth} on this page (looked for table rows, ARIA rows, list items)`);
+	}
+
 	async fill(target: string, value: string, timeoutMs = this.timeoutMs): Promise<void> {
 		try {
 			await this.locateFillable(target).fill(value, { timeout: timeoutMs });

@@ -53,7 +53,17 @@ export interface InterpretationRule {
  * expected result claims; `uiNoun` is the trailing noun to strip from a target label; `lengthUnit` and
  * `exceed` combine to read a limit ("12자 초과", "over 12 characters") without storing a regex on disk.
  */
-export type PhraseKind = "prose" | "navigation" | "restriction" | "uiNoun" | "lengthUnit" | "exceed";
+export type PhraseKind =
+	| "prose"
+	| "navigation"
+	| "restriction"
+	| "uiNoun"
+	| "lengthUnit"
+	| "exceed"
+	/** "임의 계정 선택" — pick any one from a list. 124 of 652 cases on the measured sheet. */
+	| "anyRow"
+	/** What such a step calls the thing being picked, so "임의 항목" is a row and "임의 문자" is not. */
+	| "rowNoun";
 
 /**
  * Default intent vocabulary. Korean terms are first-class, not an add-on: the sheets this tool
@@ -111,6 +121,9 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 		"checkbox",
 	],
 	lengthUnit: ["자", "글자", "characters", "chars", "letters"],
+	anyRow: ["임의", "아무", "첫 번째", "첫번째", "any", "arbitrary", "first"],
+	// `그룹`/`단지` are listed things on this app's screens too — a measured plan said "임의 그룹 선택".
+	rowNoun: ["계정", "항목", "기관", "공문", "그룹", "단지", "행", "목록", "리스트", "row", "item", "record", "entry"],
 	exceed: ["초과", "이상", "넘게", "over", "more than", "exceeding", "longer than"],
 };
 

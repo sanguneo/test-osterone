@@ -9,6 +9,7 @@ import {
 	getOrAuthorPlan,
 	MemoryPlanCache,
 	splitEnumeratedValue,
+	withRowClicks,
 } from "../src/interpret/author.ts";
 import {
 	authorAssertions,
@@ -343,6 +344,37 @@ test("derivePreparationActions leaves a precondition it cannot place alone", () 
 	expect(derivePreparationActions("1. 발송완료 상태 공문 상세페이지 진입된 상태", actions, ROUTES)).toEqual(actions);
 	// No table at all (app analysis never ran) → nothing to derive, the model's plan is untouched.
 	expect(derivePreparationActions("1. 계정 관리 페이지 진입된 상태", actions, [])).toEqual(actions);
+});
+
+test("withRowClicks turns 임의 X 선택 into a row click, because there is no label to click", () => {
+	// 124 of 652 cases on the measured sheet say "pick any account / any item" — thirty times more than
+	// every ordinal put together. The model dutifully authored `click "임의 계정"`, a target that has never
+	// existed on any page, so the case failed before reaching what it was meant to verify.
+	expect(
+		withRowClicks([
+			{ kind: "goto", path: "/account" },
+			{ kind: "click", target: "임의 계정" },
+		]),
+	).toEqual([
+		{ kind: "goto", path: "/account" },
+		{ kind: "clickRow", nth: 1 },
+	]);
+	expect(withRowClicks([{ kind: "click", target: "첫 번째 항목" }])).toEqual([{ kind: "clickRow", nth: 1 }]);
+	expect(withRowClicks([{ kind: "click", target: "any record" }])).toEqual([{ kind: "clickRow", nth: 1 }]);
+});
+
+test("withRowClicks needs both halves, so it cannot hijack an ordinary click", () => {
+	// An "any" word alone is not a row: "임의의 문자를 입력" is typing, and clicking a row instead would
+	// send the case somewhere it never asked to go.
+	const keep = (target: string) =>
+		expect(withRowClicks([{ kind: "click", target }])).toEqual([{ kind: "click", target }]);
+	keep("임의 문자");
+	keep("계정 관리");
+	keep("저장");
+	// Fills are never rewritten, whatever they say.
+	expect(withRowClicks([{ kind: "fill", target: "임의 계정", value: "x" }])).toEqual([
+		{ kind: "fill", target: "임의 계정", value: "x" },
+	]);
 });
 
 test("deriveRestrictionAssertions reads the limit from the step and the field from the plan", () => {

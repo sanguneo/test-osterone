@@ -37,6 +37,22 @@ export interface Page {
 	click(target: string, timeoutMs?: number): Promise<void>;
 	fill(target: string, value: string, timeoutMs?: number): Promise<void>;
 	/**
+	 * Click a row of the page's primary data list, 1-based.
+	 *
+	 * "임의 계정 선택" — pick any account from the list — is the single most common instruction on the
+	 * sheet this engine exists for: 124 of 652 cases, thirty times more than every ordinal ("첫 번째",
+	 * "마지막") combined. There is no label to click, so a label-only action vocabulary cannot express it
+	 * at all, and every one of those cases failed on a target that was never a target.
+	 *
+	 * "Any" resolves to the first row, deterministically: a run that picks a different row each time is
+	 * not a regression gate. Implementations must fail rather than click something that is not a row.
+	 *
+	 * Optional like the other capabilities here, so an existing `Page` implementation still compiles —
+	 * the runner reports the gap instead of skipping the step, because a setup step that quietly does
+	 * nothing is how a case gets a verdict from the wrong screen.
+	 */
+	clickRow?(nth: number, timeoutMs?: number): Promise<void>;
+	/**
 	 * Current page state. Pass `{ screenshot: false }` in polling loops: the PNG is ~90% of the
 	 * cost and only the evidence snapshot (and vision) actually needs it.
 	 */
@@ -95,6 +111,11 @@ export class FakePage implements Page {
 
 	async click(target: string): Promise<void> {
 		this.state = this.reducer({ kind: "click", target }, this.state, this.inputs);
+	}
+
+	/** Reducers see a row click as `click` with a synthetic `row:N` target, so scripts stay readable. */
+	async clickRow(nth: number): Promise<void> {
+		this.state = this.reducer({ kind: "click", target: `row:${nth}` }, this.state, this.inputs);
 	}
 
 	async fill(target: string, value: string): Promise<void> {

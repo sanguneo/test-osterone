@@ -233,7 +233,13 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		const assertions = opts.plan ? opts.plan.assertions : getOrAuthorAssertions(tc, opts.rule, opts.cache).assertions;
 
 		const targetOf = (a: PageAction): string =>
-			a.kind === "goto" ? a.path : a.kind === "click" || a.kind === "fill" ? a.target : "";
+			a.kind === "goto"
+				? a.path
+				: a.kind === "clickRow"
+					? `행 #${a.nth}`
+					: a.kind === "click" || a.kind === "fill"
+						? a.target
+						: "";
 		/**
 		 * `patience` is the per-action budget. The first attempt is deliberately impatient: an element
 		 * that is on screen resolves in milliseconds, so a long wait only ever pays off for one that
@@ -248,6 +254,11 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 					// every later step — verify the landing and fail loudly enough for the recovery ladder.
 					const problem = landingProblem(a.path, await opts.page.landing?.());
 					if (problem) return new Error(problem);
+				} else if (a.kind === "clickRow") {
+					// Explicit rather than skipped: a setup step that quietly does nothing is how a case ends
+					// up judged on the wrong screen.
+					if (!opts.page.clickRow) return new Error("이 페이지 구현은 목록 행 선택을 지원하지 않습니다");
+					await opts.page.clickRow(a.nth, patience);
 				} else if (a.kind === "click") await opts.page.click(a.target, patience);
 				else if (a.kind === "fill") await opts.page.fill(a.target, a.value, patience);
 				return null;
@@ -356,7 +367,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 
 			// Record the screen the first interaction is about to act on. Settled, not instantaneous —
 			// see `preInteraction`.
-			if (!preInteraction && (action.kind === "click" || action.kind === "fill")) {
+			if (!preInteraction && (action.kind === "click" || action.kind === "fill" || action.kind === "clickRow")) {
 				preInteraction = await settledSnapshot(opts.page, opts.settleMs ?? 0);
 				lastSeen = preInteraction;
 			}
@@ -379,7 +390,9 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			 * *last* interaction is what navigated, the navigation is the outcome the case is about, and
 			 * throwing the baseline away would make every assertion look like it "already held".
 			 */
-			const moreInteractionsAfter = actionsToRun.slice(i + 1).some((a) => a?.kind === "click" || a?.kind === "fill");
+			const moreInteractionsAfter = actionsToRun
+				.slice(i + 1)
+				.some((a) => a?.kind === "click" || a?.kind === "fill" || a?.kind === "clickRow");
 			let err = await perform(action, opts.firstTryMs ?? 1200);
 			// The live screen at the moment of failure — reused for the presence check and the repair,
 			// so a miss costs one cheap DOM read instead of a second full locator timeout.
@@ -431,9 +444,8 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				// 3. Unrecoverable: the page is no longer where the plan thinks it is. Stop the case —
 				// running the tail would act on the wrong screen (and can fire destructive clicks).
 				healEvents.push(`${action.kind}: ${targetOf(action)} — ${err.message}`);
-				const remaining = actions
-					.slice(i + 1)
-					.filter((a) => a.kind === "goto" || a.kind === "click" || a.kind === "fill").length;
+				// Everything still to do that would actually touch the page.
+				const remaining = actions.slice(i + 1).filter((a) => a.kind !== "verify" && a.kind !== "unknown").length;
 				if (remaining > 0)
 					healEvents.push(`abort: 남은 동작 ${remaining}개 — 선행 스텝 실패로 화면 상태를 신뢰할 수 없어 중단했습니다`);
 				executedAsWritten = false;
