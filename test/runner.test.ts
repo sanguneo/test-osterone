@@ -723,17 +723,31 @@ test("setup is not mistaken for the case's own effect", async () => {
 	expect(r.vacuousNote).toContain("동작 전 화면에서도");
 });
 
-/** Enforces a length limit, or silently accepts everything — a limit that works vs one that does not. */
+/**
+ * Enforces a length limit, or silently accepts everything — a limit that works vs one that does not.
+ *
+ * `declares` mirrors the control's own `maxlength`: an app that limits in JS declares nothing, while a
+ * box with `maxlength` makes the outcome the browser's doing rather than the app's.
+ */
 class InputLimitPage implements Page {
 	private value = "";
-	constructor(private readonly limit: number | null) {}
+	constructor(
+		private readonly limit: number | null,
+		private readonly declares: number | null = null,
+	) {}
 	async goto(): Promise<void> {}
 	async click(): Promise<void> {}
 	async fill(_target: string, value: string): Promise<void> {
 		this.value = this.limit === null ? value : [...value].slice(0, this.limit).join("");
 	}
 	async snapshot(): Promise<PageSnapshot> {
-		return { url: "/account", text: "아이디", html: "<main>아이디</main>", fields: { 아이디: this.value } };
+		return {
+			url: "/account",
+			text: "아이디",
+			html: "<main>아이디</main>",
+			fields: { 아이디: this.value },
+			...(this.declares === null ? {} : { fieldLimits: { 아이디: this.declares } }),
+		};
 	}
 }
 
@@ -796,6 +810,35 @@ test("a field assertion whose field is nowhere on screen fails rather than passi
 	});
 	expect(r.verdict).toBe("fail");
 	expect(r.assertions[0]?.detail).toContain("not on screen");
+});
+
+test("a length limit the box itself declares holds for review instead of passing", async () => {
+	// Measured on NO 142: the case typed 260 characters into a box that declares maxlength=255, the field
+	// held 255, and the check reported a working limit — on a case whose recorded defect is that the box
+	// accepts over 255. `fill` was never able to put more in, so reading the value back says nothing
+	// about the app. The field exemption from the two gates exists because the value could have been
+	// otherwise; here it could not, so the exemption lapses and the case goes to a human.
+	const tc = loginTC({ caseId: "TC-lim4", contentHash: "h-lim4", steps: [], expected: "1. 입력 제한되어야 한다." });
+	const opts = (page: Page): RunOptions => ({
+		page,
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "fill", target: "아이디", value: "abcdefghijklm" }],
+			assertions: [{ kind: "fieldAtMost", field: "아이디", max: 12 }],
+		},
+	});
+	const declared = await runScenario(tc, opts(new InputLimitPage(12, 12)));
+	expect(declared.verdict).toBe("needs_review");
+	// The check itself keeps its honest deterministic result — only the verdict is withheld.
+	expect(declared.assertions[0]?.passed).toBe(true);
+	// A limit the app enforces itself declares nothing, and still earns its pass.
+	expect((await runScenario(tc, opts(new InputLimitPage(12, null)))).verdict).toBe("pass");
+	// A box that declares a *longer* limit than the case asserts was free to fail, so it still counts.
+	expect((await runScenario(tc, opts(new InputLimitPage(12, 40)))).verdict).toBe("pass");
 });
 
 /** The account editor's 상태 radios: clicking one selects it, and only one is ever on. */

@@ -32,6 +32,15 @@ export interface PageSnapshot {
 	 * for `fields`: a control that is absent is not a control that is off.
 	 */
 	controls?: Record<string, boolean>;
+	/**
+	 * The length limit a field's own control declares (`maxlength`), keyed like `fields`.
+	 *
+	 * A limit the browser enforces decides a `fieldAtMost` check before the case runs: `fill` cannot put
+	 * 260 characters into a box that declares 255, so "the value is within the limit" is a fact about the
+	 * browser, not a finding about the app. Measured on a case whose recorded defect is that the limit
+	 * does not work — it passed.
+	 */
+	fieldLimits?: Record<string, number>;
 	/** Optional base64 PNG data URL (real browser only) — evidence for human review. */
 	screenshot?: string;
 }

@@ -14,6 +14,7 @@ import {
 	type Assertion,
 	type AssertionCache,
 	type AssertionResult,
+	declaredFieldLimit,
 	describeAssertion,
 	evaluateAssertion,
 } from "../interpret/assertion.ts";
@@ -612,8 +613,24 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		 * did its job; these tell exactly that, by reading the field's own value. Unlike the string check
 		 * that had to be reverted, they cannot be satisfied by a field that was never found: an
 		 * unresolvable field fails.
+		 *
+		 * The exemption ends where its premise does. When the box itself declares `maxlength` at or below
+		 * the asserted limit, the value was never free to be anything else — `fill` cannot put 260
+		 * characters into a control that declares 255 — so reading it back proves nothing about the app,
+		 * and the gates are exactly right to hold it. Measured on NO 142: the field held 255 of the 260
+		 * typed, the check called the limit working, and the defect a human recorded for that very box is
+		 * that it is not. A pass nobody earned is the one outcome this engine may not produce.
 		 */
-		const checksField = results.some((r) => r.assertion.kind === "fieldAtMost" || r.assertion.kind === "fieldExcludes");
+		const decidedByTheBrowser = (a: Assertion): boolean => {
+			if (a.kind !== "fieldAtMost") return false;
+			const declared = declaredFieldLimit(snap, a.field);
+			return declared !== null && declared <= a.max;
+		};
+		const checksField = results.some(
+			(r) =>
+				(r.assertion.kind === "fieldAtMost" || r.assertion.kind === "fieldExcludes") &&
+				!decidedByTheBrowser(r.assertion),
+		);
 		/**
 		 * Did anything the assertions talk about actually change during the case?
 		 *

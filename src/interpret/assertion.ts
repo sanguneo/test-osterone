@@ -107,6 +107,18 @@ function lookupLabelled<T>(map: Record<string, T> | undefined, label: string): {
 	return null;
 }
 
+/**
+ * The length limit the named field's own control declares, or null when it declares none.
+ *
+ * Used by the verdict layer, not by the check: a `fieldAtMost` whose box declares `maxlength` at or
+ * below the asserted limit cannot fail, because `fill` was never able to put more in. Measured on NO
+ * 142 — the case typed 260 characters into a box that declares 255, the field held 255, the check said
+ * the limit works, and the defect a human recorded for that exact box is that it does not.
+ */
+export function declaredFieldLimit(snap: PageSnapshot, field: string): number | null {
+	return lookupLabelled(snap.fieldLimits, field)?.value ?? null;
+}
+
 /** Pure, deterministic evaluation of one assertion against a snapshot. `lenient` ignores whitespace/punctuation. */
 export function evaluateAssertion(a: Assertion, snap: PageSnapshot, opts: { lenient?: boolean } = {}): AssertionResult {
 	const has = (hay: string, needle: string) =>
