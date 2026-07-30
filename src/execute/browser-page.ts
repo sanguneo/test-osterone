@@ -10,7 +10,7 @@
  */
 
 import type { Browser, BrowserContext, Locator, Page as PwPage } from "playwright";
-import { withoutUiNoun } from "../interpret/rule.ts";
+import { DEFAULT_PHRASES, withoutUiNoun } from "../interpret/rule.ts";
 
 import type { Page, PageSnapshot } from "./page.ts";
 
@@ -24,6 +24,12 @@ export interface BrowserPageOptions {
 	browser?: Browser;
 	/** Capture a Playwright trace (screenshots+DOM snapshots+sources); per-case chunks via start/stopTrace. */
 	trace?: boolean;
+	/**
+	 * The sheet's vocabulary, so the two things this adapter reads words for — which trailing noun is a
+	 * UI kind ("입력란"), and what a dismissable overlay's close control is called — are teachable per
+	 * sheet like the rest of the judgement vocabulary. Defaults when omitted.
+	 */
+	phrases?: Record<string, string[]>;
 }
 
 /**
@@ -160,6 +166,7 @@ export class BrowserPage implements Page {
 		private readonly timeoutMs: number,
 		private readonly ownsBrowser: boolean,
 		private readonly tracing: boolean,
+		private readonly phrases: Record<string, string[]>,
 	) {}
 
 	static async create(opts: BrowserPageOptions): Promise<BrowserPage> {
@@ -181,6 +188,7 @@ export class BrowserPage implements Page {
 			opts.timeoutMs ?? 5000,
 			ownsBrowser,
 			tracing,
+			{ ...DEFAULT_PHRASES, ...(opts.phrases ?? {}) },
 		);
 	}
 
@@ -255,7 +263,7 @@ export class BrowserPage implements Page {
 		// section the app labels 발송그룹, "이메일 입력란" for a box labelled 이메일. Strictly a later
 		// candidate — used only when *nothing* matched the target as written, so a real label always wins.
 		// (`withoutUiNoun` documented itself as exactly this and was wired to nothing.)
-		const stripped = withoutUiNoun(target);
+		const stripped = withoutUiNoun(target, { phrases: this.phrases });
 		const locator = stripped && (await named.count().catch(() => 0)) === 0 ? this.locate(stripped) : named;
 		try {
 			await locator.click({ timeout: timeoutMs });
@@ -357,7 +365,7 @@ export class BrowserPage implements Page {
 	 * target inside the layer means the layer is not in the way — it is where the case is working.
 	 */
 	async dismissOverlays(target?: string): Promise<void> {
-		for (const name of ["오늘 하루 보지 않기", "다시 보지 않기", "닫기", "건너뛰기", "Skip", "Close"]) {
+		for (const name of this.phrases.overlayCloser ?? []) {
 			const closer = this.pwPage
 				.getByRole("button", { name })
 				.or(this.pwPage.getByText(name, { exact: false }))
@@ -537,7 +545,7 @@ export class BrowserPage implements Page {
 		// Same "later candidate" rule as the click path: the target as written first, and only if nothing
 		// answers to it, the target with a trailing UI noun removed — a sheet writes "이메일 입력란" where
 		// the app renders only "이메일".
-		const stripped = withoutUiNoun(target);
+		const stripped = withoutUiNoun(target, { phrases: this.phrases });
 		const hit = bestFieldMatch(target, form.writable) ?? (stripped ? bestFieldMatch(stripped, form.writable) : null);
 		try {
 			if (!hit) return false;

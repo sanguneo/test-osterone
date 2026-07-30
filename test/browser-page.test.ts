@@ -78,6 +78,11 @@ test("withoutUiNoun bridges the sheet's wording and the app's placeholder", () =
 	expect(withoutUiNoun("기관명")).toBeNull();
 	expect(withoutUiNoun("입력란")).toBeNull();
 	expect(withoutUiNoun("버튼")).toBeNull();
+	// The vocabulary is the sheet's, not the adapter's: a team that calls a box a "칸" teaches it once on
+	// the rule instead of waiting for a code change.
+	expect(withoutUiNoun("메모 칸", { phrases: { uiNoun: ["칸"] } })).toBe("메모");
+	// A custom list replaces the defaults rather than extending them, so "입력란" is no longer stripped.
+	expect(withoutUiNoun("이메일 입력란", { phrases: { uiNoun: ["칸"] } })).toBeNull();
 });
 
 test("importing the browser adapter does not load playwright", () => {

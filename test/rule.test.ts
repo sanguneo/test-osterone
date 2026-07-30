@@ -52,6 +52,7 @@ test("serializeRule -> parseRule round-trips every field, including the optional
 			toggleNoun: ["switch"],
 			selected: ["ends up chosen"],
 			reflected: ["is kept"],
+			overlayCloser: ["dismiss this"],
 		},
 		charClasses: { hangul: ["hangeul"], upper: ["caps"], symbol: ["punct"], nonDigit: ["not numeric"] },
 	};

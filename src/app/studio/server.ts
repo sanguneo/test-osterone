@@ -734,9 +734,13 @@ export async function runBatch(
 		stop();
 		return finish();
 	}
+	// The sheet's vocabulary follows the browser: the adapter reads words too (which trailing noun is a
+	// UI kind, what a blocking notice calls its close control), and those were the last two lists living
+	// in code instead of on the rule.
+	const phrases = sheetSt.rule.phrases;
 	const page = input.headed
-		? await BrowserPage.create({ baseUrl, timeoutMs: 4000, headless: false, slowMo: 300, trace })
-		: await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser(), trace });
+		? await BrowserPage.create({ baseUrl, timeoutMs: 4000, headless: false, slowMo: 300, trace, phrases })
+		: await BrowserPage.create({ baseUrl, timeoutMs: 4000, browser: await sharedBrowser(), trace, phrases });
 	if (trace)
 		mkdirSync(join(tracesBaseDir, traceSafe(input.projectId ?? "sample"), traceSafe(sid)), { recursive: true });
 	// Cancellation: closing the page interrupts any in-flight Playwright action so the run stops promptly.

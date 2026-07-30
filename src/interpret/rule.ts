@@ -70,7 +70,9 @@ export type PhraseKind =
 	/** How an expected result claims that control ended up chosen ("선택되어야 한다"). */
 	| "selected"
 	/** How an expected result says the box kept what was typed ("해당란에 반영되어야 한다"). */
-	| "reflected";
+	| "reflected"
+	/** What a dismissable onboarding/notice overlay calls its close control ("오늘 하루 보지 않기"). */
+	| "overlayCloser";
 
 /**
  * Default intent vocabulary. Korean terms are first-class, not an add-on: the sheets this tool
@@ -144,6 +146,10 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 	// "반영" is the sheet's word for "the box kept it". Held to that one idea: "표시"/"출력" also describe
 	// text appearing anywhere on the page, and a text assertion already reads that.
 	reflected: ["반영", "reflect"],
+	// The adapter presses these to clear a blocking popup before retrying. Vocabulary, so an app whose
+	// notice says "확인" is teachable instead of needing a code change — and, like every other list here,
+	// visible where a human can see what the engine will press.
+	overlayCloser: ["오늘 하루 보지 않기", "다시 보지 않기", "닫기", "건너뛰기", "Skip", "Close"],
 };
 
 /** Each class's names, in both languages. `nonDigit` is "anything but digits", i.e. 숫자 외. */
@@ -168,8 +174,8 @@ export const DEFAULT_CHAR_CLASSES: Record<CharClass, string[]> = {
  * filled "발송 그룹 입력란" (which resolves, by stripping) and the derived check then asked the snapshot
  * for that same unstripped string and was told "not on screen", failing a case the app had handled.
  */
-export function withoutUiNoun(label: string): string | null {
-	const nouns = [...DEFAULT_PHRASES.uiNoun]
+export function withoutUiNoun(label: string, vocab: { phrases?: Record<string, string[]> } = {}): string | null {
+	const nouns = [...{ ...DEFAULT_PHRASES, ...(vocab.phrases ?? {}) }.uiNoun]
 		.sort((a, b) => b.length - a.length)
 		.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 	const stripped = label.replace(new RegExp(`\\s*(?:${nouns.join("|")})\\s*$`, "i"), "").trim();
