@@ -142,15 +142,14 @@ test("a field is resolved exactly, never by a noun two boxes happen to share", (
 	const two = withFields({ "아이디를 입력해 주세요.": "", 아이디: "abcdefghijklm" });
 	// The box actually typed into answers, and it is over the limit.
 	expect(evaluateAssertion({ kind: "fieldAtMost", field: "아이디", max: 12 }, two).passed).toBe(false);
-	// The sheet's wording resolves by dropping the trailing UI noun — onto a field of exactly that name,
-	// which here is the box that was actually typed into.
+	// The sheet's wording for a box the app labels differently is not guessed at — it fails closed, and
+	// the judgement layer keeps that stricter than the click and fill rankings on purpose. Stripping the
+	// trailing noun here took a measured 98-case sheet from 3 false passes to 5, and the two it added
+	// were this exact shape: a same-named box the case had never typed into, empty, read as a working
+	// restriction on cases whose recorded defect is that the limit does not work.
 	const r = evaluateAssertion({ kind: "fieldAtMost", field: "아이디 입력란", max: 12 }, two);
 	expect(r.passed).toBe(false);
-	expect(r.detail).toContain("over the 12 limit");
-	// What must never come back is the *other* box. Stripping resolves exactly, never by stem: with only
-	// the placeholder-named field on screen, "아이디 입력란" finds nothing rather than answering with an
-	// empty box the case never touched — the emptiness that read as a working restriction on two cases
-	// whose recorded defect is that the limit does not work.
+	expect(r.detail).toContain("not on screen");
 	const elsewhere = evaluateAssertion(
 		{ kind: "fieldAtMost", field: "아이디 입력란", max: 12 },
 		withFields({ "아이디를 입력해 주세요.": "" }),

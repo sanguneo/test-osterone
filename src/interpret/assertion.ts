@@ -7,7 +7,6 @@
  */
 
 import type { PageSnapshot } from "../execute/page.ts";
-import { withoutUiNoun } from "./rule.ts";
 
 /**
  * Character classes a field must not end up containing, named by what is forbidden.
@@ -105,31 +104,30 @@ const CHAR_CLASS: Record<CharClass, RegExp> = {
  * meaningful: the snapshot carries every field and every toggle, including the empty and the unselected
  * ones, so "not found" means there is no such control — not that the app cleared or deselected it.
  *
- * Exact, then whitespace/punctuation-insensitive, then the same name minus a trailing UI noun — and
- * deliberately no looser than that. A stem match on "아이디 입력란" resolved to a *different* box whose
+ * Exact, then whitespace/punctuation-insensitive — and deliberately no looser than that, in the
+ * judgement layer specifically. A stem match on "아이디 입력란" resolved to a *different* box whose
  * placeholder shares the noun, one the case had never typed into, and its emptiness read as a working
  * restriction: two cases whose recorded defect is "the limit does not work" passed that way. Not
  * finding it fails instead, which is the safe answer — if the case's target is not what the check is
  * looking at, the check has learned nothing.
  *
- * The noun strip is the same later candidate the click and fill rankings use, and it belongs here for
- * the same reason it belongs there. Measured on NO 222: the plan filled "소속 그룹 입력란" — which lands,
- * by stripping — and the derived check then asked the snapshot for that unstripped string and was told
- * "not on screen", failing a case the app had handled correctly.
+ * A trailing UI noun is *not* stripped here, and the difference from the click and fill rankings is the
+ * point. There, a widened candidate that picks the wrong element makes an action fail — visibly, as a
+ * heal event. Here it makes a verdict. Measured: adding the strip to this lookup took a 98-case sheet
+ * from 3 false passes to 5, and the two it added are the same pair as before — "아이디 입력란 내
+ * 한글/대문자/특수문자 입력 → 입력 제한되어야 한다" and its 기관명 twin, both recorded by a human as
+ * *the limit does not work*, both passed on a box that was empty because nothing had been typed into it.
+ * A `fieldHolds`-style false fail (NO 222, "not on screen") is the price, and it is the cheaper one.
  */
 function lookupLabelled<T>(map: Record<string, T> | undefined, label: string): { label: string; value: T } | null {
 	const entries = map ?? {};
-	const hit = (want: string): { label: string; value: T } | null => {
-		const direct = entries[want];
-		if (direct !== undefined) return { label: want, value: direct };
-		const loose = looseText(want);
-		for (const [key, value] of Object.entries(entries)) {
-			if (looseText(key) === loose) return { label: key, value };
-		}
-		return null;
-	};
-	const stripped = withoutUiNoun(label);
-	return hit(label) ?? (stripped ? hit(stripped) : null);
+	const direct = entries[label];
+	if (direct !== undefined) return { label, value: direct };
+	const want = looseText(label);
+	for (const [key, value] of Object.entries(entries)) {
+		if (looseText(key) === want) return { label: key, value };
+	}
+	return null;
 }
 
 /**

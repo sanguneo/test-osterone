@@ -54,6 +54,12 @@ const sheet = project.sheets.find((s) => s.id === sheetId);
 if (!sheet) throw new Error(`no sheet ${sheetId} in ${projectId}`);
 
 // Run it. The server hydrates the sheet content from disk, so csvText stays empty on the wire.
+// `startedAt` is the guard against scoring the wrong thing: a run that dies (the batch aborted on a
+// login timeout, the browser never launched) records nothing, and the history's newest entry is then
+// yesterday's. Scoring that silently is how a stale run gets reported as today's measurement — it
+// happened, and the numbers looked plausible enough to believe.
+const startedAt = Date.now();
+let runError = "";
 if (!scoreOnly) {
 const res = await fetch(`${BASE}/api/run`, {
 	method: "POST",
@@ -87,7 +93,10 @@ const res = await fetch(`${BASE}/api/run`, {
 			}
 			if (ev.type === "start") console.log(`run: ${ev.total} cases · ${ev.baseUrl} · ${ev.interpreter}`);
 			else if (ev.type === "notice") console.log(`  · ${ev.message}`);
-			else if (ev.type === "error") console.error(`  ! ${ev.error}`);
+			else if (ev.type === "error") {
+				runError = String(ev.error ?? "");
+				console.error(`  ! ${runError}`);
+			}
 		}
 	}
 }
@@ -143,12 +152,24 @@ interface RunView {
 	model?: string;
 	reasoning?: string;
 	interpreter: string;
+	/** Epoch ms the run was recorded — the only way to tell today's run from yesterday's. */
+	at?: number;
 }
 const history = await get<RunView[]>(
 	`/api/history?projectId=${encodeURIComponent(projectId)}&sheetId=${encodeURIComponent(sheetId)}`,
 );
 const run = history[0];
 if (!run) throw new Error("no run recorded");
+// The run we just asked for has to be the run we score. A batch that aborts records nothing, and the
+// newest history entry is then whatever ran last time — plausible numbers for the wrong code.
+if (!scoreOnly && (run.at ?? 0) < startedAt) {
+	const age = ((Date.now() - (run.at ?? 0)) / 3600000).toFixed(1);
+	throw new Error(
+		`this run recorded nothing — the newest history entry is ${age}h old, so scoring it would report the previous run's numbers.` +
+			`${runError ? `\n  run error: ${runError}` : ""}` +
+			"\n  Fix the run first, or pass --score-only to score the stored run on purpose.",
+	);
+}
 const queue = await get<{ caseId: string; reason: string }[] | { queue: { caseId: string; reason: string }[] }>(
 	`/api/review/queue?projectId=${encodeURIComponent(projectId)}&sheetId=${encodeURIComponent(sheetId)}`,
 );
