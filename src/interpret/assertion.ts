@@ -85,12 +85,14 @@ function lookupField(snap: PageSnapshot, label: string): { label: string; value:
 	const fields = snap.fields ?? {};
 	const direct = fields[label];
 	if (direct !== undefined) return { label, value: direct };
+	// Exact, then whitespace/punctuation-insensitive — and deliberately no looser than that. A stem match
+	// on "아이디 입력란" resolved to a *different* box whose placeholder shares the noun, one the case had
+	// never typed into, and its emptiness read as a working restriction: two cases whose recorded defect
+	// is "the limit does not work" passed that way. Not finding the field fails instead, which is the safe
+	// answer — if the typed value did not land where the check is looking, the check has learned nothing.
 	const want = looseText(label);
 	for (const [key, value] of Object.entries(fields)) {
 		if (looseText(key) === want) return { label: key, value };
-	}
-	for (const [key, value] of Object.entries(fields)) {
-		if (looseText(key).includes(want) && want.length >= 2) return { label: key, value };
 	}
 	return null;
 }

@@ -129,6 +129,23 @@ test("fieldExcludes names the character class the app let through", () => {
 	expect(evaluateAssertion(digits, withFields({ 연락처: "010-1234" })).passed).toBe(false);
 });
 
+test("a field is resolved exactly, never by a noun two boxes happen to share", () => {
+	// Stem matching was tried and removed: "아이디 입력란" resolved to a different box whose placeholder
+	// shares the noun and which the case had never typed into, so its emptiness read as a working
+	// restriction. Two cases whose recorded defect is "the limit does not work" passed that way.
+	const two = withFields({ "아이디를 입력해 주세요.": "", 아이디: "abcdefghijklm" });
+	// The box actually typed into answers, and it is over the limit.
+	expect(evaluateAssertion({ kind: "fieldAtMost", field: "아이디", max: 12 }, two).passed).toBe(false);
+	// The sheet's wording for a field the app labels differently is not guessed at — it fails closed.
+	const r = evaluateAssertion({ kind: "fieldAtMost", field: "아이디 입력란", max: 12 }, two);
+	expect(r.passed).toBe(false);
+	expect(r.detail).toContain("not on screen");
+	// Spacing the app renders differently still resolves, because that is the same label.
+	expect(
+		evaluateAssertion({ kind: "fieldAtMost", field: "기관유형", max: 5 }, withFields({ "기관 유형": "전체" })).passed,
+	).toBe(true);
+});
+
 test("describeAssertion says what a field assertion checks, since it has no value", () => {
 	expect(describeAssertion({ kind: "fieldAtMost", field: "아이디", max: 12 })).toBe("아이디 ≤ 12자");
 	expect(describeAssertion({ kind: "fieldExcludes", field: "아이디", classes: ["hangul"] })).toBe(

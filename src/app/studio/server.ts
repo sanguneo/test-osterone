@@ -877,20 +877,29 @@ export async function runBatch(
 				 * interpretation while the model keeps working, and the plan it eventually returns still
 				 * lands in the cache for the next run rather than being thrown away.
 				 */
+				// `Promise.race` does not cancel the loser, so the timer fires either way: without this flag
+				// every case reported a 150s overrun ~150s after its plan had already arrived in 5s. 87 of 98
+				// cases "timed out" in a run where nothing had, which cost two misdiagnoses.
+				let authoredFirst = false;
+				const budget = new Promise<undefined>((resolve) => {
+					const t = setTimeout(() => resolve(undefined), PLAN_BUDGET_MS);
+					t.unref();
+				}).then(() => {
+					if (authoredFirst) return undefined;
+					onProgress?.({
+						type: "notice",
+						message: `플랜 작성이 ${PLAN_BUDGET_MS / 1000}초를 넘겨(${tc.title || tc.caseId}) 이 케이스는 규칙 해석으로 진행합니다 — 작성은 계속되어 다음 실행에 쓰입니다.`,
+					});
+					return undefined;
+				});
 				planning.set(
 					tc.caseId,
 					Promise.race([
-						authored.then((r) => r.plan),
-						new Promise<undefined>((resolve) => {
-							const t = setTimeout(() => resolve(undefined), PLAN_BUDGET_MS);
-							t.unref();
-						}).then(() => {
-							onProgress?.({
-								type: "notice",
-								message: `플랜 작성이 ${PLAN_BUDGET_MS / 1000}초를 넘겨(${tc.title || tc.caseId}) 이 케이스는 규칙 해석으로 진행합니다 — 작성은 계속되어 다음 실행에 쓰입니다.`,
-							});
-							return undefined;
+						authored.then((r) => {
+							authoredFirst = true;
+							return r.plan;
 						}),
+						budget,
 					]).catch(() => undefined),
 				);
 				authored.catch((err) => {
