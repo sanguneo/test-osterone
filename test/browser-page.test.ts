@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { browserInstallHint, flexTextRe, looksLikeCss } from "../src/execute/browser-page.ts";
+import { browserInstallHint, flexTextRe, looksLikeCss, withoutUiNoun } from "../src/execute/browser-page.ts";
 
 test("browserInstallHint: maps Playwright's missing-executable error to an actionable install hint", () => {
 	const pwError = [
@@ -22,6 +22,19 @@ test("browserInstallHint: maps a missing `playwright` package to a package-insta
 	const hint = browserInstallHint("Cannot find package 'playwright' imported from /app/src/execute/browser-page.ts");
 	expect(hint).toContain("bun install");
 	expect(browserInstallHint("Error [ERR_MODULE_NOT_FOUND]: Cannot find module 'playwright'")).toContain("bun install");
+});
+
+test("withoutUiNoun bridges the sheet's wording and the app's placeholder", () => {
+	// Measured: six fills failed on fields that were right there. A sheet names a box "이메일 입력란";
+	// the app's only accessible name is its placeholder, "이메일을 입력해주세요." — neither string is a
+	// substring of the other, so every candidate missed. Stripping the noun leaves what they share.
+	expect(withoutUiNoun("이메일 입력란")).toBe("이메일");
+	expect(withoutUiNoun("비고란")).toBe("비고");
+	expect(withoutUiNoun("Save button")).toBe("Save");
+	// Nothing to strip, or nothing left worth locating by → null, so no extra candidate is added.
+	expect(withoutUiNoun("기관명")).toBeNull();
+	expect(withoutUiNoun("입력란")).toBeNull();
+	expect(withoutUiNoun("버튼")).toBeNull();
 });
 
 test("importing the browser adapter does not load playwright", () => {

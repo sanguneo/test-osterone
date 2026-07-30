@@ -98,6 +98,9 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 		"영역",
 		"필드",
 		"입력란",
+		// Bare `란` is "field/column" by itself ("비고란" → "비고"), which a measured fill missed. `입력란`
+		// is longer so it still wins where both apply — the list is sorted by length where it is used.
+		"란",
 		"체크박스",
 		"button",
 		"link",
