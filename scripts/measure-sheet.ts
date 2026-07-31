@@ -212,10 +212,24 @@ for (const c of card.cases) {
 	const entry = labels.get(c.caseId);
 	const id = entry?.source || c.caseId.slice(0, 6);
 	// A mismatch row carries the human's own defect note — it adjudicates the row on the spot.
-	const note = (c.outcome === "false-pass" || c.outcome === "false-fail") && entry?.note ? ` · 비고: ${entry.note.slice(0, 60)}` : "";
+	const note =
+		(c.outcome === "false-pass" || c.outcome === "false-fail") && entry?.note ? ` · 비고: ${entry.note.slice(0, 60)}` : "";
+	// A row the human passed carries no defect note, so a false-fail needs the other half of the
+	// argument: what the engine looked for and did not find. Measured (NO 216): the sheet quotes one
+	// guidance line and the app paints a different one — sheet↔app copy drift, the mirror of the
+	// false-pass "기획서와 상이" class, and unreadable from the outcome column alone.
+	const missed =
+		c.outcome === "false-fail"
+			? ` · ${(r?.assertions ?? [])
+					.filter((a) => !a.passed)
+					.map((a) => a.detail)
+					.join(" / ")
+					.replace(/\s+/g, " ")
+					.slice(0, 90)}`
+			: "";
 	console.log(
 		`${String(id).padStart(6)}  ${c.human.padEnd(9)} ${c.verdict.padEnd(13)}  ${r?.passed}/${r?.total}` +
-			`     ${MARK[c.outcome]?.padEnd(11)}  ${c.holdReason ?? ""}${note}`,
+			`     ${MARK[c.outcome]?.padEnd(11)}  ${c.holdReason ?? ""}${note}${missed}`,
 	);
 }
 console.log(`\n${formatScorecard(card)}`);

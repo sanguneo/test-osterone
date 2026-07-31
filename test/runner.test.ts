@@ -1417,3 +1417,60 @@ test("a failing check with real words in it keeps the fail, glyphs alongside or 
 	expect(r.verdict).toBe("fail");
 	expect(r.vacuousNote).toBeUndefined();
 });
+
+/** A duplicate-check control: it answers only about what the box beside it holds. */
+class DuplicateCheckPage implements Page {
+	private name = "";
+	private checked = false;
+	async goto(): Promise<void> {}
+	async click(target: string): Promise<void> {
+		if (target === "기관명 중복확인") this.checked = true;
+	}
+	async fill(target: string, value: string): Promise<string> {
+		this.name = value;
+		return target;
+	}
+	async snapshot(): Promise<PageSnapshot> {
+		// The app confirms a name only when there is one to confirm — probed live on the real screen.
+		const text = this.checked && this.name ? "기관 생성 기관명 사용할 수 있는 기관명입니다." : "기관 생성 기관명";
+		return { url: "/agency", text, html: `<main>${text}</main>`, fields: { 기관명: this.name } };
+	}
+}
+
+const runDuplicateCheck = (prep: PageAction[], caseId: string) =>
+	runScenario(loginTC({ caseId, contentHash: caseId, steps: [], expected: "사용할 수 있는 기관명입니다." }), {
+		page: new DuplicateCheckPage(),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		preparation: prep,
+		plan: {
+			actions: [{ kind: "click", target: "기관명 중복확인" }],
+			assertions: [{ kind: "textIncludes", value: "사용할 수 있는 기관명입니다." }],
+		},
+	});
+
+test("pressing a field's own control while the field is empty holds as an unmet precondition", async () => {
+	// Measured (NO 206): the precondition is a data state — "중복된 이름이 없는 경우" — which the authored
+	// setup turned into "open the dialog" and nothing more. Failing here files a defect against an app
+	// that behaved correctly: with a name typed, the confirmation appears exactly as the sheet says.
+	const r = await runDuplicateCheck([{ kind: "goto", path: "/agency" }], "TC-dupe-empty");
+	expect(r.verdict).toBe("needs_review");
+	expect(r.healEvents.join()).toContain("precondition: fill: 기관명");
+	// The case did not run as written, so no approved baseline may sign it off either.
+	expect(r.executedAsWritten).toBe(false);
+});
+
+test("the same case passes once the setup actually enters a value", async () => {
+	const r = await runDuplicateCheck(
+		[
+			{ kind: "goto", path: "/agency" },
+			{ kind: "fill", target: "기관명", value: "가온" },
+		],
+		"TC-dupe-filled",
+	);
+	expect(r.verdict).toBe("pass");
+	expect(r.healEvents).toEqual([]);
+});

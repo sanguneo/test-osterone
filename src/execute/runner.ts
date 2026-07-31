@@ -18,6 +18,7 @@ import {
 	describeAssertion,
 	evaluateAssertion,
 	isIconographic,
+	untypedFieldInTarget,
 } from "../interpret/assertion.ts";
 import type { AuthoredPlan } from "../interpret/author.ts";
 import {
@@ -642,6 +643,33 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				.join(", ")
 				.replace(/\s+/g, " ")
 				.slice(0, 80)}`;
+		}
+		/**
+		 * A control named after a field was pressed while that field was empty: the setup the case
+		 * assumes never happened, so the screen that followed is not an answer about the app.
+		 *
+		 * Measured (NO 206): the precondition is a *data* state — "중복된 이름이 없는 경우" — which the
+		 * authored setup turned into "open the dialog" and nothing more. The case then pressed
+		 * "기관명 중복확인" against an empty box and failed on a confirmation the app only shows once
+		 * there is a name to confirm. Probed live: type a name first and the message appears exactly as
+		 * the sheet describes. Nothing about the app was wrong; the state was never reached.
+		 *
+		 * Recorded as an unmet precondition rather than filled in for the case. Inventing the value a
+		 * sheet never gave is how a check starts answering for data nobody described — and the reviewer
+		 * needs to fix the sheet's setup, which this reason says in one line.
+		 */
+		if (verdict === "fail") {
+			const landedKeys = Object.values(landings);
+			for (const a of actionsToRun) {
+				if (a.kind !== "click") continue;
+				const field = untypedFieldInTarget(a.target, snap.fields, landedKeys);
+				if (!field) continue;
+				verdict = "needs_review";
+				confidence = round2(passRatio * 0.5);
+				executedAsWritten = false;
+				healEvents.push(`precondition: fill: ${field} — '${a.target}'을(를) 눌렀지만 이 칸이 비어 있습니다`);
+				break;
+			}
 		}
 		/**
 		 * A field assertion is exempt from both gates below, and for the same reason each time.

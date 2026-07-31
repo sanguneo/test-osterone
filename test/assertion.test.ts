@@ -8,6 +8,7 @@ import {
 	describeAssertion,
 	evaluateAssertion,
 	isIconographic,
+	untypedFieldInTarget,
 } from "../src/interpret/assertion.ts";
 
 const snap = (text: string, url = "/"): PageSnapshot => ({ url, text, html: `<body>${text}</body>` });
@@ -273,4 +274,27 @@ test("isIconographic: pure glyphs are iconography, anything with a word in it is
 	// Nothing at all is not iconography either — an empty check must not be softened by this rule.
 	expect(isIconographic("")).toBe(false);
 	expect(isIconographic("  ")).toBe(false);
+});
+
+test("untypedFieldInTarget: a control named after an empty box names the setup that never happened", () => {
+	// Measured (NO 206): the case pressed "기관명 중복확인" with 기관명 empty, because its precondition
+	// was a data state ("중복된 이름이 없는 경우") the authored setup turned into "open the dialog".
+	const empty = { 기관명: "", "기관 코드": "" };
+	expect(untypedFieldInTarget("기관명 중복확인", empty)).toBe("기관명");
+	// Longest field name wins, so the shorter one does not answer for the longer one's control.
+	expect(untypedFieldInTarget("기관 코드 중복확인", { ...empty, 기관: "" })).toBe("기관 코드");
+	// Spacing is the sheet's, not the app's.
+	expect(untypedFieldInTarget("기관명중복확인", empty)).toBe("기관명");
+
+	// A box that holds something has been set up — the click is answerable.
+	expect(untypedFieldInTarget("기관명 중복확인", { 기관명: "가온" })).toBeNull();
+	// So has one the run typed into and the app then cleared: that is a finding, not a missing setup.
+	expect(untypedFieldInTarget("기관명 중복확인", empty, ["기관명"])).toBeNull();
+	// Clicking the box itself is ordinary, not a control that operates it.
+	expect(untypedFieldInTarget("기관명", empty)).toBeNull();
+	// A control that names no field on screen is none of this rule's business.
+	expect(untypedFieldInTarget("신규 기관 생성", { 아이디: "" })).toBeNull();
+	expect(untypedFieldInTarget("저장", empty)).toBeNull();
+	expect(untypedFieldInTarget("", empty)).toBeNull();
+	expect(untypedFieldInTarget("기관명 중복확인", undefined)).toBeNull();
 });

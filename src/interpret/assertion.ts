@@ -94,6 +94,46 @@ export function isIconographic(value: string): boolean {
 }
 
 /**
+ * The empty field a click target operates on — the field's own name plus a verb ("<필드> 중복확인"),
+ * with nothing ever typed into it.
+ *
+ * A control named after a box does that box's work: pressing "기관명 중복확인" asks the app to judge
+ * whatever 기관명 holds. With the box empty there is nothing to judge, so whatever the screen does
+ * next is not an answer to the case's question. Measured (NO 206): the precondition is "중복된 이름이
+ * 없는 경우" — a *data* state, not a UI one — so the authored setup only opened the dialog, the case
+ * pressed the button against an empty box, and the app's confirmation understandably never appeared.
+ * A human running the same case types a name first.
+ *
+ * Deliberately not "fill something in": inventing the value a case never gave is how a check starts
+ * answering for data the sheet never described. The engine can only say the state was never reached.
+ *
+ * Narrow by construction: the target must be *longer* than the field name (clicking the box itself is
+ * ordinary), the field must be empty, and no fill may have landed in it — a box the app itself cleared
+ * has been typed into, and that is a finding rather than a missing setup. Longest field name wins, so
+ * "기관 코드 중복확인" is not answered by a field called "기관".
+ */
+export function untypedFieldInTarget(
+	target: string,
+	fields: Record<string, string> | undefined,
+	landedKeys: readonly string[] = [],
+): string | null {
+	const t = looseText(target);
+	if (!t) return null;
+	const landed = new Set(landedKeys.map(looseText));
+	let best: string | null = null;
+	let bestLen = 0;
+	for (const [key, value] of Object.entries(fields ?? {})) {
+		if (value.trim() !== "") continue;
+		const k = looseText(key);
+		if (k.length < 2 || k.length <= bestLen || landed.has(k)) continue;
+		if (!t.includes(k) || t.length <= k.length) continue;
+		best = key;
+		bestLen = k.length;
+	}
+	return best;
+}
+
+/**
  * What a text assertion is allowed to see: the page's visible text plus the current value of every
  * form field. A value someone typed is on screen for a human but absent from the DOM's text, so
  * without the fields an "입력 제한" case can never fail — the typed string is nowhere to be found
