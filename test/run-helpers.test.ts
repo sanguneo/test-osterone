@@ -198,6 +198,18 @@ test("summarizeHeal: a failed action outranks an AI repair, which outranks an un
 		reason: "step not interpreted",
 		target: "프로시저 실행",
 	});
+	// A label the engine snapped onto the screen's own wording has its own reason. It used to fall
+	// through to the catch-all, so the panel told the reviewer the element "could not be found and the
+	// action was skipped" about a case whose action had run and whose typed value had verified.
+	expect(summarizeHeal(["ground: 이메일 — 화면의 라벨 '이메일을 입력해 주세요.'로 맞췄습니다"])).toEqual({
+		reason: "label snapped",
+		target: "이메일",
+	});
+	// …but a real failure still outranks it.
+	expect(summarizeHeal(["ground: 이메일 — 화면의 라벨로 맞췄습니다", "fill: 비밀번호 — no element"])).toEqual({
+		reason: "self-heal: fill",
+		target: "비밀번호",
+	});
 	// an unparseable note still produces a usable reason rather than an empty panel
 	expect(summarizeHeal(["weird note"])).toEqual({ reason: "self-heal: action", target: "" });
 	expect(summarizeHeal([])).toEqual({ reason: "self-heal: action", target: "" });

@@ -82,6 +82,25 @@ export interface Pregrounded {
 	 * which element was meant and has to stay visible to a human.
 	 */
 	normalizedOnly: boolean;
+	/**
+	 * True when the screen leaves no choice: exactly one thing could answer to the target, and it
+	 * answers by *starting* with it.
+	 *
+	 * `normalizedOnly` asks "is it the same name?"; this asks the question that decides whether a
+	 * human is needed — "could it have meant anything else?". A sheet writes 이메일 and the app labels
+	 * its one email box "이메일을 입력해 주세요."; different strings, so not a normalization, but with a
+	 * single candidate that carries the target as its opening it is not a guess either. Measured: the
+	 * fill landed, the typed value verified, and the case was still capped at needs_review under a
+	 * reason that read "the element could not be found".
+	 *
+	 * Both halves are load-bearing. Two candidates and it is a choice again (이메일 vs 이메일 인증번호)
+	 * — the shape that has answered for the wrong box before. And a target that is merely *inside* a
+	 * longer label is a fragment of a different name, not that name with instructions after it:
+	 * "생성" is the only match on a page whose one button is "신규 계정 생성", but the case may well
+	 * have meant a 생성 button this screen does not have. Korean UI puts the name first and the
+	 * instruction after it, which is exactly what the prefix test keeps.
+	 */
+	unambiguous: boolean;
 }
 
 /**
@@ -104,7 +123,13 @@ export function pregroundAction(action: PageAction, html: string, url: string): 
 	if (vocabulary.includes(action.target)) return null;
 	const grounded = groundAction(action, scan);
 	if (!grounded || grounded.kind !== action.kind || grounded.target === action.target) return null;
-	return { action: grounded, normalizedOnly: normLabel(grounded.target) === normLabel(action.target) };
+	const hint = normLabel(action.target);
+	const candidates = vocabulary.filter((v) => normLabel(v).includes(hint)).length;
+	return {
+		action: grounded,
+		normalizedOnly: normLabel(grounded.target) === normLabel(action.target),
+		unambiguous: candidates === 1 && normLabel(grounded.target).startsWith(hint),
+	};
 }
 
 /**

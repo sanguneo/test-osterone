@@ -36,6 +36,10 @@ const S = {
 		reasonPartlyChecked: (note: string) =>
 			`예상결과에 적힌 항목 중 일부만 검증했습니다 — 통과한 검증만 보면 초록이지만, 검증하지 않은 항목이 실제로 깨져 있을 수 있어 보류했습니다. 화면을 확인해 판단하고, 필요하면 항목별로 검증 가능한 문구로 다듬으세요.${note ? ` (${note})` : ""}`,
 		reasonNoAssertions: "이 케이스에 기대 결과(검증 항목)가 없어 통과/실패를 자동으로 판정할 수 없습니다. 화면을 보고 직접 판단하세요.",
+		reasonLabelSnapped: (target: string) =>
+			target
+				? `시트가 쓴 '${target}' 라벨이 화면에 없어, 화면이 실제로 쓰는 라벨로 맞춰서 실행했습니다 — 동작은 정상 수행됐습니다. 다만 그 이름으로 불릴 수 있는 요소가 화면에 둘 이상이라 엔진이 고른 것이 맞는지 확인이 필요합니다.`
+				: "시트의 라벨이 화면에 없어 화면의 라벨로 맞춰 실행했습니다. 같은 요소가 맞는지 화면·트레이스로 확인하세요.",
 		reasonBaselinePending: "비교 기준(baseline) 화면이 아직 승인되지 않았습니다. 현재 화면이 올바르면 기준으로 승인하세요.",
 		reasonErrorInfo: (info: string) => `실행 중 오류가 발생해 판정을 보류했습니다: ${info} — 화면과 트레이스로 원인을 확인하세요.`,
 		reasonErrorGeneric: "실행 중 오류가 발생해 판정을 보류했습니다. 화면과 트레이스로 원인을 확인하세요.",
@@ -92,6 +96,10 @@ const S = {
 		reasonPartlyChecked: (note: string) =>
 			`Only some of the outcomes listed in the expected result were checked — the assertions that ran are green, but an unchecked item could well be broken, so this was held. Review the screen, and consider rewording the expected result item by item so each one is checkable.${note ? ` (${note})` : ""}`,
 		reasonNoAssertions: "This case has no expected result (assertions), so pass/fail can't be judged automatically. Review the screen and decide.",
+		reasonLabelSnapped: (target: string) =>
+			target
+				? `The sheet's label '${target}' is not on the screen, so the engine snapped it onto the wording the page actually uses and ran the action — which succeeded. More than one element could answer to that name, so confirm the engine picked the one the case means.`
+				: "The sheet's label is not on the screen, so the engine snapped it onto the page's own wording and ran the action. Check the screen and trace that it is the same element.",
 		reasonBaselinePending: "The comparison baseline hasn't been approved yet. If the current screen is correct, approve it as the baseline.",
 		reasonErrorInfo: (info: string) => `The run errored, so the verdict was held: ${info} — use the screen and trace to find the cause.`,
 		reasonErrorGeneric: "The run errored, so the verdict was held. Use the screen and trace to find the cause.",
@@ -124,7 +132,7 @@ const S = {
 type ReviewStrings = (typeof S)[Lang];
 
 const OP_LABEL: Record<Lang, Record<string, string>> = {
-	ko: { fill: "입력", click: "클릭", press: "키 입력", select: "선택", check: "체크", uncheck: "체크 해제", hover: "마우스 오버", goto: "페이지 이동", navigate: "페이지 이동" },
+	ko: { fill: "입력", click: "클릭", press: "키 입력", select: "선택", check: "체크", uncheck: "체크 해제", hover: "마우스 오버", goto: "페이지 이동", navigate: "페이지 이동", action: "동작" },
 	en: {},
 };
 
@@ -143,6 +151,7 @@ function explainReason(item: ReviewItem, t: ReviewStrings, lang: Lang): string {
 	if (reason === "requirements partly checked") return t.reasonPartlyChecked(item.holdNote ?? "");
 	if (reason === "no assertions authored") return t.reasonNoAssertions;
 	if (reason === "baseline pending approval") return t.reasonBaselinePending;
+	if (reason === "label snapped") return t.reasonLabelSnapped(item.healTarget ?? "");
 	if (reason === "error" || reason.trim() === "") return t.reasonErrorGeneric;
 	return t.reasonErrorInfo(stripAnsi(reason));
 }

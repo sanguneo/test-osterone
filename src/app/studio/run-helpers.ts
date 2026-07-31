@@ -159,8 +159,14 @@ export function parseHealEvent(healEvent: string): { kind: string; target: strin
  * Turn a case's heal events into the single review reason that best explains why a human is
  * needed. Severity order: a precondition that could not be reached (the case never got to the screen
  * it describes, so nothing about it was tested), then an action that could not be performed at all,
- * then an AI repair the human should confirm, then a step the rule could not interpret. Without this
- * the first event wins by accident and the review panel explains the wrong thing.
+ * then an AI repair the human should confirm, then a label the engine snapped onto the screen's own
+ * wording, then a step the rule could not interpret. Without this the first event wins by accident
+ * and the review panel explains the wrong thing.
+ *
+ * Every kind that can be recorded needs a case here. A label snap used to fall through to the
+ * catch-all below, so the panel told the reviewer the element "could not be found and the action was
+ * skipped" about a case whose action had run and whose typed value had verified — the reader's whole
+ * picture of the run was upside down.
  */
 export function summarizeHeal(healEvents: readonly string[]): { reason: string; target: string } {
 	const parsed = healEvents.map(parseHealEvent);
@@ -173,6 +179,8 @@ export function summarizeHeal(healEvents: readonly string[]): { reason: string; 
 	if (repaired) return { reason: "ai repair", target: repaired.target };
 	const skipped = parsed.find((h) => h.kind === "skip");
 	if (skipped) return { reason: "step not interpreted", target: skipped.target };
+	const snapped = parsed.find((h) => h.kind === "ground");
+	if (snapped) return { reason: "label snapped", target: snapped.target };
 	return { reason: "self-heal: action", target: parsed[0]?.target ?? "" };
 }
 

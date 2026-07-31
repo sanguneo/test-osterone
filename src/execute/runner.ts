@@ -427,8 +427,12 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				if (g) {
 					// Spacing-only drift is a normalization, not a different element: no heal event, so a
 					// case whose only problem was a stray space can pass instead of being held forever.
-					// A partial match is a guess about which control was meant — that stays visible.
-					if (!g.normalizedOnly) {
+					// The same holds when only one thing on screen could answer to the target — snapping
+					// 이메일 onto the page's single email box is not a choice, and reporting it as one
+					// capped cases whose fill had plainly landed (the typed value verified) under a
+					// reason that read "the element could not be found". A partial match with *two*
+					// candidates is a guess about which control was meant — that stays visible.
+					if (!g.normalizedOnly && !g.unambiguous) {
 						healEvents.push(`ground: ${targetOf(action)} — 화면의 라벨 '${targetOf(g.action)}'로 맞췄습니다`);
 					}
 					action = g.action;

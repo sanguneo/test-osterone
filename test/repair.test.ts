@@ -134,11 +134,32 @@ test("pregroundAction separates a spacing normalization from a partial-match gue
 	expect(pregroundAction({ kind: "click", target: "기관유형" }, html, "/account")).toEqual({
 		action: { kind: "click", target: "기관 유형" },
 		normalizedOnly: true,
+		unambiguous: true,
 	});
 	// "생성" is only *part of* a longer label — which control was meant is a guess, and a guess has to
-	// stay visible to a human.
+	// stay visible to a human. It is the page's only match, but a fragment sitting at the *end* of a
+	// different name is not that name: the case may mean a 생성 control this screen does not carry.
 	expect(pregroundAction({ kind: "click", target: "생성" }, html, "/account")).toEqual({
 		action: { kind: "click", target: "신규 계정 생성" },
 		normalizedOnly: false,
+		unambiguous: false,
 	});
+});
+
+test("pregroundAction: one box that opens with the target is not a choice the human must make", () => {
+	// Measured on a 아이디/비밀번호 찾기 screen: the sheet says 이메일, the app's only email box is
+	// labelled by its placeholder "이메일을 입력해 주세요.". The fill landed and the typed value
+	// verified, yet the case was held under a reason that read "the element could not be found".
+	const one = `<main><input placeholder="이메일을 입력해 주세요." /><button>확인</button></main>`;
+	expect(pregroundAction({ kind: "fill", target: "이메일", value: "x" }, one, "/find")).toEqual({
+		action: { kind: "fill", target: "이메일을 입력해 주세요.", value: "x" },
+		normalizedOnly: false,
+		unambiguous: true,
+	});
+	// A second box that answers to the same word puts the choice back: this is the shape that has
+	// answered for the wrong box before, so the human keeps seeing it.
+	const two = `<main><input placeholder="이메일을 입력해 주세요." />
+		<input placeholder="이메일 인증번호" /><button>확인</button></main>`;
+	const g = pregroundAction({ kind: "fill", target: "이메일", value: "x" }, two, "/find");
+	expect(g?.unambiguous).toBe(false);
 });
