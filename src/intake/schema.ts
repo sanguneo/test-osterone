@@ -7,7 +7,18 @@ export interface RawTable {
 }
 
 /** Canonical test-case fields the raw sheet is mapped onto. */
-export type TcField = "id" | "title" | "step" | "expected" | "priority" | "role" | "env" | "category" | "precondition";
+export type TcField =
+	| "id"
+	| "title"
+	| "step"
+	| "expected"
+	| "priority"
+	| "role"
+	| "env"
+	| "category"
+	| "precondition"
+	| "recordedVerdict"
+	| "note";
 
 /** A normalized, deduplicated test case with a deterministic content-derived id. */
 export interface NormalizedTC {
@@ -28,6 +39,20 @@ export interface NormalizedTC {
 	 * precondition share one plan.
 	 */
 	precondition?: string;
+	/**
+	 * What a person already recorded for this case, verbatim from the sheet: the QA verdict column
+	 * ("검증 결과" → Pass/Fail) and the defect note beside it ("비고").
+	 *
+	 * Carried so a reviewer can adjudicate an engine verdict against the sheet's own record without
+	 * leaving the screen — the same pairing `measure` prints, which is what makes a disagreement
+	 * readable in one line ("사람 Fail · 엔진 pass · 비고: 기획서와 상이").
+	 *
+	 * Outside `contentHash` for the same reason `precondition` is: this is bookkeeping *about* the
+	 * case, not what the case verifies, and hashing it would change every caseId whenever somebody
+	 * filled a result in — orphaning every approved baseline.
+	 */
+	recordedVerdict?: string;
+	note?: string;
 	priority: string | null;
 	role: string | null;
 	env: string | null;

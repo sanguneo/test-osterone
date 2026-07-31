@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
-import { type Lang, useLang } from "../i18n";
+import { formatAssertion, type Lang, useLang } from "../i18n";
 import type { ReviewItem } from "../types";
 import { Icon } from "./Icon";
 import { stripAnsi, VerdictMark } from "./Verdict";
@@ -44,6 +44,11 @@ const S = {
 		reasonErrorInfo: (info: string) => `실행 중 오류가 발생해 판정을 보류했습니다: ${info} — 화면과 트레이스로 원인을 확인하세요.`,
 		reasonErrorGeneric: "실행 중 오류가 발생해 판정을 보류했습니다. 화면과 트레이스로 원인을 확인하세요.",
 		screenTextLabel: "화면 텍스트",
+		preconditionLabel: "사전조건",
+		checksLabel: "검사 내역",
+		recordedLabel: "시트 기록",
+		noteLabel: "비고",
+		noChecks: "(이 케이스에는 자동 검사가 없습니다)",
 		stepsLabel: "테스트 내용",
 		expectedLabel: "기대 결과",
 		noExpected: "(기대 결과 없음)",
@@ -104,6 +109,11 @@ const S = {
 		reasonErrorInfo: (info: string) => `The run errored, so the verdict was held: ${info} — use the screen and trace to find the cause.`,
 		reasonErrorGeneric: "The run errored, so the verdict was held. Use the screen and trace to find the cause.",
 		screenTextLabel: "Screen text",
+		preconditionLabel: "Precondition",
+		checksLabel: "Checks",
+		recordedLabel: "Recorded in the sheet",
+		noteLabel: "Note",
+		noChecks: "(no automated checks for this case)",
 		stepsLabel: "Test steps",
 		expectedLabel: "Expected result",
 		noExpected: "(no expected result)",
@@ -288,8 +298,14 @@ export function ReviewPanel({
 							</div>
 							<b className="rev-title">{it.title}</b>
 						</header>
-						{((it.steps?.length ?? 0) > 0 || it.expected) && (
+						{((it.steps?.length ?? 0) > 0 || it.expected || it.precondition) && (
 							<div className="rev-tc">
+								{it.precondition && (
+									<>
+										<span className="lbl">{t.preconditionLabel}</span>
+										<p className="rev-expected">{it.precondition}</p>
+									</>
+								)}
 								{(it.steps?.length ?? 0) > 0 && (
 									<>
 										<span className="lbl">{t.stepsLabel}</span>
@@ -302,12 +318,38 @@ export function ReviewPanel({
 								)}
 								<span className="lbl">{t.expectedLabel}</span>
 								<p className="rev-expected">{it.expected || t.noExpected}</p>
+								{(it.recordedVerdict || it.note) && (
+									<>
+										<span className="lbl">{t.recordedLabel}</span>
+										<p className="rev-expected">
+											{it.recordedVerdict}
+											{it.note ? `${it.recordedVerdict ? " · " : ""}${t.noteLabel}: ${it.note}` : ""}
+										</p>
+									</>
+								)}
 							</div>
 						)}
 						<div className="rev-reason">
 							<span className="lbl">{t.reasonLabel}</span>
 							<p className="rev-reason-text">{explainReason(it, t, lang)}</p>
 							<code className="rev-reason-code">{it.reason}</code>
+						</div>
+						{/* The checks the verdict was made of. The reason above says why a human is needed;
+						    this says what the engine actually asked and what the screen answered. */}
+						<div className="rev-tc rev-checks">
+							<span className="lbl">{t.checksLabel}</span>
+							{it.assertions?.length ? (
+								it.assertions.map((assertion, index) => (
+									<div className="detail assertion-detail" key={`${it.caseId}-a${index}`}>
+										<span className={assertion.passed ? "o" : "x"}>
+											<Icon name={assertion.passed ? "check" : "x"} size={14} />
+										</span>
+										{stripAnsi(formatAssertion(assertion, lang))}
+									</div>
+								))
+							) : (
+								<p className="rev-expected">{t.noChecks}</p>
+							)}
 						</div>
 						<div className="rev-txt-wrap">
 							<span className="lbl">{t.screenTextLabel}</span>

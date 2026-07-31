@@ -37,6 +37,16 @@ export interface CaseView {
 	caseId: string;
 	title: string;
 	category: string | null;
+	/**
+	 * The case as the sheet wrote it. The results table renders a verdict against a title, so a
+	 * reviewer reading "fail" had to open the sheet in another window to see what was even asked.
+	 */
+	steps: string[];
+	expected: string;
+	precondition?: string;
+	/** What a person already recorded in the sheet: the QA verdict column and the defect note. */
+	recordedVerdict?: string;
+	note?: string;
 	verdict: Verdict;
 	confidence: number;
 	passed: number;
@@ -70,6 +80,14 @@ export interface ReviewItem {
 	/** The case's natural-language steps + expected result — surfaced in the review card for context. */
 	steps: string[];
 	expected: string;
+	precondition?: string;
+	/** What a person already recorded in the sheet: the QA verdict column and the defect note beside
+	 * it, so an engine verdict can be adjudicated against the sheet's own record in place. */
+	recordedVerdict?: string;
+	note?: string;
+	/** The checks the verdict was made of — the reason says why a human is needed, this says what
+	 * the engine asked and what the screen answered. */
+	assertions?: { detail: string; passed: boolean; kind?: string; value?: string }[];
 	verdict: Verdict;
 	reason: string;
 	/** Why the engine held this case, when it has more to say than the reason code (vision, vacuous check). */

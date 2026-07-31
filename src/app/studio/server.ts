@@ -1031,6 +1031,23 @@ export async function runBatch(
 					category: caseById.get(r.caseId)?.category ?? null,
 					steps: caseById.get(r.caseId)?.steps ?? [],
 					expected: caseById.get(r.caseId)?.expected ?? "",
+					// The rest of the row as written: the starting state the case assumes, and what a person
+					// already recorded against it. A reviewer was being asked to judge a screen while the
+					// sheet's own verdict and defect note lived in another window.
+					...(caseById.get(r.caseId)?.precondition ? { precondition: caseById.get(r.caseId)?.precondition } : {}),
+					...(caseById.get(r.caseId)?.recordedVerdict
+						? { recordedVerdict: caseById.get(r.caseId)?.recordedVerdict }
+						: {}),
+					...(caseById.get(r.caseId)?.note ? { note: caseById.get(r.caseId)?.note } : {}),
+					// What the engine actually checked. The panel explained *why* it held the case but never
+					// showed the checks the verdict was made of, so "확인이 필요한 이유" was the only evidence
+					// and a reviewer could not see which requirement passed and which did not.
+					assertions: r.assertions.map((a) => ({
+						detail: a.detail,
+						passed: a.passed,
+						kind: a.assertion.kind,
+						value: describeAssertion(a.assertion),
+					})),
 					verdict: r.verdict,
 					reason,
 					holdNote:
@@ -1059,6 +1076,14 @@ export async function runBatch(
 				caseId: r.caseId,
 				title: tc.title || r.caseId,
 				category: tc.category,
+				// The case as the sheet wrote it. The results table renders a verdict against a title, and a
+				// reviewer reading "fail" there had no way to see what the case even asked for without
+				// opening the sheet in another window.
+				steps: tc.steps,
+				expected: tc.expected,
+				...(tc.precondition ? { precondition: tc.precondition } : {}),
+				...(tc.recordedVerdict ? { recordedVerdict: tc.recordedVerdict } : {}),
+				...(tc.note ? { note: tc.note } : {}),
 				verdict: r.verdict,
 				confidence: r.confidence,
 				passed: r.assertions.filter((a) => a.passed).length,

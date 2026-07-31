@@ -177,3 +177,36 @@ test("ingestCsv falls back to a [말머리] title prefix as category and strips 
 	expect(cases[1]?.category).toBe(null);
 	expect(cases[1]?.title).toBe("일반 케이스");
 });
+
+test("ingestCsv carries what a person already recorded: the QA verdict column and the 비고 note", () => {
+	// Read so a reviewer can adjudicate an engine verdict against the sheet's own record without
+	// leaving the screen — the pairing `measure` prints to make a disagreement readable in one line.
+	const csv = "소분류,시험절차,예상결과,검증 결과,비고\n로그인,1. 로그인,대시보드,Fail,기획서와 상이한 현상\n";
+	const m = mapColumns(csvToRawTable(csv).headers);
+	expect(m.recordedVerdict).toBe("검증 결과");
+	expect(m.note).toBe("비고");
+	const tc = ingestCsv(csv).unique[0];
+	expect(tc?.recordedVerdict).toBe("Fail");
+	expect(tc?.note).toBe("기획서와 상이한 현상");
+});
+
+test("a sheet with no verdict column must not have its 예상결과 read as one", () => {
+	// Both record columns are matched last, so they can only ever double-claim a column an earlier
+	// field already took. Letting that stand would put a fabricated "this is what the human recorded"
+	// in front of a reviewer — the one thing this data may never do.
+	const m = mapColumns(["소분류", "시험절차", "예상결과"]);
+	expect(m.expected).toBe("예상결과");
+	expect(m.recordedVerdict).toBeUndefined();
+	expect(m.note).toBeUndefined();
+	expect(ingestCsv("소분류,시험절차,예상결과\n로그인,1. 로그인,대시보드\n").unique[0]?.recordedVerdict).toBeUndefined();
+});
+
+test("the recorded columns stay outside the content hash, so filling a result in never re-ids a case", () => {
+	// Same reason `precondition` is excluded: a caseId change orphans every approved baseline, and a
+	// QA verdict typed in after the fact is bookkeeping about the case, not what the case verifies.
+	const blank = ingestCsv("소분류,시험절차,예상결과,검증 결과,비고\n로그인,1. 로그인,대시보드,,\n").unique[0];
+	const filled = ingestCsv("소분류,시험절차,예상결과,검증 결과,비고\n로그인,1. 로그인,대시보드,Fail,깨짐\n").unique[0];
+	expect(filled?.caseId).toBe(blank?.caseId as string);
+	expect(blank?.recordedVerdict).toBeUndefined();
+	expect(filled?.recordedVerdict).toBe("Fail");
+});

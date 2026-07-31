@@ -43,6 +43,13 @@ export interface CaseView {
 	caseId: string;
 	title: string;
 	category: string | null;
+	/** The case as the sheet wrote it, so a verdict can be read against what was actually asked. */
+	steps: string[];
+	expected: string;
+	precondition?: string;
+	/** What a person already recorded in the sheet: the QA verdict column and the defect note. */
+	recordedVerdict?: string;
+	note?: string;
 	verdict: Verdict;
 	confidence: number;
 	passed: number;
@@ -170,6 +177,12 @@ export interface ReviewItem {
 	category: string | null;
 	steps: string[];
 	expected: string;
+	precondition?: string;
+	/** What a person already recorded in the sheet: the QA verdict column and the defect note. */
+	recordedVerdict?: string;
+	note?: string;
+	/** The checks the verdict was made of — what passed, what did not, and what each one asked. */
+	assertions?: AssertionView[];
 	verdict: Verdict;
 	reason: string;
 	/** Why the engine held this case, when it has more to say than the reason code (vision, vacuous check). */

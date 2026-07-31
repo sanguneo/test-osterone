@@ -75,6 +75,23 @@ const FIELD_ALIASES: Record<TcField, string[]> = {
 		"전제조건",
 		"선행조건",
 	],
+	// Bookkeeping a person already filled in: the QA verdict and the defect note beside it. Read so a
+	// reviewer can adjudicate the engine against the sheet's own record in place. Aliases stay
+	// specific — a bare "결과" would swallow 예상결과 on every sheet that has no verdict column.
+	recordedVerdict: [
+		"검증 결과",
+		"검증결과",
+		"시험 결과",
+		"시험결과",
+		"테스트 결과",
+		"테스트결과",
+		"수행결과",
+		"판정결과",
+		"verdict",
+		"test result",
+		"pass/fail",
+	],
+	note: ["비고", "note", "notes", "remark", "remarks", "특이사항", "메모", "comment", "comments"],
 };
 
 /**
@@ -99,6 +116,20 @@ export function mapColumns(headers: string[]): Partial<Record<TcField, string>> 
 	// step field's last-resort alias is for). Claiming the same column twice would replay the steps as
 	// their own setup, so the procedure wins and there is no separate precondition.
 	if (mapping.precondition && mapping.precondition === mapping.step) delete mapping.precondition;
+	// Neither record-keeping column may share one with the case's own content. They are matched last,
+	// so they can only ever double-claim — and a sheet with no verdict column having its 예상결과 read
+	// as one would put a fabricated "this is what the human recorded" in front of a reviewer.
+	for (const field of ["recordedVerdict", "note"] as const) {
+		const claimed = mapping[field];
+		if (!claimed) continue;
+		const ownedByCase =
+			claimed === mapping.expected ||
+			claimed === mapping.step ||
+			claimed === mapping.title ||
+			claimed === mapping.precondition ||
+			claimed === mapping.category;
+		if (ownedByCase) delete mapping[field];
+	}
 	return mapping;
 }
 
@@ -149,8 +180,11 @@ export function normalizeTable(
 		const priority = normText(cell(row, "priority")) || null;
 		const sourceId = normText(cell(row, "id")) || null;
 		const precondition = normText(cell(row, "precondition")) || undefined;
-		// `precondition` is deliberately outside the hash: it is the starting state, not what the case
-		// verifies, and hashing it would change every caseId and orphan every approved baseline.
+		const recordedVerdict = normText(cell(row, "recordedVerdict")) || undefined;
+		const note = normText(cell(row, "note")) || undefined;
+		// `precondition` and the two record-keeping columns are deliberately outside the hash: none of
+		// them is what the case verifies, and hashing them would change every caseId — orphaning every
+		// approved baseline the moment somebody filled a result in.
 		const hash = contentHash([title, steps, expected, role, env]);
 		return {
 			caseId: `TC-${hash}`,
@@ -159,6 +193,8 @@ export function normalizeTable(
 			steps,
 			expected,
 			...(precondition ? { precondition } : {}),
+			...(recordedVerdict ? { recordedVerdict } : {}),
+			...(note ? { note } : {}),
 			priority,
 			role,
 			env,

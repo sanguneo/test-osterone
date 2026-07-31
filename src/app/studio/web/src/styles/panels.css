@@ -226,6 +226,12 @@
 .rev-steps { margin: 0 0 6px; padding-left: 18px; display: grid; gap: 3px; color: var(--ink); font-size: var(--text-small); line-height: 1.5; }
 .rev-steps li { padding-left: 2px; }
 .rev-expected { margin: 0; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-muted); color: var(--ink); font-size: var(--text-small); line-height: 1.5; }
+/* The checks a held verdict was made of, and the original TC opened from a results row. Both reuse
+   the review card's TC block, so they read the same wherever the reviewer meets them. */
+.rev-checks { margin-top: var(--space-3); font-size: var(--text-small); line-height: 1.5; }
+.rev-checks .assertion-detail { color: var(--ink); }
+.tc-toggle { margin-left: 8px; vertical-align: middle; }
+.tc-row > td { padding-top: 0; background: color-mix(in srgb, var(--panel) 88%, #000 8%); }
 .rev-evidence { display: grid; gap: var(--space-2); align-content: start; padding-left: var(--space-5); border-left: 1px solid var(--line); }
 .rev-evidence img { display: block; width: 100%; max-height: 440px; object-fit: contain; object-position: left top; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); }
 .rev-txt-wrap { color: var(--dim); font-size: var(--text-small); line-height: 1.55; }
