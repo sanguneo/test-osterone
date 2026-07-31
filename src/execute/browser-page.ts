@@ -352,6 +352,13 @@ export class BrowserPage implements Page {
 				for (const e of els) {
 					const t = norm(e.textContent);
 					if (!t.includes(sq) || t.length >= bestLen) continue;
+					// A disabled control is not a click target. Playwright's own click refuses it (that is
+					// why this fallback was reached), and dispatching a DOM click at it reports a success
+					// the app never saw. Measured (NO 15/21): the login form disables 로그인 until both
+					// fields hold text, the preparation had filled only 아이디, and the forced click
+					// "succeeded" into a page that never changed — a fail on a popup that was never asked
+					// for. Failing the action instead routes the case to review as the heal it really is.
+					if ((e as HTMLButtonElement).disabled || e.getAttribute("aria-disabled") === "true") continue;
 					const r = e.getBoundingClientRect();
 					if (r.width > 0 && r.height > 0) {
 						best = e as HTMLElement;
