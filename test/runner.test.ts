@@ -1389,11 +1389,11 @@ test("route check: a 404 route is reported, while a benign sub-route redirect ru
 	expect(r2.verdict).toBe("pass");
 });
 
-test("a fail carried only by glyph checks holds for review — icons cannot be read as text", async () => {
-	// Measured (NO 161): "<<, <, 페이지번호, >, >> 버튼이 제공되어야 한다" — the app paints those buttons
-	// as icon elements with no text, the human passed the screen, and the engine failed it on four
-	// pure-glyph quotes. A textIncludes on "<<" fails on every app that draws its arrows, working or
-	// not, so its failure is not evidence about the app.
+test("a glyph never becomes a check, so a case is never failed on iconography", async () => {
+	// Measured (NO 161): "<<, <, 페이지번호, >, >> 버튼이 제공되어야 한다" — the app paints those buttons as
+	// icon elements with no text, the human passed the screen, and the engine failed it on four
+	// pure-glyph quotes. Such a check cannot pass on a working app, so it is not authored at all and
+	// the clause is simply unchecked — which the coverage gate reports honestly.
 	const r = await run(
 		loginTC({
 			contentHash: "hash-glyph-only",
@@ -1401,21 +1401,19 @@ test("a fail carried only by glyph checks holds for review — icons cannot be r
 			expected: "page /login",
 		}),
 	);
-	expect(r.assertions.some((a) => !a.passed)).toBe(true);
-	expect(r.verdict).toBe("needs_review");
-	expect(r.vacuousNote).toContain("글리프");
-});
+	expect(r.assertions.map((a) => a.assertion)).toEqual([{ kind: "textIncludes", value: "page /login" }]);
+	expect(r.verdict).not.toBe("fail");
 
-test("a failing check with real words in it keeps the fail, glyphs alongside or not", async () => {
-	const r = await run(
+	// A real word alongside it still decides the verdict on its own evidence.
+	const mixed = await run(
 		loginTC({
 			contentHash: "hash-glyph-mixed",
 			steps: ["Navigate to /login", 'Verify page shows "<<"', 'Verify page shows "Signed in as viewer"'],
 			expected: "Signed in as viewer",
 		}),
 	);
-	expect(r.verdict).toBe("fail");
-	expect(r.vacuousNote).toBeUndefined();
+	expect(mixed.assertions.every((a) => a.assertion.kind !== "textIncludes" || a.assertion.value !== "<<")).toBe(true);
+	expect(mixed.verdict).toBe("fail");
 });
 
 /** A duplicate-check control: it answers only about what the box beside it holds. */

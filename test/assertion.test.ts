@@ -4,11 +4,13 @@ import type { PageSnapshot } from "../src/execute/page.ts";
 import {
 	AUTHOR_VERSION,
 	assertionCacheKey,
+	authorableAssertions,
 	dedupeAssertions,
 	describeAssertion,
 	evaluateAssertion,
 	isIconographic,
 	untypedFieldInTarget,
+	withoutTrailingAnnotation,
 } from "../src/interpret/assertion.ts";
 
 const snap = (text: string, url = "/"): PageSnapshot => ({ url, text, html: `<body>${text}</body>` });
@@ -274,6 +276,57 @@ test("isIconographic: pure glyphs are iconography, anything with a word in it is
 	// Nothing at all is not iconography either — an empty check must not be softened by this rule.
 	expect(isIconographic("")).toBe(false);
 	expect(isIconographic("  ")).toBe(false);
+});
+
+test("authorableAssertions: one funnel drops what cannot be judged and reads past the sheet's annotations", () => {
+	// A glyph names a control by the shape it is drawn as, and the app draws it as an icon printing no
+	// text — so the check cannot pass on a working app. It is the mirror of the vacuous check this engine
+	// already refuses, and it is dropped rather than softened later, so the clause is simply unchecked and
+	// the coverage gate can say so. Measured (NO 161): human pass, engine fail on 4 glyph quotes.
+	expect(
+		authorableAssertions([
+			{ kind: "textIncludes", value: "<<" },
+			{ kind: "textIncludes", value: "∨" },
+			{ kind: "textIncludes", value: "페이지번호" },
+		]),
+	).toEqual([{ kind: "textIncludes", value: "페이지번호" }]);
+	// Only text checks: a url is never iconography, and a field check reads a value rather than the page.
+	expect(authorableAssertions([{ kind: "urlIncludes", value: "/" }])).toEqual([{ kind: "urlIncludes", value: "/" }]);
+
+	// Measured over 640 cases: every one of the 50 trailing parentheticals is an annotation, not copy.
+	// The screen shows the part outside them, so quoting the whole thing failed on text the app prints.
+	expect(
+		authorableAssertions([
+			{ kind: "textIncludes", value: "10~12자 조합 (X)" },
+			{ kind: "textIncludes", value: "이미 생성된 아이디입니다.(붉은색)" },
+		]),
+	).toEqual([
+		{ kind: "textIncludes", value: "10~12자 조합" },
+		{ kind: "textIncludes", value: "이미 생성된 아이디입니다." },
+	]);
+	// Stripped before the dedupe, so two literals that differ only by their annotation collapse into one.
+	expect(
+		authorableAssertions([
+			{ kind: "textIncludes", value: "10~12자 조합 (X)" },
+			{ kind: "textIncludes", value: "10~12자 조합 (O)" },
+		]),
+	).toEqual([{ kind: "textIncludes", value: "10~12자 조합" }]);
+});
+
+test("withoutTrailingAnnotation can only relax a check, never tighten one", () => {
+	expect(withoutTrailingAnnotation("아이디(관리자)")).toBe("아이디");
+	expect(withoutTrailingAnnotation("10~12자 조합 (X)")).toBe("10~12자 조합");
+	// A leading bracket is part of a name, not an annotation — annotations trail.
+	expect(withoutTrailingAnnotation("(주)회사명")).toBe("(주)회사명");
+	// Nothing usable left → keep what the sheet wrote rather than checking a fragment.
+	expect(withoutTrailingAnnotation("(붉은색)")).toBe("(붉은색)");
+	expect(withoutTrailingAnnotation("A(x)")).toBe("A(x)");
+	// Untouched when there is no annotation at all.
+	expect(withoutTrailingAnnotation("사용할 수 있는 기관명입니다.")).toBe("사용할 수 있는 기관명입니다.");
+	// The relaxation is the safety argument: a shorter needle still matches every screen the longer one
+	// matched, so this direction can never turn a passing check into a failing one.
+	const screen = "고객센터 1566-5643 (내선 4번) / 평일 09:00 ~ 17:00";
+	expect(screen.includes(withoutTrailingAnnotation("고객센터 1566-5643 (내선 4번)"))).toBe(true);
 });
 
 test("untypedFieldInTarget: a control named after an empty box names the setup that never happened", () => {

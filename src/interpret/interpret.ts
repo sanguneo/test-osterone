@@ -5,7 +5,7 @@
  */
 
 import type { NormalizedTC } from "../intake/schema.ts";
-import { type Assertion, type AssertionCache, assertionCacheKey, dedupeAssertions } from "./assertion.ts";
+import { type Assertion, type AssertionCache, assertionCacheKey, authorableAssertions } from "./assertion.ts";
 import { DEFAULT_PHRASES, type InterpretationRule } from "./rule.ts";
 
 export type PageAction =
@@ -201,7 +201,8 @@ export function authorAssertions(tc: NormalizedTC, rule: InterpretationRule): As
 		}
 	}
 	if (tc.expected && !isProse(tc.expected)) assertions.push({ kind: "textIncludes", value: tc.expected });
-	return dedupeAssertions(assertions);
+	// Same funnel the model's plan goes through, so what the engine refuses to judge is refused here too.
+	return authorableAssertions(assertions);
 }
 
 export interface AuthoredAssertions {

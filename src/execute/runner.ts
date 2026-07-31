@@ -17,7 +17,6 @@ import {
 	declaredFieldLimit,
 	describeAssertion,
 	evaluateAssertion,
-	isIconographic,
 	untypedFieldInTarget,
 } from "../interpret/assertion.ts";
 import type { AuthoredPlan } from "../interpret/author.ts";
@@ -624,29 +623,6 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		if (verdict === "fail" && visionNote) {
 			verdict = "needs_review";
 			confidence = round2(passRatio * 0.5);
-		}
-		/**
-		 * A fail carried only by glyph checks is not a finding. A sheet quotes iconography as
-		 * characters — "<<, <, 페이지번호, >, >> 버튼이 제공되어야 한다" — and the app paints those buttons
-		 * as icon elements with no text, so a textIncludes on "<<" fails whether or not the buttons are
-		 * there. Measured (NO 161): human pass, engine fail on 4 pure-glyph quotes with the pagination
-		 * fully on screen. Text checks cannot read icons — hand it to a human. One direction only: if
-		 * any failing check has real words in it, the fail stands on that evidence.
-		 */
-		if (
-			verdict === "fail" &&
-			results.every(
-				(r) => r.passed || (r.assertion.kind === "textIncludes" && isIconographic(String(r.assertion.value ?? ""))),
-			)
-		) {
-			verdict = "needs_review";
-			confidence = 0.5;
-			vacuousNote = `글리프 검증만 실패했습니다 — 앱이 아이콘으로 그리는 문자를 텍스트 검사는 읽지 못합니다: ${results
-				.filter((r) => !r.passed)
-				.map((r) => describeAssertion(r.assertion))
-				.join(", ")
-				.replace(/\s+/g, " ")
-				.slice(0, 80)}`;
 		}
 		/**
 		 * A control named after a field was pressed while that field was empty: the setup the case

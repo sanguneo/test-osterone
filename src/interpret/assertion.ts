@@ -326,6 +326,52 @@ export function dedupeAssertions(assertions: Assertion[]): Assertion[] {
 }
 
 /**
+ * A quoted literal without the annotation a sheet trails it with.
+ *
+ * Measured over 640 cases: 50 quoted literals carry a trailing parenthetical, and every one of them is
+ * an annotation rather than copy — an example value (`아이디(관리자)`, where the app prints the actual
+ * username), a case marker (`10~12자 조합 (X)` / `(O)`), or a colour the sheet wants
+ * (`이미 생성된 아이디입니다.(붉은색)`, and colour is something no text check can read). The screen copy
+ * is the part *outside* the brackets, so quoting the whole thing fails on text the app really does show.
+ *
+ * Safe by construction in the one direction that matters: a shorter needle still matches everything the
+ * longer one did, so this can never turn a passing check into a failing one. Trailing only — an
+ * annotation trails, while `(주)회사명` is a name — and never when nothing usable would be left.
+ */
+export function withoutTrailingAnnotation(value: string): string {
+	const stripped = value.replace(/\s*[(（][^()（）]*[)）]\s*$/u, "").trim();
+	return stripped.length >= 2 ? stripped : value;
+}
+
+/**
+ * The authored set as it may actually be judged: deduped, with the checks that cannot decide anything
+ * removed.
+ *
+ * One funnel on purpose. Both authoring paths — the model's plan and the rule interpretation — used to
+ * end at `dedupeAssertions` separately, so anything applied to one silently skipped the other. That is
+ * the exact shape of the divergence this repo keeps paying for.
+ *
+ * What gets dropped: a `textIncludes` whose value is a glyph. A sheet names a control by the shape it
+ * is drawn as — "∨(드롭다운) 버튼 표출되어야 한다", "<<, <, 페이지번호, >, >> 버튼이 제공되어야 한다" — and
+ * the app draws those as icons that print no text at all. Such a check *cannot pass on a working app*,
+ * which makes it the mirror of the vacuous check this engine already refuses: one can only ever be
+ * true, the other only ever false, and neither tells a reviewer anything.
+ *
+ * Dropping it beats softening the verdict afterwards. The clause is then simply unchecked, so the
+ * coverage gate holds the case and names it, instead of showing a red X against a control that was on
+ * screen the whole time.
+ */
+export function authorableAssertions(assertions: Assertion[]): Assertion[] {
+	// The annotation goes before the dedupe, so two literals that differ only by it collapse into one.
+	const readable = assertions.map((a) =>
+		a.kind === "textIncludes" ? { ...a, value: withoutTrailingAnnotation(String(a.value ?? "")) } : a,
+	);
+	return dedupeAssertions(readable).filter(
+		(a) => !(a.kind === "textIncludes" && isIconographic(String(a.value ?? ""))),
+	);
+}
+
+/**
  * Bump when the authoring contract changes — the prompt, the sanitizer, anything that would make the
  * same case produce a different plan today than it did before.
  *

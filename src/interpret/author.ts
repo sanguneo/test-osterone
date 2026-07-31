@@ -13,8 +13,8 @@ import {
 	type Assertion,
 	AUTHOR_VERSION,
 	assertionCacheKey,
+	authorableAssertions,
 	type CharClass,
-	dedupeAssertions,
 	type ValueAssertion,
 } from "./assertion.ts";
 import { escapeRe, expectedRequirements, isProse, matchesPhrase, type PageAction } from "./interpret.ts";
@@ -518,9 +518,9 @@ export function withDerivedAssertions(
 	const quoted = deriveQuotedAssertions(tc.expected, assertions, { phrases: rule?.phrases });
 	return {
 		actions,
-		// Deduped because a plan cached before this moved may already carry the derived checks it was
-		// authored with, and applying them again must not double every one of them.
-		assertions: dedupeAssertions([
+		// Deduped and filtered through the one funnel both authoring paths share, so a check the engine
+		// refuses to judge is refused whether the model wrote it or the rule derived it.
+		assertions: authorableAssertions([
 			...assertions,
 			...(route ? [route] : []),
 			...restrictions,
