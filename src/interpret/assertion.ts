@@ -80,6 +80,20 @@ function looseText(s: string): string {
 }
 
 /**
+ * Is this text a glyph rather than copy — no letter, digit, or hangul anywhere?
+ *
+ * A sheet quotes iconography as characters: "<<, <, 페이지번호, >, >> 버튼이 제공되어야 한다" names four
+ * buttons the app paints as `<i class="icon">` with no text at all. A textIncludes on "<<" then fails
+ * on every app that draws its arrows, working or not — the failure says nothing about the app. The
+ * verdict layer softens a fail carried only by these to needs_review; a glyph check that *passes*
+ * still counts, because then the text really is on screen.
+ */
+export function isIconographic(value: string): boolean {
+	const v = value.trim();
+	return v.length > 0 && !/[\p{L}\p{N}]/u.test(v);
+}
+
+/**
  * What a text assertion is allowed to see: the page's visible text plus the current value of every
  * form field. A value someone typed is on screen for a human but absent from the DOM's text, so
  * without the fields an "입력 제한" case can never fail — the typed string is nowhere to be found

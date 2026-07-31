@@ -7,6 +7,7 @@ import {
 	dedupeAssertions,
 	describeAssertion,
 	evaluateAssertion,
+	isIconographic,
 } from "../src/interpret/assertion.ts";
 
 const snap = (text: string, url = "/"): PageSnapshot => ({ url, text, html: `<body>${text}</body>` });
@@ -256,4 +257,20 @@ test("a snapshot with no fields behaves exactly as before", () => {
 	expect(evaluateAssertion({ kind: "textIncludes", value: "Welcome" }, s).passed).toBe(true);
 	expect(evaluateAssertion({ kind: "textNotIncludes", value: "Welcome" }, s).passed).toBe(false);
 	expect(evaluateAssertion({ kind: "textNotIncludes", value: "nope" }, s).passed).toBe(true);
+});
+
+test("isIconographic: pure glyphs are iconography, anything with a word in it is copy", () => {
+	// The pagination quotes that produced NO 161's false-fail — no letter, digit, or hangul anywhere.
+	expect(isIconographic("<<")).toBe(true);
+	expect(isIconographic(">")).toBe(true);
+	expect(isIconographic("→")).toBe(true);
+	expect(isIconographic("...")).toBe(true);
+	// Copy: a page number, a Korean label, an English word — their absence is a real finding.
+	expect(isIconographic("1")).toBe(false);
+	expect(isIconographic("페이지번호")).toBe(false);
+	expect(isIconographic("Save")).toBe(false);
+	expect(isIconographic("x")).toBe(false);
+	// Nothing at all is not iconography either — an empty check must not be softened by this rule.
+	expect(isIconographic("")).toBe(false);
+	expect(isIconographic("  ")).toBe(false);
 });

@@ -1388,3 +1388,32 @@ test("route check: a 404 route is reported, while a benign sub-route redirect ru
 	expect(r2.healEvents).toEqual([]);
 	expect(r2.verdict).toBe("pass");
 });
+
+test("a fail carried only by glyph checks holds for review — icons cannot be read as text", async () => {
+	// Measured (NO 161): "<<, <, 페이지번호, >, >> 버튼이 제공되어야 한다" — the app paints those buttons
+	// as icon elements with no text, the human passed the screen, and the engine failed it on four
+	// pure-glyph quotes. A textIncludes on "<<" fails on every app that draws its arrows, working or
+	// not, so its failure is not evidence about the app.
+	const r = await run(
+		loginTC({
+			contentHash: "hash-glyph-only",
+			steps: ["Navigate to /login", 'Verify page shows "<<"', 'Verify page shows "page /login"'],
+			expected: "page /login",
+		}),
+	);
+	expect(r.assertions.some((a) => !a.passed)).toBe(true);
+	expect(r.verdict).toBe("needs_review");
+	expect(r.vacuousNote).toContain("글리프");
+});
+
+test("a failing check with real words in it keeps the fail, glyphs alongside or not", async () => {
+	const r = await run(
+		loginTC({
+			contentHash: "hash-glyph-mixed",
+			steps: ["Navigate to /login", 'Verify page shows "<<"', 'Verify page shows "Signed in as viewer"'],
+			expected: "Signed in as viewer",
+		}),
+	);
+	expect(r.verdict).toBe("fail");
+	expect(r.vacuousNote).toBeUndefined();
+});
