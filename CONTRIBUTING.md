@@ -37,7 +37,7 @@ bun run typecheck        # tsc --noEmit (engine)
 bun run studio:webcheck  # tsc for the web app
 bun run lint             # biome check
 bun run fmt              # biome format --write (fix style before committing)
-bun test                 # 211/211 must stay green
+bun test                 # 281/281 must stay green
 bun run studio:build     # only if you touched src/app/studio/web
 ```
 

@@ -37,9 +37,20 @@ bun run typecheck        # tsc --noEmit (엔진)
 bun run studio:webcheck  # 웹 앱 tsc
 bun run lint             # biome check
 bun run fmt              # biome format --write (커밋 전 스타일 정리)
-bun test                 # 132/132 유지
+bun test                 # 281/281 유지
 bun run studio:build     # src/app/studio/web을 건드렸을 때만
 ```
+
+## 사람 판정 대비 실측
+
+`bun test`는 엔진이 결정적임을 증명하지만, 엔진이 **실제 앱을 두고 사람과 같은 판단을 하는지**는 말해 주지 않습니다. 판정을 바꿀 수 있는 것을 건드렸다면 라벨링된 시트를 채점하세요:
+
+```bash
+bun run studio                                          # 터미널 1
+bun run measure -- <projectId> <sheetId> [labelColumn]   # 터미널 2 · 기본 열: 검증 결과
+```
+
+시트를 라이브로 돌려 각 판정을 시트에 이미 적힌 QA 판정과 비교하고, **사람이 결함으로 기록한 케이스가 초록으로 돌아오면 종료 코드가 0이 아닙니다**. `held`는 놓친 게 아닙니다 — 판정을 보류하는 것이 엔진이 제대로 동작하는 모습입니다. `false-pass`를 먼저, `false-fail`을 그다음에 보세요.
 
 ## 타협 불가 불변식
 
