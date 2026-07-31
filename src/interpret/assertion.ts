@@ -142,10 +142,35 @@ export function declaredFieldLimit(snap: PageSnapshot, field: string): number | 
 	return lookupLabelled(snap.fieldLimits, field)?.value ?? null;
 }
 
-/** Pure, deterministic evaluation of one assertion against a snapshot. `lenient` ignores whitespace/punctuation. */
-export function evaluateAssertion(a: Assertion, snap: PageSnapshot, opts: { lenient?: boolean } = {}): AssertionResult {
+/**
+ * Pure, deterministic evaluation of one assertion against a snapshot.
+ *
+ * `lenient` ignores whitespace/punctuation. `landings` maps each fill's target to the snapshot key of
+ * the element it actually wrote — when present, a field check reads exactly the box that was typed
+ * into, and a field nothing ever landed in fails instead of letting a same-named empty box answer.
+ * Measured (NO 114): "아이디 입력란 내 한글/대문자/특수문자 입력 → 입력 제한되어야 한다" passed on an
+ * empty 아이디 the case had never touched, while the app — probed live — accepts 한글ABC!@# verbatim.
+ */
+export function evaluateAssertion(
+	a: Assertion,
+	snap: PageSnapshot,
+	opts: { lenient?: boolean; landings?: Record<string, string> } = {},
+): AssertionResult {
 	const has = (hay: string, needle: string) =>
 		opts.lenient ? looseText(hay).includes(looseText(needle)) : hay.includes(needle);
+	/** The box a field check may read: the landed one when landings are known, name lookup otherwise. */
+	const typedField = (name: string): { found: { label: string; value: string } | null; miss: string } => {
+		if (!opts.landings) {
+			const found = lookupLabelled(snap.fields, name);
+			return { found, miss: `field "${name}" not on screen` };
+		}
+		const want = looseText(name);
+		const hit = Object.entries(opts.landings).find(([target]) => looseText(target) === want);
+		if (!hit) return { found: null, miss: `no typed value ever landed in field "${name}"` };
+		const value = snap.fields?.[hit[1]];
+		if (value === undefined) return { found: null, miss: `field "${hit[1]}" not on screen` };
+		return { found: { label: hit[1], value }, miss: "" };
+	};
 	switch (a.kind) {
 		case "urlIncludes": {
 			const passed = snap.url.includes(a.value);
@@ -169,11 +194,11 @@ export function evaluateAssertion(a: Assertion, snap: PageSnapshot, opts: { leni
 			};
 		}
 		case "fieldAtMost": {
-			const found = lookupLabelled(snap.fields, a.field);
 			// Cannot see the field → cannot verify the limit. Passing here is exactly the unsound shortcut
 			// that let "입력 제한되어야 한다" go green on two cases whose recorded defect is that the limit
 			// does not work: if the typed value never landed anywhere, nothing was ever restricted.
-			if (!found) return { assertion: a, passed: false, detail: `field "${a.field}" not on screen` };
+			const { found, miss } = typedField(a.field);
+			if (!found) return { assertion: a, passed: false, detail: miss };
 			const length = [...found.value].length;
 			const passed = length <= a.max;
 			return {
@@ -185,8 +210,8 @@ export function evaluateAssertion(a: Assertion, snap: PageSnapshot, opts: { leni
 			};
 		}
 		case "fieldExcludes": {
-			const found = lookupLabelled(snap.fields, a.field);
-			if (!found) return { assertion: a, passed: false, detail: `field "${a.field}" not on screen` };
+			const { found, miss } = typedField(a.field);
+			if (!found) return { assertion: a, passed: false, detail: miss };
 			const violated = a.classes.filter((c) => CHAR_CLASS[c].test(found.value));
 			const passed = violated.length === 0;
 			return {
@@ -210,8 +235,8 @@ export function evaluateAssertion(a: Assertion, snap: PageSnapshot, opts: { leni
 			};
 		}
 		case "fieldHolds": {
-			const found = lookupLabelled(snap.fields, a.field);
-			if (!found) return { assertion: a, passed: false, detail: `field "${a.field}" not on screen` };
+			const { found, miss } = typedField(a.field);
+			if (!found) return { assertion: a, passed: false, detail: miss };
 			// Punctuation-insensitive on purpose, and only here: an app that reflects "01012345678" as
 			// "010-1234-5678" *did* reflect it, and separators it adds itself are not a rejection. The
 			// check still fails on an empty box, a truncated value, or anything else — which is the whole

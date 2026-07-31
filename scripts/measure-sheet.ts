@@ -122,9 +122,14 @@ if (labelIdx < 0) {
 	throw new Error(`sheet has no "${labelColumn}" column. Columns: ${csvToRawTable(csvText).headers.join(", ")}`);
 }
 const idIdx = header.findIndex((h) => ["no", "no.", "id", "시험 id", "tc id"].includes(h.toLowerCase().trim()));
+// The human's own words for the defect. Printed on every mismatch row because they adjudicate it:
+// a false-pass whose 비고 says "기획서와 상이" is the engine judging the sheet while the human judged a
+// document the engine has never seen — a documented class, not a defect — and telling the two apart
+// used to cost a per-case archaeology dig into the sheet.
+const noteIdx = header.findIndex((h) => ["비고", "note", "notes", "remark", "remarks"].includes(h.toLowerCase().trim()));
 const dataRows = rows.slice(1).filter((r) => (idIdx < 0 ? r.some(Boolean) : (r[idIdx] ?? "").trim()));
 const unique = ingestCsv(csvText, {}).unique;
-const labels = new Map<string, { label: string; source: string }>();
+const labels = new Map<string, { label: string; source: string; note: string }>();
 const bySourceId = new Map<string, string[]>();
 if (idIdx >= 0) {
 	for (const row of dataRows) {
@@ -141,7 +146,11 @@ if (!pairedById && unique.length !== dataRows.length) {
 }
 unique.forEach((c, i) => {
 	const row = (pairedById && c.sourceId ? bySourceId.get(c.sourceId) : dataRows[i]) as string[] | undefined;
-	labels.set(c.caseId, { label: row?.[labelIdx] ?? "", source: (idIdx >= 0 ? row?.[idIdx] : "") ?? "" });
+	labels.set(c.caseId, {
+		label: row?.[labelIdx] ?? "",
+		source: (idIdx >= 0 ? row?.[idIdx] : "") ?? "",
+		note: (noteIdx >= 0 ? row?.[noteIdx] : "")?.replace(/\s+/g, " ").trim() ?? "",
+	});
 });
 console.log(`labels paired by ${pairedById ? "sheet id" : "row order"} · ${unique.length} cases / ${dataRows.length} rows`);
 
@@ -200,10 +209,13 @@ console.log(
 console.log("\n  case  human   engine         checks  outcome      hold reason");
 for (const c of card.cases) {
 	const r = run.results.find((x) => x.caseId === c.caseId);
-	const id = labels.get(c.caseId)?.source || c.caseId.slice(0, 6);
+	const entry = labels.get(c.caseId);
+	const id = entry?.source || c.caseId.slice(0, 6);
+	// A mismatch row carries the human's own defect note — it adjudicates the row on the spot.
+	const note = (c.outcome === "false-pass" || c.outcome === "false-fail") && entry?.note ? ` · 비고: ${entry.note.slice(0, 60)}` : "";
 	console.log(
 		`${String(id).padStart(6)}  ${c.human.padEnd(9)} ${c.verdict.padEnd(13)}  ${r?.passed}/${r?.total}` +
-			`     ${MARK[c.outcome]?.padEnd(11)}  ${c.holdReason ?? ""}`,
+			`     ${MARK[c.outcome]?.padEnd(11)}  ${c.holdReason ?? ""}${note}`,
 	);
 }
 console.log(`\n${formatScorecard(card)}`);

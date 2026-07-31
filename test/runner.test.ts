@@ -792,9 +792,10 @@ test("an input limit that does not work fails on the length the field kept", asy
 	expect(r.assertions[0]?.detail).toContain("over the 12 limit");
 });
 
-test("a field assertion whose field is nowhere on screen fails rather than passing", async () => {
-	// The soundness property: if the typed value never landed, nothing was restricted. A pass here is
-	// how the reverted version turned two real defects green.
+test("a field assertion whose field was never typed into fails rather than passing", async () => {
+	// The soundness property: if the typed value never landed in the box the check is about, nothing was
+	// restricted. A pass here is how the reverted version turned two real defects green — and the runner
+	// says so in the landing's terms: the plan filled 아이디, so nothing ever landed in this field.
 	const tc = loginTC({ caseId: "TC-lim3", contentHash: "h-lim3", steps: [], expected: "1. 입력 제한되어야 한다." });
 	const r = await runScenario(tc, {
 		page: new InputLimitPage(12),
@@ -809,7 +810,7 @@ test("a field assertion whose field is nowhere on screen fails rather than passi
 		},
 	});
 	expect(r.verdict).toBe("fail");
-	expect(r.assertions[0]?.detail).toContain("not on screen");
+	expect(r.assertions[0]?.detail).toContain("no typed value ever landed");
 });
 
 test("a length limit the box itself declares holds for review instead of passing", async () => {
@@ -839,6 +840,81 @@ test("a length limit the box itself declares holds for review instead of passing
 	expect((await runScenario(tc, opts(new InputLimitPage(12, null)))).verdict).toBe("pass");
 	// A box that declares a *longer* limit than the case asserts was free to fail, so it still counts.
 	expect((await runScenario(tc, opts(new InputLimitPage(12, 40)))).verdict).toBe("pass");
+});
+
+/**
+ * The NO 114 shape: the screen carries an empty box named 아이디 (a search field, another form), and the
+ * fill lands somewhere else — here reported honestly as a differently-keyed element that kept the value.
+ */
+class WrongBoxPage implements Page {
+	private typed = "";
+	async goto(): Promise<void> {}
+	async click(): Promise<void> {}
+	async fill(_target: string, value: string): Promise<string> {
+		this.typed = value;
+		// The write landed, but on the element the snapshot calls "아이디#1" — not the empty "아이디".
+		return "아이디#1";
+	}
+	async snapshot(): Promise<PageSnapshot> {
+		return {
+			url: "/account",
+			text: "아이디",
+			html: "<main>아이디</main>",
+			fields: { 아이디: "", "아이디#1": this.typed },
+		};
+	}
+}
+
+test("a field check reads the box the fill landed in, not the first one sharing its name", async () => {
+	// Measured (NO 114): the app accepts 한글ABC!@# verbatim — probed live — yet fieldExcludes passed,
+	// because an empty same-named box answered for the one that was actually typed into. The landing
+	// report is what tells them apart, and with it the case fails exactly as the human recorded.
+	const tc = loginTC({ caseId: "TC-land", contentHash: "h-land", steps: [], expected: "1. 입력 제한되어야 한다." });
+	const r = await runScenario(tc, {
+		page: new WrongBoxPage(),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "fill", target: "아이디", value: "한글ABC!@#" }],
+			assertions: [{ kind: "fieldExcludes", field: "아이디", classes: ["hangul", "upper", "symbol"] }],
+		},
+	});
+	expect(r.verdict).toBe("fail");
+	expect(r.assertions[0]?.detail).toContain("아이디#1");
+});
+
+test("a field check fails closed when no fill ever landed in that field", async () => {
+	// The fill failed (heal already caps the verdict) — but the check itself must also refuse to read
+	// a same-named box the case never touched. Green here is the exact false pass being closed.
+	class NoLandingPage implements Page {
+		async goto(): Promise<void> {}
+		async click(): Promise<void> {}
+		async fill(): Promise<void> {
+			throw new Error("no such field");
+		}
+		async snapshot(): Promise<PageSnapshot> {
+			return { url: "/", text: "아이디", html: "<main>아이디</main>", fields: { 아이디: "" } };
+		}
+	}
+	const tc = loginTC({ caseId: "TC-land2", contentHash: "h-land2", steps: [], expected: "1. 입력 제한되어야 한다." });
+	const r = await runScenario(tc, {
+		page: new NoLandingPage(),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		plan: {
+			actions: [{ kind: "fill", target: "아이디", value: "한글ABC!@#" }],
+			assertions: [{ kind: "fieldExcludes", field: "아이디", classes: ["hangul"] }],
+		},
+	});
+	expect(r.verdict).toBe("needs_review"); // the failed fill is a heal event
+	expect(r.assertions[0]?.passed).toBe(false);
+	expect(r.assertions[0]?.detail).toContain("no typed value ever landed");
 });
 
 /** The account editor's 상태 radios: clicking one selects it, and only one is ever on. */

@@ -499,20 +499,53 @@ export class BrowserPage implements Page {
 			.catch(() => {});
 	}
 
-	async fill(target: string, value: string, timeoutMs = this.timeoutMs): Promise<void> {
+	async fill(target: string, value: string, timeoutMs = this.timeoutMs): Promise<string | undefined> {
 		try {
-			await this.locateFillable(target).fill(value, { timeout: timeoutMs });
-			return;
+			const loc = this.locateFillable(target);
+			await loc.fill(value, { timeout: timeoutMs });
+			return await this.landedKeyOf(loc);
 		} catch (err) {
 			// Grounded fallback: match the target against every real input's label/placeholder/name.
-			if (await this.fillByProximity(target, value)) return;
+			const proximate = await this.fillByProximity(target, value);
+			if (proximate !== null) return proximate;
 			// Last resort: the wide ranking (raw css selectors, exotic contenteditable widgets).
 			try {
-				await this.locate(target).fill(value, { timeout: 1000 });
-				return;
+				const loc = this.locate(target);
+				await loc.fill(value, { timeout: 1000 });
+				return await this.landedKeyOf(loc);
 			} catch {
 				throw err;
 			}
+		}
+	}
+
+	/**
+	 * The snapshot key of the element a locator just filled — the name the verdict will look up.
+	 *
+	 * The write and the read have to agree on which box they mean, and the locator paths cannot say by
+	 * themselves: `getByPlaceholder` can satisfy a fill on an element whose snapshot key is a row label,
+	 * or on a same-named box on the wrong screen. Measured (NO 114): the typed value landed where the
+	 * check never looked, an empty same-named field answered instead, and a limit a human recorded as
+	 * broken passed. Tag the element, let `readForm` name it with the same rule the snapshot uses.
+	 * Best effort: an undefined landing makes the verdict fail closed, never pass.
+	 */
+	private async landedKeyOf(locator: Locator): Promise<string | undefined> {
+		const tagged = await locator
+			.evaluate((el) => el.setAttribute("data-osteron-landed", "1"))
+			.then(
+				() => true,
+				() => false,
+			);
+		if (!tagged) return undefined;
+		try {
+			return (await this.readForm(false)).landed;
+		} finally {
+			await this.pwPage
+				.evaluate(() => {
+					for (const el of document.querySelectorAll("[data-osteron-landed]"))
+						el.removeAttribute("data-osteron-landed");
+				})
+				.catch(() => {});
 		}
 	}
 
@@ -530,8 +563,8 @@ export class BrowserPage implements Page {
 	}
 
 	/**
-	 * Find the writable field the target names, tag it, and let Playwright fill it so real
-	 * input/change events still fire.
+	 * Find the writable field the target names, fill it, and return its snapshot key — or null when
+	 * nothing answered to the name or the write failed.
 	 *
 	 * Reads the page through the same `readForm` the snapshot uses, so the field a fill writes to and
 	 * the field a `fieldAtMost`/`fieldExcludes` check later looks up are one and the same by
@@ -539,8 +572,8 @@ export class BrowserPage implements Page {
 	 * disagreed: the fill landed on `input[name=email]` (matched through its placeholder) while the
 	 * check asked for "이메일" and was told `field "이메일" not on screen`.
 	 */
-	private async fillByProximity(target: string, value: string): Promise<boolean> {
-		if (target.replace(/\s+/g, "").length < 2) return false;
+	private async fillByProximity(target: string, value: string): Promise<string | null> {
+		if (target.replace(/\s+/g, "").length < 2) return null;
 		const form = await this.readForm(true);
 		// Same "later candidate" rule as the click path: the target as written first, and only if nothing
 		// answers to it, the target with a trailing UI noun removed — a sheet writes "이메일 입력란" where
@@ -548,11 +581,11 @@ export class BrowserPage implements Page {
 		const stripped = withoutUiNoun(target, { phrases: this.phrases });
 		const hit = bestFieldMatch(target, form.writable) ?? (stripped ? bestFieldMatch(stripped, form.writable) : null);
 		try {
-			if (!hit) return false;
+			if (!hit) return null;
 			await this.pwPage.locator(`[data-osteron-field="${hit.index}"]`).fill(value, { timeout: this.timeoutMs });
-			return true;
+			return hit.key;
 		} catch {
-			return false;
+			return null;
 		} finally {
 			await this.pwPage
 				.evaluate(() => {
@@ -608,6 +641,8 @@ export class BrowserPage implements Page {
 		controls: Record<string, boolean>;
 		limits: Record<string, number>;
 		writable: FieldEntry[];
+		/** Snapshot key of the element carrying `data-osteron-landed` — how a fill names where it wrote. */
+		landed?: string;
 	}> {
 		return await this.pwPage
 			.evaluate(
@@ -615,6 +650,7 @@ export class BrowserPage implements Page {
 					const fields: Record<string, string> = {};
 					const controls: Record<string, boolean> = {};
 					const limits: Record<string, number> = {};
+					let landed: string | undefined;
 					const writable: { index: number; key: string; names: string[] }[] = [];
 					const text = (s: string | null | undefined) => (s ?? "").trim();
 					/**
@@ -678,10 +714,14 @@ export class BrowserPage implements Page {
 						// typed" from "there is no such field", and only presence in this map answers that. Text
 						// assertions filter the empties out themselves.
 						// Distinct keys for repeated labels so one field never masks another's value.
-						fields[key in fields ? `${key}#${++i}` : key] = v;
+						const finalKey = key in fields ? `${key}#${++i}` : key;
+						fields[finalKey] = v;
+						// A fill tagged this element: report the key it ended up under, deduped and all, so the
+						// verdict reads exactly the box that was written — not the first one sharing its name.
+						if (el.hasAttribute("data-osteron-landed")) landed = finalKey;
 						// `maxLength` is -1 unless the control declares one, and a declared one decides a length
 						// check before the case runs — the verdict layer has to know it was not free to fail.
-						if (el instanceof HTMLInputElement && el.maxLength >= 0) limits[key] = el.maxLength;
+						if (el instanceof HTMLInputElement && el.maxLength >= 0) limits[finalKey] = el.maxLength;
 						if (el instanceof HTMLInputElement && (el.type === "radio" || el.type === "checkbox")) {
 							// A styled toggle is an invisible input plus a painted label, so the label is both the
 							// only thing a reader sees and the only name the sheet can be quoting.
@@ -695,7 +735,9 @@ export class BrowserPage implements Page {
 						if (mark) el.setAttribute("data-osteron-field", String(index));
 						writable.push({
 							index,
-							key,
+							// The deduped snapshot key, so what the fill reports and what the verdict looks up can
+							// never disagree about which of two same-labelled boxes is meant.
+							key: finalKey,
 							names: [
 								byFor,
 								wrapping,
@@ -708,7 +750,7 @@ export class BrowserPage implements Page {
 							].filter(Boolean),
 						});
 					}
-					return { fields, controls, limits, writable };
+					return { fields, controls, limits, writable, landed };
 				},
 				{ mark: tag, fillable: FILLABLE_CSS },
 			)

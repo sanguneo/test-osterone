@@ -53,7 +53,18 @@ export interface Page {
 	 * target that simply does not exist costs seconds instead of tens of seconds across a batch.
 	 */
 	click(target: string, timeoutMs?: number): Promise<void>;
-	fill(target: string, value: string, timeoutMs?: number): Promise<void>;
+	/**
+	 * Type into the field the target names.
+	 *
+	 * May return the snapshot key of the element actually written — the same key `fields` uses — so the
+	 * verdict can ask "is the box I typed into empty?" instead of "is any box by this name empty?".
+	 * Measured (NO 114): a case typed 한글ABC!@# to prove an input limit, the fill landed somewhere the
+	 * check never looked, and an empty same-named field elsewhere read as the limit working — on a case
+	 * whose recorded defect is that it does not. A `void` return means the implementation cannot say,
+	 * and the runner then trusts the target as written (the deterministic test double's semantics).
+	 */
+	// biome-ignore lint/suspicious/noConfusingVoidType: `void` (not `undefined`) is what keeps every existing `Promise<void>` implementation assignable — reporting a landing is opt-in.
+	fill(target: string, value: string, timeoutMs?: number): Promise<string | void>;
 	/**
 	 * Click a row of the page's primary data list, 1-based.
 	 *
@@ -140,9 +151,11 @@ export class FakePage implements Page {
 		this.state = this.reducer({ kind: "click", target: `row:${nth}` }, this.state, this.inputs);
 	}
 
-	async fill(target: string, value: string): Promise<void> {
+	async fill(target: string, value: string): Promise<string> {
 		this.inputs[target] = value;
 		this.state = this.reducer({ kind: "fill", target, value }, this.state, this.inputs);
+		// The landing is the target by construction: snapshot() keys typed values by the same name.
+		return target;
 	}
 
 	/**

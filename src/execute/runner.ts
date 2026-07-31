@@ -274,6 +274,17 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 						? a.target
 						: "";
 		/**
+		 * Where each fill actually wrote, keyed by the target as performed.
+		 *
+		 * A field check's premise is "the value I typed ended up (or was refused) in *this* box" — and
+		 * name lookup alone cannot carry that premise. Measured (NO 114): the fill landed where the check
+		 * never looked, an empty same-named box answered instead, and its emptiness read as a working
+		 * input limit on a case whose recorded defect is that the limit does not work. The page reports
+		 * the snapshot key it wrote to (a `void` return trusts the target — the test double's semantics),
+		 * and the verdict resolves field checks through this map: no landing, no evidence.
+		 */
+		const landings: Record<string, string> = {};
+		/**
 		 * `patience` is the per-action budget. The first attempt is deliberately impatient: an element
 		 * that is on screen resolves in milliseconds, so a long wait only ever pays off for one that
 		 * isn't there — and across a batch that dead waiting dominates the wall clock. The retry after
@@ -293,7 +304,10 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 					if (!opts.page.clickRow) return new Error("이 페이지 구현은 목록 행 선택을 지원하지 않습니다");
 					await opts.page.clickRow(a.nth, patience);
 				} else if (a.kind === "click") await opts.page.click(a.target, patience);
-				else if (a.kind === "fill") await opts.page.fill(a.target, a.value, patience);
+				else if (a.kind === "fill") {
+					const landed = await opts.page.fill(a.target, a.value, patience);
+					landings[a.target] = typeof landed === "string" && landed ? landed : a.target;
+				}
 				return null;
 			} catch (err) {
 				return err as Error;
@@ -505,7 +519,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		// Cheap first: the retry loop only needs DOM text/url, and the PNG is most of a snapshot's cost.
 		let snap = await opts.page.snapshot({ screenshot: false });
 		observed.push(snap);
-		let results = assertions.map((a) => evaluateAssertion(a, snap, { lenient: opts.lenientMatch }));
+		let results = assertions.map((a) => evaluateAssertion(a, snap, { lenient: opts.lenientMatch, landings }));
 		// Async content (toasts, late-rendered lists) can appear just after the last action — if an
 		// assertion misses, re-snapshot briefly before giving up. Passing-all cases skip this.
 		if (assertions.length > 0 && opts.assertRetryMs) {
@@ -514,13 +528,13 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				await new Promise((r) => setTimeout(r, 400));
 				snap = await opts.page.snapshot({ screenshot: false });
 				observed.push(snap);
-				results = assertions.map((a) => evaluateAssertion(a, snap, { lenient: opts.lenientMatch }));
+				results = assertions.map((a) => evaluateAssertion(a, snap, { lenient: opts.lenientMatch, landings }));
 			}
 		}
 		// Evidence (and the vision fallback) needs the image: take exactly one full snapshot of the
 		// final state and judge on it, so the verdict and the screenshot always describe one moment.
 		snap = await opts.page.snapshot();
-		results = assertions.map((a) => evaluateAssertion(a, snap, { lenient: opts.lenientMatch }));
+		results = assertions.map((a) => evaluateAssertion(a, snap, { lenient: opts.lenientMatch, landings }));
 		/**
 		 * The final screen decides absence; presence may be satisfied by any screen the case passed
 		 * through. `textIncludes` says "this must appear", and it did appear — that the run went on to
@@ -531,7 +545,9 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		for (let i = 0; i < results.length; i++) {
 			const r = results[i];
 			if (!r || r.passed || r.assertion.kind !== "textIncludes") continue;
-			const seen = observed.find((s) => evaluateAssertion(r.assertion, s, { lenient: opts.lenientMatch }).passed);
+			const seen = observed.find(
+				(s) => evaluateAssertion(r.assertion, s, { lenient: opts.lenientMatch, landings }).passed,
+			);
 			if (seen) {
 				results[i] = { ...r, passed: true, detail: `${r.detail} · 실행 중 화면에서 확인됨(최종 화면에는 없음)` };
 			}
@@ -652,9 +668,11 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			const present = (a: Assertion, s: PageSnapshot): boolean =>
 				evaluateAssertion(a.kind === "textNotIncludes" ? { kind: "textIncludes", value: a.value } : a, s, {
 					lenient: opts.lenientMatch,
+					landings,
 				}).passed;
 			const informative = results.some((r) => {
-				const truth = (s: PageSnapshot) => evaluateAssertion(r.assertion, s, { lenient: opts.lenientMatch }).passed;
+				const truth = (s: PageSnapshot) =>
+					evaluateAssertion(r.assertion, s, { lenient: opts.lenientMatch, landings }).passed;
 				// The end state answers differently than the start: the case changed something.
 				if (truth(pre) !== truth(snap)) return true;
 				// Or the subject appeared and left. That is the only reason to look at the middle at all:
