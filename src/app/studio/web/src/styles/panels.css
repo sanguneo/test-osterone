@@ -232,6 +232,10 @@
 .rev-checks .assertion-detail { color: var(--ink); }
 .tc-toggle { margin-left: 8px; vertical-align: middle; }
 .tc-row > td { padding-top: 0; background: color-mix(in srgb, var(--panel) 88%, #000 8%); }
+/* The bench's closing state: counts plus the way onward. It replaces the results table the bench
+   used to keep, which had turned it into a second copy of the status view. */
+.run-done { display: grid; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-raised); }
+.run-done > p { margin: 0; font-size: var(--text-small); line-height: 1.55; }
 .rev-evidence { display: grid; gap: var(--space-2); align-content: start; padding-left: var(--space-5); border-left: 1px solid var(--line); }
 .rev-evidence img { display: block; width: 100%; max-height: 440px; object-fit: contain; object-position: left top; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); }
 .rev-txt-wrap { color: var(--dim); font-size: var(--text-small); line-height: 1.55; }

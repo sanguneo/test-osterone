@@ -4,7 +4,7 @@ import { getLang, useLang } from "../i18n";
 import type { CaseView, PreviewResult, Project, Verdict } from "../types";
 import { Icon } from "./Icon";
 import { RunResults, type RunViewLike } from "./RunResults";
-import { vLabel } from "./Verdict";
+import { VerdictCounts, vLabel } from "./Verdict";
 
 const S = {
 	ko: {
@@ -49,6 +49,10 @@ const S = {
 		runAllTitle: "전체 시트 실행",
 		sheetCol: "시트",
 		statusCol: "상태",
+		runDone: "실행 완료",
+		runDoneHint: "판정별 결과·이력·필터는 실행 현황에서, 보류된 케이스는 리뷰 대기에서 이어집니다.",
+		openStatus: "실행 현황에서 보기 →",
+		openReview: (n: number) => `리뷰 대기 ${n}건 →`,
 		stPending: "대기",
 		stRunning: "진행",
 		stDone: "완료",
@@ -98,6 +102,10 @@ const S = {
 		statusCol: "Status",
 		stPending: "Pending",
 		stRunning: "Running",
+		runDone: "Run complete",
+		runDoneHint: "Results by verdict, history and filters continue in Run status; held cases in the review queue.",
+		openStatus: "Open run status →",
+		openReview: (n: number) => `Review queue (${n}) →`,
 		stDone: "Done",
 		stError: "Error",
 	},
@@ -149,7 +157,16 @@ function RunRail({ done, live, running }: { readonly done: boolean; readonly liv
 		</ol>
 	);
 }
-export function RunPanel({ project, selId, selSheetId, onDone }: { readonly project?: Project; readonly selId: string; readonly selSheetId: string; readonly onDone: () => void }) {
+/**
+ * The bench is where a run is configured and watched — not where its results live afterwards.
+ *
+ * It used to keep the full results table once a run finished, which made it a second copy of the
+ * status view: same rows, same verdicts, one of them ephemeral component state and the other the
+ * persisted history. Two screens, one job, and the two tables had already drifted apart. So the
+ * bench hands off when the run ends: the counts, and the way to the screens that own what happens
+ * next.
+ */
+export function RunPanel({ project, selId, selSheetId, onDone, goTo }: { readonly project?: Project; readonly selId: string; readonly selSheetId: string; readonly onDone: () => void; readonly goTo: (tab: "dash" | "rules" | "run" | "review") => void }) {
 	const [ai, setAi] = useState(false);
 	const [headed, setHeaded] = useState(false);
 	const [preview, setPreview] = useState<PreviewResult | null>(null);
@@ -339,7 +356,26 @@ export function RunPanel({ project, selId, selSheetId, onDone }: { readonly proj
 					{!live && preview && <PreviewTable preview={preview} />}
 					{runError && <div className="card err" role="alert">{t.error(runError)}</div>}
 					{runNotice && <div className="card muted" role="status">{runNotice}</div>}
-					{live && <RunResults view={live} total={done ? undefined : total} />}
+					{live && !done && <RunResults view={live} total={total} />}
+					{live && done && (
+						<div className="run-done">
+							<div className="summary">
+								<b>{t.runDone}</b>
+								<VerdictCounts counts={live.counts} />
+							</div>
+							<p className="muted">{t.runDoneHint}</p>
+							<div className="run-actions">
+								<button className="button primary" type="button" onClick={() => goTo("dash")}>
+									{t.openStatus}
+								</button>
+								{live.counts.needs_review > 0 && (
+									<button className="button secondary" type="button" onClick={() => goTo("review")}>
+										{t.openReview(live.counts.needs_review)}
+									</button>
+								)}
+							</div>
+						</div>
+					)}
 					{runAll && (
 						<div className="preview-surface">
 							<div className="summary"><b>{t.runAllTitle}</b>{VERDICTS.map((v) => <span className="chip" key={v}>{vLabel(v, lang)} <b>{runAll.order.reduce((sum, id) => sum + (runAll.prog[id]?.counts[v] || 0), 0)}</b></span>)}</div>

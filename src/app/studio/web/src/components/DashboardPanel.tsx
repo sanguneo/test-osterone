@@ -3,7 +3,8 @@ import { api } from "../api";
 import { useLang } from "../i18n";
 import type { Lang } from "../i18n";
 import type { CaseView, Project, RunView, Verdict } from "../types";
-import { DashboardQueueRow, DashboardSkeleton, Spark } from "./DashboardParts";
+import { CaseTable } from "./CaseTable";
+import { DashboardSkeleton, Spark } from "./DashboardParts";
 import { Icon } from "./Icon";
 import { vLabel } from "./Verdict";
 
@@ -42,11 +43,6 @@ const S = {
 		selectRunAria: "실행 선택",
 		noCasesInRun: "이 실행에는 케이스가 없습니다.",
 		noVerdictCases: (v: string) => `${v} 케이스가 없습니다.`,
-		caseCol: "케이스",
-		verdictCol: "판정",
-		verifyCol: "검증",
-		confidenceCol: "신뢰도",
-		detailCol: "상세",
 	},
 	en: {
 		dashTitle: "Run overview",
@@ -82,11 +78,6 @@ const S = {
 		selectRunAria: "Select run",
 		noCasesInRun: "This run has no cases.",
 		noVerdictCases: (v: string) => `No ${v} cases.`,
-		caseCol: "Case",
-		verdictCol: "Verdict",
-		verifyCol: "Verify",
-		confidenceCol: "Confidence",
-		detailCol: "Detail",
 	},
 } as const;
 
@@ -156,7 +147,6 @@ export function DashboardPanel({
 	const [confirmClear, setConfirmClear] = useState(false);
 	const [clearing, setClearing] = useState(false);
 	const [clearErr, setClearErr] = useState("");
-	const tbodyRef = useRef<HTMLTableSectionElement>(null);
 	const loadRequest = useRef(0);
 
 	const load = useCallback(() => {
@@ -227,20 +217,6 @@ export function DashboardPanel({
 		const rows = filter === "all" ? run.results : run.results.filter((r) => r.verdict === filter);
 		return rows.toSorted((a, b) => ACTION_ORDER[a.verdict] - ACTION_ORDER[b.verdict]);
 	}, [run, filter]);
-
-	// Arrow keys move between queue rows; Enter opens the row's action (review for held verdicts).
-	function onRowKey(e: React.KeyboardEvent<HTMLTableRowElement>, r: CaseView) {
-		if (e.key === "Enter" && r.verdict === "needs_review") {
-			goTo("review");
-			return;
-		}
-		if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
-		e.preventDefault();
-		const rows = Array.from(tbodyRef.current?.querySelectorAll("tr") ?? []);
-		const i = rows.indexOf(e.currentTarget);
-		const next = rows[e.key === "ArrowDown" ? i + 1 : i - 1];
-		next?.focus();
-	}
 
 	const actionable = run ? (run.counts.fail || 0) + (run.counts.error || 0) : 0;
 
@@ -368,24 +344,7 @@ export function DashboardPanel({
 						{queue.length === 0 ? (
 							<div className="muted">{filter === "all" ? t.noCasesInRun : t.noVerdictCases(vLabel(filter as Verdict, lang))}</div>
 						) : (
-							<div className="tscroll">
-								<table className="queue">
-								<thead>
-									<tr>
-										<th>{t.caseCol}</th>
-										<th>{t.verdictCol}</th>
-										<th className="num">{t.verifyCol}</th>
-										<th className="num">{t.confidenceCol}</th>
-										<th>{t.detailCol}</th>
-									</tr>
-								</thead>
-								<tbody ref={tbodyRef}>
-									{queue.map((r) => (
-										<DashboardQueueRow key={r.caseId} result={r} onKey={(e) => onRowKey(e, r)} goReview={() => goTo("review")} />
-									))}
-								</tbody>
-								</table>
-								</div>
+							<CaseTable results={queue} onReview={() => goTo("review")} />
 						)}
 					</div>
 				</>

@@ -1,13 +1,3 @@
-import { formatAssertion, useLang } from "../i18n";
-import type { KeyboardEvent } from "react";
-import type { CaseView } from "../types";
-import { SelfHealNote, stripAnsi, VerdictMark } from "./Verdict";
-
-const S = {
-	ko: { review: "리뷰 →" },
-	en: { review: "Review →" },
-} as const;
-
 const EMPTY_CELLS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 
 export function Spark({ rates }: { readonly rates: number[] }) {
@@ -50,13 +40,3 @@ export function DashboardSkeleton() {
 	);
 }
 
-export function DashboardQueueRow({ result, onKey, goReview }: { readonly result: CaseView; readonly onKey: (event: KeyboardEvent<HTMLTableRowElement>) => void; readonly goReview: () => void }) {
-	const firstFail = result.assertions.find((assertion) => !assertion.passed);
-	const lang = useLang();
-	return (
-		<tr tabIndex={0} onKeyDown={onKey}>
-			<td className="ttl">{result.category && <span className="cat-tag">{result.category}</span>}{result.title || result.caseId}</td><td><VerdictMark verdict={result.verdict} /></td><td className="num">{result.passed}/{result.total}</td><td className="num">{result.confidence.toFixed(2)}</td>
-			<td>{firstFail && <div className="detail">{stripAnsi(formatAssertion(firstFail, lang))}</div>}<SelfHealNote heal={result.heal} />{result.verdict === "needs_review" && <button className="linkbtn" type="button" onClick={goReview}>{S[lang].review}</button>}</td>
-		</tr>
-	);
-}

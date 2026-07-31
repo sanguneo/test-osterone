@@ -268,7 +268,7 @@ export function App() {
 							<RulesPanel status={status} selId={selectedProjectId} project={selectedProject} selSheetId={selectedSheetId} connected={connected} onStatus={setStatus} goToModel={() => setModelOpen(true)} />
 						</div>
 						<div hidden={tab !== "run"}>
-							<RunPanel key={`${selectedProjectId}:${selectedSheetId}`} project={selectedProject} selId={selectedProjectId} selSheetId={selectedSheetId} onDone={() => setRunSequence((value) => value + 1)} />
+							<RunPanel key={`${selectedProjectId}:${selectedSheetId}`} project={selectedProject} selId={selectedProjectId} selSheetId={selectedSheetId} onDone={() => setRunSequence((value) => value + 1)} goTo={setTab} />
 						</div>
 						<div hidden={tab !== "review"}>
 							<ReviewPanel selId={selectedProjectId} selSheetId={selectedSheetId} sheetName={selectedProject.sheets.find((sheet) => sheet.id === selectedSheetId)?.name ?? t.noSheetSelected} onCount={setReviewCount} onRun={() => setTab("run")} refreshKey={runSequence} />
