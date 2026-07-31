@@ -191,7 +191,7 @@ export class BrowserPage implements Page {
 		// Native popups must never block a run, but the kinds part ways. Dismissing an alert/confirm is
 		// the safe answer (a dismissed confirm refuses the destructive action it guards). Dismissing a
 		// `beforeunload` means "stay on the page" — it cancels the navigation that raised it, and the
-		// dialog re-arms on the next one. Measured: the 공문 editor arms beforeunload once typed into, and
+		// dialog re-arms on the next one. Measured: an editor screen arms beforeunload once typed into,
 		// one dirty editor left behind by a case turned every later `goto` — preconditions, login
 		// retries, resetSession — into net::ERR_ABORTED, holding 66 of 98 cases two nights in a row at
 		// the same sheet position. Accepting is what a user does: leave the page, lose the draft.
@@ -379,7 +379,7 @@ export class BrowserPage implements Page {
 	 * `target` is what the caller was trying to reach, and it is what keeps this from eating the app.
 	 * Measured on the account editor: the sweep's own rule (large, fixed, high z, covers the centre)
 	 * describes `div.modal-dim` — the dialog's backdrop — exactly, so hiding it took the dialog with it
-	 * ("발송자 계정 수정" present before the sweep, gone after). Every failed click inside a dialog was
+	 * ("계정 수정" present before the sweep, gone after). Every failed click inside a dialog was
 	 * destroying the screen it was about to retry on, which made step ① of the recovery ladder
 	 * guarantee its own failure.
 	 *

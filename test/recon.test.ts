@@ -219,7 +219,7 @@ const SPA_LOGIN_HTML = `<!doctype html><html><head><title>샘플 관리 서비�
 		<button type="submit">로그인</button>
 	</form>
 </body></html>`;
-const SPA_HOME_HTML = `<!doctype html><html><head><title>대시보드</title></head><body><h1>문서 발송</h1></body></html>`;
+const SPA_HOME_HTML = `<!doctype html><html><head><title>대시보드</title></head><body><h1>문서 관리</h1></body></html>`;
 const SPA_LIVE_TARGETS = ["아이디를 입력해 주세요.", "비밀번호를 입력해 주세요.", "아이디", "비밀번호"];
 
 class SpaLoginPage implements Page {
@@ -261,7 +261,7 @@ class SpaLoginPage implements Page {
 		const refused = this.showsRejection
 			? "아이디\n비밀번호\n로그인\n로그인 안내\n아이디 또는 비밀번호를 확인해 주세요."
 			: "아이디\n비밀번호\n로그인";
-		this.text = ok ? "문서 발송" : refused;
+		this.text = ok ? "문서 관리" : refused;
 	}
 }
 

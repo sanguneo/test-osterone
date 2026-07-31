@@ -138,9 +138,9 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 	],
 	lengthUnit: ["자", "글자", "characters", "chars", "letters"],
 	anyRow: ["임의", "아무", "첫 번째", "첫번째", "any", "arbitrary", "first"],
-	// Common Korean nouns for a thing that appears in a list. Domain words a particular sheet uses
-	// ("단지", "공문") belong on that sheet's rule, not in the engine's defaults — teaching one is a
-	// vocabulary edit, and shipping every industry's nouns here would make "임의 X 선택" match prose.
+	// Common Korean nouns for a thing that appears in a list. A word only one industry uses belongs on
+	// that sheet's rule, not in the engine's defaults — teaching one is a vocabulary edit, and shipping
+	// every industry's nouns here would make "임의 X 선택" match prose.
 	rowNoun: ["계정", "항목", "기관", "문서", "그룹", "행", "목록", "리스트", "row", "item", "record", "entry"],
 	exceed: ["초과", "이상", "넘게", "over", "more than", "exceeding", "longer than"],
 	// Narrow on purpose: these two gate a check that reads a control's state, and every other

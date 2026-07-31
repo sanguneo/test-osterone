@@ -78,8 +78,8 @@ test("authorAssertions refuses to assert a written requirement it cannot check",
 	]);
 	// …and an explicit quoted verify step is always authored, prose expectation or not.
 	expect(
-		authorAssertions(tc({ steps: ['화면에 "발송 완료"가 표출되는지 확인'], expected: "표출되어야 한다" }), RULE),
-	).toEqual([{ kind: "textIncludes", value: "발송 완료" }]);
+		authorAssertions(tc({ steps: ['화면에 "저장 완료"가 표출되는지 확인'], expected: "표출되어야 한다" }), RULE),
+	).toEqual([{ kind: "textIncludes", value: "저장 완료" }]);
 });
 
 test("authorPlanAI drops a prose assertion the model returned despite being told not to", async () => {
@@ -226,7 +226,7 @@ test("an enumerated expectation becomes one assertion per item", () => {
 		"위탁관리",
 		"일반업체",
 	]);
-	expect(splitEnumeratedValue("전체, 발송 완료, 발송 대기, 발송 실패")).toHaveLength(4);
+	expect(splitEnumeratedValue("전체, 처리 완료, 처리 대기, 처리 실패")).toHaveLength(4);
 	expect(splitEnumeratedValue("NO, 기관유형, 기관명, 아이디, 이메일, 연락처, 상태")).toHaveLength(7);
 });
 

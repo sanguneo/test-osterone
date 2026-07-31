@@ -173,8 +173,8 @@ test("describeAssertion says what a field assertion checks, since it has no valu
 
 const withControls = (controls: Record<string, boolean>): PageSnapshot => ({
 	url: "/account",
-	text: "발송자 계정 수정 상태 활성 비활성",
-	html: "<main>발송자 계정 수정</main>",
+	text: "계정 수정 상태 활성 비활성",
+	html: "<main>계정 수정</main>",
 	controls,
 });
 

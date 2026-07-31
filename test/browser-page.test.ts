@@ -141,7 +141,7 @@ test("looksLikeCss: only real selectors reach the CSS engine, never a human labe
 });
 
 test("dialogAnswer: beforeunload is accepted (leave the page), everything else dismissed", () => {
-	// Measured: the 공문 editor arms beforeunload once typed into, and dismissing that dialog cancels
+	// Measured: an editor screen arms beforeunload once typed into, and dismissing that dialog cancels
 	// the navigation that raised it — one dirty editor turned every later goto (preconditions, login
 	// retries, resetSession) into net::ERR_ABORTED, holding 66 of 98 cases two nights in a row at the
 	// same sheet position. Accepting is what a user does: leave the page, lose the draft.

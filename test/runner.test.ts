@@ -934,8 +934,8 @@ class RadioPage implements Page {
 		// the whole reason this class of expectation needed a check that is not about text.
 		return {
 			url: "/account",
-			text: "발송자 계정 수정 상태 활성 비활성",
-			html: "<main>발송자 계정 수정</main>",
+			text: "계정 수정 상태 활성 비활성",
+			html: "<main>계정 수정</main>",
 			controls: { 활성: this.selected === "활성", 비활성: this.selected === "비활성" },
 		};
 	}
