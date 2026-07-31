@@ -770,6 +770,10 @@ export async function runBatch(
 				page,
 				{ username: acct.username, password: acct.password },
 				{
+					// Batch patience: a login that takes 12 seconds tonight is not a finding about the app,
+					// and the 6s default reads it as a failed attempt — two of those open the breaker and
+					// the batch runs on signed out. The batch can afford to wait; a recon probe cannot.
+					settleTimeoutMs: 15000,
 					onRetry: (note) =>
 						onProgress?.({
 							type: "notice",
@@ -779,25 +783,33 @@ export async function runBatch(
 			);
 		/** Account id the browser is currently authenticated as; null means signed out / unknown. */
 		let signedInAs: string | null = null;
+		/** Consecutive sign-in failures; reset by a success. `authStepFor` decides what they mean. */
 		let failedSignIns = 0;
+		/** The app showed a wrong-credentials message — resubmitting risks a lockout. Permanent. */
+		let credentialRefused = false;
+		/** Cases seen since the last sign-in attempt — the half-open retry window's clock. */
+		let casesSinceAttempt = 0;
 		let signedInEver = false;
 		/** Make the live session match `want`, signing the previous user out first when they differ. */
 		const ensureSignedInAs = async (want: Account, why: string): Promise<void> => {
 			if (signedInAs === want.id) return;
-			// The app refuses to authenticate — stop spending a login timeout on every remaining case.
-			if (failedSignIns >= 2) return;
+			casesSinceAttempt = 0;
 			if (signedInAs !== null) await page.resetSession().catch(() => {});
 			const res = await signIn(want);
 			signedInAs = res.ok ? want.id : null;
 			const who = want.role || want.username || want.id;
 			if (!res.ok) {
 				failedSignIns++;
+				if (res.rejected) credentialRefused = true;
 				// Nothing ever authenticated: the credentials or the app are wrong, and every remaining
 				// case would fail into the review queue one by one. Stop the batch with the real reason.
 				if (!signedInEver) throw new Error(`로그인 실패로 실행을 중단했습니다 (${who}) — ${res.note}`);
 				onProgress?.({ type: "notice", message: `${why} — ${who} 로그인 실패: ${res.note}` });
+				if (credentialRefused)
+					onProgress?.({ type: "notice", message: `자격증명이 거부되어 이 배치에서는 재시도하지 않습니다 (${who})` });
 				return;
 			}
+			failedSignIns = 0;
 			signedInEver = true;
 			// The first authenticated screen is where onboarding/notice popups live — clear them now.
 			await page.dismissOverlays().catch(() => {});
@@ -832,11 +844,19 @@ export async function runBatch(
 		 * unit-tested; here we only carry it out.
 		 */
 		const prepareAuth = async (tc: NormalizedTC, account: Account | undefined): Promise<void> => {
-			const step = authStepFor(tc, account, { signedInAs, failedSignIns }, { sample: input.sample });
+			casesSinceAttempt++;
+			const step = authStepFor(
+				tc,
+				account,
+				{ signedInAs, failedSignIns, credentialRefused, casesSinceAttempt },
+				{ sample: input.sample },
+			);
 			if (step.kind === "signOut") {
 				await page.resetSession().catch(() => {});
 				signedInAs = null;
 			} else if (step.kind === "signIn" && hasCreds(account)) {
+				if (failedSignIns >= 2)
+					onProgress?.({ type: "notice", message: "로그인 연속 실패 후 재시도 창 — 다시 로그인해 봅니다" });
 				await ensureSignedInAs(account, tc.title || tc.caseId);
 			}
 		};

@@ -51,15 +51,27 @@ export type AuthStep =
 export interface SessionState {
 	/** Account id the browser is currently authenticated as (null = signed out or unknown). */
 	signedInAs: string | null;
-	/** Sign-in attempts that failed; past the budget the planner stops asking. */
+	/** Consecutive sign-in failures since the last success; a success resets it. */
 	failedSignIns: number;
+	/**
+	 * The app *said no* — a wrong-credentials message on screen. Permanent for the batch: resubmitting
+	 * a refused credential buys nothing but a locked account. Distinct from `failedSignIns`, which
+	 * counts silent/transient failures — a login that merely errored tonight is not a refusal, and the
+	 * old breaker treated it as one: two transient goto failures opened it permanently and the
+	 * remaining 66 cases of a 98-case batch ran signed out, every one held as precondition unmet.
+	 */
+	credentialRefused?: boolean;
+	/** Cases seen since the last sign-in attempt — the half-open window's clock. */
+	casesSinceAttempt?: number;
 }
 
 export interface AuthPlanOptions {
 	/** Sample run: no real app, no credentials — never touch the session. */
 	sample?: boolean;
-	/** Give up after this many failed sign-ins (default 2) instead of burning a timeout per case. */
+	/** Consecutive failures before attempts pause (default 2) instead of burning a timeout per case. */
 	maxFailedSignIns?: number;
+	/** While paused, try again after this many cases (default 5) — the app may just have been slow. */
+	retryAfterCases?: number;
 }
 
 /**
@@ -83,7 +95,15 @@ export function authStepFor(
 	if (startsSignedOut(tc)) return { kind: "signOut" };
 	if (!account || !(account.username || account.password)) return { kind: "none" };
 	if (state.signedInAs === account.id) return { kind: "none" };
-	if (state.failedSignIns >= (opts.maxFailedSignIns ?? 2)) return { kind: "none" };
+	// The app explicitly refused these credentials: never resubmit them, for the rest of the batch.
+	if (state.credentialRefused) return { kind: "none" };
+	// Silent/transient failures pause the attempts rather than end them: after the budget, sit out a
+	// few cases, then half-open — one fresh attempt. A success closes the breaker (the caller resets
+	// the counter); another failure re-arms the pause. The alternative is what actually happened: two
+	// transient failures tripped the old permanent breaker and 66 signed-out cases were held unmet.
+	if (state.failedSignIns >= (opts.maxFailedSignIns ?? 2)) {
+		if ((state.casesSinceAttempt ?? 0) < (opts.retryAfterCases ?? 5)) return { kind: "none" };
+	}
 	return { kind: "signIn", accountId: account.id };
 }
 

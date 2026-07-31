@@ -100,9 +100,9 @@ test("session contract: sample runs are untouched, and a dead app stops costing 
 	// Sample runs never touch the session.
 	expect(walk([{ tc: { category: "로그인" }, account: ADMIN }], { sample: true })).toEqual(["none"]);
 
-	// After the failure budget, the planner stops asking (no login timeout per remaining case).
-	const exhausted = { signedInAs: null, failedSignIns: 2 };
-	expect(authStepFor({ category: "전자결재" }, ADMIN, exhausted)).toEqual({ kind: "none" });
+	// After the failure budget, attempts pause (no login timeout per remaining case)…
+	const paused = { signedInAs: null, failedSignIns: 2, casesSinceAttempt: 1 };
+	expect(authStepFor({ category: "전자결재" }, ADMIN, paused)).toEqual({ kind: "none" });
 	expect(authStepFor({ category: "전자결재" }, ADMIN, { signedInAs: null, failedSignIns: 1 })).toEqual({
 		kind: "signIn",
 		accountId: "a1",
@@ -110,6 +110,38 @@ test("session contract: sample runs are untouched, and a dead app stops costing 
 	// An account with no credentials cannot be signed in as.
 	expect(authStepFor({ category: "전자결재" }, { id: "a3" }, { signedInAs: null, failedSignIns: 0 })).toEqual({
 		kind: "none",
+	});
+});
+
+test("session contract: transient sign-in failures pause attempts, a refusal ends them", () => {
+	// …but the pause half-opens after a few cases: the failure may have been transient, and the
+	// permanent version of this breaker once ran the remaining 66 cases of a batch signed out — two
+	// transient goto failures opened it and all 66 were held as precondition unmet.
+	const state = { signedInAs: null, failedSignIns: 2, casesSinceAttempt: 0 };
+	expect(authStepFor({ category: "전자결재" }, ADMIN, { ...state, casesSinceAttempt: 4 })).toEqual({ kind: "none" });
+	expect(authStepFor({ category: "전자결재" }, ADMIN, { ...state, casesSinceAttempt: 5 })).toEqual({
+		kind: "signIn",
+		accountId: "a1",
+	});
+	// The window is a knob, like the budget.
+	expect(
+		authStepFor({ category: "전자결재" }, ADMIN, { ...state, casesSinceAttempt: 2 }, { retryAfterCases: 2 }),
+	).toEqual({ kind: "signIn", accountId: "a1" });
+
+	// An explicit refusal is different in kind, not degree: the app said no, and resubmitting risks a
+	// locked account. No window ever reopens it.
+	expect(
+		authStepFor({ category: "전자결재" }, ADMIN, {
+			signedInAs: null,
+			failedSignIns: 1,
+			credentialRefused: true,
+			casesSinceAttempt: 99,
+		}),
+	).toEqual({ kind: "none" });
+	// A login-feature case still clears the session even while attempts are paused — it tests the form,
+	// not the batch's ability to authenticate.
+	expect(authStepFor({ category: "로그인" }, ADMIN, { ...state, credentialRefused: true })).toEqual({
+		kind: "signOut",
 	});
 });
 
