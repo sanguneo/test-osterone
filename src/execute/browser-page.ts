@@ -75,6 +75,16 @@ export function looksLikeCss(target: string): boolean {
 }
 
 /**
+ * How the engine answers a native dialog so it never blocks a run: `beforeunload` is accepted
+ * (leave the page — dismissing one *cancels* the navigation that raised it, and a dirty form then
+ * aborts every goto until the batch dies), everything else is dismissed (a dismissed confirm
+ * refuses the destructive action it guards).
+ */
+export function dialogAnswer(type: string): "accept" | "dismiss" {
+	return type === "beforeunload" ? "accept" : "dismiss";
+}
+
+/**
  * Elements Playwright's `fill` can actually write to. Restricting fills to these keeps a
  * label/heading that shares the field's text (very common on Korean login forms) from winning
  * the locator race and failing the action with "Element is not an <input>".
@@ -178,8 +188,14 @@ export class BrowserPage implements Page {
 		// test, so they only inflate every kept trace — and hundreds of kept traces fill a disk.
 		if (tracing) await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
 		const pwPage = await context.newPage();
-		// Auto-dismiss native alert/confirm/beforeunload popups so they never block a test run.
-		pwPage.on("dialog", (d) => void d.dismiss().catch(() => {}));
+		// Native popups must never block a run, but the kinds part ways. Dismissing an alert/confirm is
+		// the safe answer (a dismissed confirm refuses the destructive action it guards). Dismissing a
+		// `beforeunload` means "stay on the page" — it cancels the navigation that raised it, and the
+		// dialog re-arms on the next one. Measured: the 공문 editor arms beforeunload once typed into, and
+		// one dirty editor left behind by a case turned every later `goto` — preconditions, login
+		// retries, resetSession — into net::ERR_ABORTED, holding 66 of 98 cases two nights in a row at
+		// the same sheet position. Accepting is what a user does: leave the page, lose the draft.
+		pwPage.on("dialog", (d) => void (dialogAnswer(d.type()) === "accept" ? d.accept() : d.dismiss()).catch(() => {}));
 		return new BrowserPage(
 			browser,
 			context,

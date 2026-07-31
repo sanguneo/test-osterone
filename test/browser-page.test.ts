@@ -3,6 +3,7 @@ import { expect, test } from "bun:test";
 import {
 	bestFieldMatch,
 	browserInstallHint,
+	dialogAnswer,
 	type FieldEntry,
 	flexTextRe,
 	looksLikeCss,
@@ -137,4 +138,16 @@ test("looksLikeCss: only real selectors reach the CSS engine, never a human labe
 	expect(looksLikeCss("개인정보처리방침")).toBe(false);
 	expect(looksLikeCss("Save changes")).toBe(false);
 	expect(looksLikeCss("")).toBe(false);
+});
+
+test("dialogAnswer: beforeunload is accepted (leave the page), everything else dismissed", () => {
+	// Measured: the 공문 editor arms beforeunload once typed into, and dismissing that dialog cancels
+	// the navigation that raised it — one dirty editor turned every later goto (preconditions, login
+	// retries, resetSession) into net::ERR_ABORTED, holding 66 of 98 cases two nights in a row at the
+	// same sheet position. Accepting is what a user does: leave the page, lose the draft.
+	expect(dialogAnswer("beforeunload")).toBe("accept");
+	// A dismissed confirm refuses the destructive action it guards; a dismissed alert just closes.
+	expect(dialogAnswer("confirm")).toBe("dismiss");
+	expect(dialogAnswer("alert")).toBe("dismiss");
+	expect(dialogAnswer("prompt")).toBe("dismiss");
 });
