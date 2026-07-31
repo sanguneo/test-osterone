@@ -7,6 +7,7 @@ import {
 	type FieldEntry,
 	flexTextRe,
 	looksLikeCss,
+	pagerSlot,
 } from "../src/execute/browser-page.ts";
 import { withoutUiNoun } from "../src/interpret/rule.ts";
 
@@ -150,4 +151,36 @@ test("dialogAnswer: beforeunload is accepted (leave the page), everything else d
 	expect(dialogAnswer("confirm")).toBe("dismiss");
 	expect(dialogAnswer("alert")).toBe("dismiss");
 	expect(dialogAnswer("prompt")).toBe("dismiss");
+});
+
+test("pagerSlot: a sheet names pagination the way it is drawn, and only a glyph may ask", () => {
+	// Measured across two sheets: 5 of 14 failed actions were these four glyphs. The app draws them as
+	// <button><i class="icon board_prev"></i></button> — clickable, with no accessible name at all, so
+	// every locator candidate misses an element that is right there.
+	expect(pagerSlot("<<")).toBe("first");
+	expect(pagerSlot("<")).toBe("prev");
+	expect(pagerSlot(">")).toBe("next");
+	expect(pagerSlot(">>")).toBe("last");
+	expect(pagerSlot("«")).toBe("first");
+	expect(pagerSlot("»")).toBe("last");
+	// A trailing UI noun is the sheet's, not the app's — and one character left over is the point here,
+	// which is why this cannot reuse `withoutUiNoun` (it refuses to leave fewer than two).
+	expect(pagerSlot("< 버튼")).toBe("prev");
+	expect(pagerSlot(">> 버튼")).toBe("last");
+	// A bare page number needs nothing special: its button carries the number as text, which the
+	// ordinary text candidate already finds. Verified live — click("3") moved page=0 to page=2.
+	expect(pagerSlot("2")).toBeNull();
+
+	// Everything else stays out — a real label has locators that can find it honestly.
+	expect(pagerSlot("검색")).toBeNull();
+	expect(pagerSlot("다음 페이지")).toBeNull();
+	expect(pagerSlot("")).toBeNull();
+	expect(pagerSlot("버튼")).toBeNull();
+	// A chevron beside a name is a disclosure control, not a pager. Mapping it onto "next" would click
+	// something the case never meant.
+	expect(pagerSlot("V")).toBeNull();
+	expect(pagerSlot("∨")).toBeNull();
+	expect(pagerSlot("∧")).toBeNull();
+	// The noun list is the sheet's vocabulary, like everywhere else.
+	expect(pagerSlot("> 칸", { phrases: { uiNoun: ["칸"] } })).toBe("next");
 });

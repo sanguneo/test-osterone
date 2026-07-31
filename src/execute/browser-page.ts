@@ -84,6 +84,51 @@ export function dialogAnswer(type: string): "accept" | "dismiss" {
 	return type === "beforeunload" ? "accept" : "dismiss";
 }
 
+/** Where in a pager a glyph points, or the 1-based page a bare number names. */
+export type PagerSlot = "first" | "prev" | "next" | "last";
+
+const PAGER_GLYPHS: readonly (readonly [RegExp, PagerSlot])[] = [
+	// The doubled forms first: `<<` must not be read as `<`.
+	[/^(?:<<|«|≪|⟪|＜＜)$/, "first"],
+	[/^(?:>>|»|≫|⟫|＞＞)$/, "last"],
+	[/^(?:<|‹|◀|◁|＜)$/, "prev"],
+	[/^(?:>|›|▶|▷|＞)$/, "next"],
+];
+
+/**
+ * Which pager arrow a target names, when a sheet writes the arrow as the glyph it is drawn as.
+ *
+ * Sheets name pagination the way it looks: `<<`, `<`, `>`, `>> 버튼`. Probed live, the app labels those
+ * same four buttons `aria-label="처음|이전|다음|끝"` and gives them no text at all — so the glyph and
+ * the name never meet, and 5 of 14 failed actions across two sheets were arrows that had been named
+ * the whole time. Returning the slot lets the caller ask for the app's own word for it.
+ *
+ * Glyphs only. A bare page number needs nothing special — its button carries the number as text, which
+ * the ordinary text candidate already finds — and a real label must never route here.
+ *
+ * `∨`/`V` is deliberately absent: a chevron beside a name is a disclosure control, not a pager, and
+ * mapping it onto "next" would click something the case never meant.
+ */
+export function pagerSlot(target: string, vocab: { phrases?: Record<string, string[]> } = {}): PagerSlot | null {
+	const nouns = [...{ ...DEFAULT_PHRASES, ...(vocab.phrases ?? {}) }.uiNoun]
+		.sort((a, b) => b.length - a.length)
+		.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+	// `withoutUiNoun` is the same idea but refuses to leave fewer than two characters, which is every
+	// glyph there is. Here a one-character remainder is the whole point.
+	const bare = target
+		.replace(new RegExp(`\\s*(?:${nouns.join("|")})\\s*$`, "i"), "")
+		.replace(/\s+/g, "")
+		.trim();
+	if (!bare) return null;
+	for (const [re, slot] of PAGER_GLYPHS) if (re.test(bare)) return slot;
+	return null;
+}
+
+/** The vocabulary key holding the app's own names for a pager slot. */
+export function pagerPhraseKind(slot: PagerSlot): "pagerFirst" | "pagerPrev" | "pagerNext" | "pagerLast" {
+	return slot === "first" ? "pagerFirst" : slot === "prev" ? "pagerPrev" : slot === "next" ? "pagerNext" : "pagerLast";
+}
+
 /**
  * Elements Playwright's `fill` can actually write to. Restricting fills to these keeps a
  * label/heading that shares the field's text (very common on Korean login forms) from winning
@@ -289,6 +334,9 @@ export class BrowserPage implements Page {
 			// Tried before the overlay sweep on purpose: that sweep presses "닫기" and hides big fixed
 			// layers, which on this app means closing the very dialog the radio lives in.
 			if (await this.clickControlLabel(target, timeoutMs)) return;
+			// A pager arrow the app draws as an icon: clickable, and with no name for any locator to
+			// match. Resolved by position inside the pager, which is why only a glyph may ask.
+			if (await this.clickPager(target, timeoutMs)) return;
 			// A popup/overlay may be intercepting pointer events — clear it and retry.
 			await this.dismissOverlays(target);
 			try {
@@ -300,6 +348,45 @@ export class BrowserPage implements Page {
 				if (!(await this.clickByText(target))) throw err;
 			}
 		}
+	}
+
+	/**
+	 * Click a pager arrow the sheet named by its glyph and the app named by a word.
+	 *
+	 * Probed live on the account list: the four arrows are ordinary buttons carrying
+	 * `aria-label="처음|이전|다음|끝"` and no text, so `<<` never met `처음` and the step spent its whole
+	 * budget on a control that had a name all along.
+	 *
+	 * Deliberately a name lookup and not a geometric guess. The first version of this walked the
+	 * document for nameless clickables abutting the run of page-number buttons — and the probe that was
+	 * supposed to confirm it showed there were no nameless clickables to find. Position is the widest
+	 * guess available; a translated name is the narrowest.
+	 *
+	 * The words are the sheet's vocabulary (`pagerFirst`/`pagerPrev`/`pagerNext`/`pagerLast`), so an app
+	 * that says "앞으로" teaches it once on the rule instead of waiting for a code change. A disabled
+	 * arrow is left alone: on the first page there is no previous page, and reporting that as a click
+	 * that worked would be a lie the caller cannot see through.
+	 */
+	private async clickPager(target: string, timeoutMs: number): Promise<boolean> {
+		const slot = pagerSlot(target, { phrases: this.phrases });
+		if (!slot) return false;
+		const names = this.phrases[pagerPhraseKind(slot)] ?? [];
+		for (const name of names) {
+			const control = this.pwPage
+				.getByRole("button", { name, exact: true })
+				.or(this.pwPage.getByRole("link", { name, exact: true }))
+				.or(this.pwPage.getByLabel(name, { exact: true }))
+				.first();
+			if ((await control.count().catch(() => 0)) === 0) continue;
+			if (
+				await control
+					.click({ timeout: timeoutMs })
+					.then(() => true)
+					.catch(() => false)
+			)
+				return true;
+		}
+		return false;
 	}
 
 	/**

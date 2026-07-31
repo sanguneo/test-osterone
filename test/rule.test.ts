@@ -54,6 +54,10 @@ test("serializeRule -> parseRule round-trips every field, including the optional
 			reflected: ["is kept"],
 			overlayCloser: ["dismiss this"],
 			quotedLine: [">"],
+			pagerFirst: ["to the start"],
+			pagerPrev: ["back one"],
+			pagerNext: ["on one"],
+			pagerLast: ["to the end"],
 		},
 		charClasses: { hangul: ["hangeul"], upper: ["caps"], symbol: ["punct"], nonDigit: ["not numeric"] },
 	};

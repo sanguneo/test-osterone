@@ -74,7 +74,19 @@ export type PhraseKind =
 	/** What a dismissable onboarding/notice overlay calls its close control ("오늘 하루 보지 않기"). */
 	| "overlayCloser"
 	/** What marks a line that quotes the app's own copy, under a written requirement ("- 검색된 목록이 없습니다."). */
-	| "quotedLine";
+	| "quotedLine"
+	/**
+	 * What the app calls the pager arrows a sheet writes as glyphs.
+	 *
+	 * The sheet says `<<`, `<`, `>`, `>> 버튼`; the app labels the same four buttons
+	 * `aria-label="처음|이전|다음|끝"`. Neither side is wrong — a glyph is how the control is drawn and
+	 * the label is how it is named — but nothing in the locator chain bridges them, so 5 of 14 failed
+	 * actions across two measured sheets were these four arrows sitting right there, named.
+	 */
+	| "pagerFirst"
+	| "pagerPrev"
+	| "pagerNext"
+	| "pagerLast";
 
 /**
  * Default intent vocabulary. Korean terms are first-class, not an add-on: the sheets this tool
@@ -158,6 +170,13 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 	// sheet it introduces a note *about* the requirement ("* 기본값 : 전체", "* 기관 생성 시 작성한 유형값
 	// 반영") and asserting those as page text fails cases the app handled correctly.
 	quotedLine: ["-", "•", "‧"],
+	// The names an app gives the pager arrows a sheet draws as `<<` `<` `>` `>>`. Probed live: those
+	// four buttons carry `aria-label="처음|이전|다음|끝"` and no text at all, so every candidate in the
+	// locator chain missed a control that was named the whole time.
+	pagerFirst: ["처음", "첫 페이지", "첫페이지", "맨 앞", "first", "first page"],
+	pagerPrev: ["이전", "이전 페이지", "이전페이지", "previous", "prev", "previous page"],
+	pagerNext: ["다음", "다음 페이지", "다음페이지", "next", "next page"],
+	pagerLast: ["끝", "마지막", "마지막 페이지", "맨 끝", "last", "last page"],
 };
 
 /** Each class's names, in both languages. `nonDigit` is "anything but digits", i.e. 숫자 외. */
