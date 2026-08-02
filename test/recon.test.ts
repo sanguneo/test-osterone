@@ -436,3 +436,41 @@ test("attemptLogin never retries a credential the app refused, however many retr
 	expect(res.rejected).toBe(true);
 	expect(notes).toEqual([]);
 });
+
+test("a login that fails because the app's own request failed says so, instead of blaming the account", async () => {
+	// Measured on a live outage: the fields filled, the button enabled, the click landed, and the app
+	// simply stayed put — while the login POST went to a different host and came back HTTP 500, which
+	// also failed its CORS preflight so the real request never left the browser. The note read
+	// "credentials refused or a slow login", which sends the reader to look at the account. Five probes
+	// to learn what the browser already knew.
+	const broke = ["POST https://api.example/login — HTTP 500", "POST https://api.example/login — net::ERR_FAILED"];
+	const page: Page = {
+		async goto() {},
+		async click() {},
+		async fill() {},
+		requestFailures: () => broke.splice(0, broke.length),
+		async snapshot() {
+			return {
+				url: "/login",
+				text: "아이디 비밀번호 로그인",
+				html: "<input placeholder='아이디' /><input placeholder='비밀번호' /><button>로그인</button>",
+			};
+		},
+	};
+	const res = await attemptLogin(page, { username: "u", password: "p" }, { settleTimeoutMs: 600, retries: 0 });
+	expect(res.ok).toBe(false);
+	expect(res.note).toContain("실패한 요청");
+	expect(res.note).toContain("HTTP 500");
+	// A transport failure is the app failing to answer, never the app saying no — so it stays retryable
+	// and never trips the permanent breaker meant for a refused credential.
+	expect(res.rejected).toBeFalsy();
+});
+
+test("a page that reports no failed requests reads exactly as it did before", async () => {
+	const silent = await attemptLogin(
+		new SpaLoginPage(0, false),
+		{ username: "u1", password: "nope" },
+		{ settleTimeoutMs: 1200 },
+	);
+	expect(silent.note).not.toContain("실패한 요청");
+});

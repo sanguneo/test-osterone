@@ -30,6 +30,17 @@ export interface RepairRequest {
 	url: string;
 	/** Optional screenshot (data URL) so the model can see a blocking popup the DOM does not explain. */
 	screenshot?: string;
+	/**
+	 * What the live page will actually respond to a click on, computed in the browser.
+	 *
+	 * The scan below reads the HTML string, so it only ever sees controls the markup declares —
+	 * buttons, links, headings, form fields. An app's dropdown trigger is routinely a `div` with a
+	 * class, no role and no aria-label, marked clickable by `cursor: pointer` alone; no amount of regex
+	 * finds it. Probed live: the account menu a case has to open is exactly that, it shows up here as
+	 * the username it wraps, and a plain text locator clicks it successfully. Without this the model has
+	 * no name to propose and grounding would refuse the right answer.
+	 */
+	clickables?: string[];
 	/** Case intent, so the repair serves the test's goal rather than the literal selector. */
 	title?: string;
 	steps?: string[];
@@ -56,7 +67,11 @@ function clickableLabels(scan: ReconPage): string[] {
  * Snap a proposed action onto the live page, or reject it. Returns the action rewritten with the
  * exact on-screen label (so the executor's locator gets the real text, not the model's paraphrase).
  */
-export function groundAction(candidate: PageAction, scan: ReconPage): PageAction | null {
+export function groundAction(
+	candidate: PageAction,
+	scan: ReconPage,
+	clickables: readonly string[] = [],
+): PageAction | null {
 	if (candidate.kind === "goto") {
 		const path = candidate.path.trim().split("#")[0] ?? "";
 		if (!path.startsWith("/")) return null;
@@ -64,7 +79,11 @@ export function groundAction(candidate: PageAction, scan: ReconPage): PageAction
 		return linked || path === "/" ? { kind: "goto", path } : null;
 	}
 	if (candidate.kind === "click") {
-		const label = pickFieldLabel(clickableLabels(scan), [candidate.target]);
+		// The markup's declared controls first, then what the browser reports as actually clickable — a
+		// `div` marked only by `cursor: pointer` is invisible to the scan and is routinely the very
+		// thing the case needs to press.
+		const label =
+			pickFieldLabel(clickableLabels(scan), [candidate.target]) ?? pickFieldLabel([...clickables], [candidate.target]);
 		return label ? { kind: "click", target: label } : null;
 	}
 	if (candidate.kind === "fill") {
@@ -188,7 +207,14 @@ export async function repairAction(model: ModelClient, req: RepairRequest): Prom
 	]
 		.filter(Boolean)
 		.join("\n");
-	const text = `${intent ? `${intent}\n\n` : ""}FAILED ACTION: ${describeAction(req.action)}\nERROR: ${req.error}\n\nLIVE PAGE SCAN:\n${renderPageForPrompt(scan)}`;
+	// The browser's own list of what a click reaches, alongside the markup scan. It carries the
+	// controls the scan structurally cannot see, and it is the vocabulary grounding checks the answer
+	// against — so naming one is the model's cheapest way to be accepted.
+	const rendered = renderPageForPrompt(scan);
+	const alsoClickable = (req.clickables ?? []).filter((c) => !rendered.includes(c));
+	const text =
+		`${intent ? `${intent}\n\n` : ""}FAILED ACTION: ${describeAction(req.action)}\nERROR: ${req.error}\n\nLIVE PAGE SCAN:\n${rendered}` +
+		(alsoClickable.length ? `\nALSO CLICKABLE (reported by the browser): ${alsoClickable.join(" | ")}` : "");
 	// Send the screenshot too when we have one: a blocking popup or a spinner is visible long
 	// before it is explainable from the DOM scan alone.
 	const content: string | ContentPart[] = req.screenshot
@@ -208,5 +234,5 @@ export async function repairAction(model: ModelClient, req: RepairRequest): Prom
 	const obj = extractJsonObject(reply);
 	if (!obj || obj.kind === "none") return null;
 	const candidate = parseCandidate(obj);
-	return candidate ? groundAction(candidate, scan) : null;
+	return candidate ? groundAction(candidate, scan, req.clickables ?? []) : null;
 }

@@ -163,3 +163,24 @@ test("pregroundAction: one box that opens with the target is not a choice the hu
 	const g = pregroundAction({ kind: "fill", target: "이메일", value: "x" }, two, "/find");
 	expect(g?.unambiguous).toBe(false);
 });
+
+test("groundAction accepts a control only the browser can see, and still refuses what is nowhere", () => {
+	// The markup scan reads an HTML string, so it only sees declared controls. An app's account menu is
+	// a div with a class, no role and no aria-label, marked clickable by `cursor: pointer` alone — the
+	// scan structurally cannot find it. Probed live: it reports as the username it wraps, and a plain
+	// text locator clicks it, opening the menu the case needs.
+	const html = `<main><button>검색</button><div class="header__user"><b>superadmin</b></div></main>`;
+	const scan = extractStructure(html, "/document");
+	expect(groundAction({ kind: "click", target: "superadmin" }, scan)).toBeNull();
+	expect(groundAction({ kind: "click", target: "superadmin" }, scan, ["검색", "superadmin"])).toEqual({
+		kind: "click",
+		target: "superadmin",
+	});
+	// The declared scan still wins when it can answer, so nothing about the existing path changes.
+	expect(groundAction({ kind: "click", target: "검색" }, scan, ["superadmin"])).toEqual({
+		kind: "click",
+		target: "검색",
+	});
+	// The widening stays grounded: a name on neither list is a model invention, and is refused.
+	expect(groundAction({ kind: "click", target: "결재 승인" }, scan, ["superadmin"])).toBeNull();
+});

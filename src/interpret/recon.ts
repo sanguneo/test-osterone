@@ -529,9 +529,24 @@ async function attemptLoginOnce(
 		if (!stillOnLoginForm(snap)) return { ok: true, note: "로그인 완료(로그인 폼 이탈 확인)" };
 	}
 	const shown = loginErrorMessage(lastText);
+	/**
+	 * What the browser saw underneath the screen.
+	 *
+	 * A form that simply stays put looks identical whether the app refused the credentials or its login
+	 * service is down, and the screen cannot tell them apart. Measured on a live outage: the fields
+	 * filled, the button enabled, the click landed, and the app sat there — while the login POST went to
+	 * a different host and came back `HTTP 500`, failing its CORS preflight so the real request never
+	 * left the browser. The note said "credentials refused or a slow login", which sent the reader
+	 * looking at the account.
+	 */
+	const broke = page.requestFailures?.() ?? [];
 	return {
 		ok: false,
-		note: `제출 후에도 로그인 화면에 머무름(자격증명 거부 또는 로그인 지연)${shown ? ` — 화면 메시지: ${shown}` : ""}`,
+		note:
+			`제출 후에도 로그인 화면에 머무름(자격증명 거부 또는 로그인 지연)${shown ? ` — 화면 메시지: ${shown}` : ""}` +
+			(broke.length ? ` — 실패한 요청: ${broke.slice(-2).join(" / ")}` : ""),
+		// A transport failure or a 5xx is the app failing to answer, never the app saying no: retrying is
+		// the right move, and marking it refused would stop the batch on an outage that may pass.
 		rejected: !!shown,
 	};
 }

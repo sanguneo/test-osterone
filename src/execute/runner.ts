@@ -474,6 +474,10 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 								html: seen.html,
 								url: seen.url,
 								screenshot: seen.screenshot,
+								// What the browser says a click reaches, which the markup scan cannot see on its
+								// own: without it the model has no name for a `div`-with-a-class trigger and
+								// grounding would refuse the one answer that works.
+								clickables: seen.clickables,
 								title: tc.title,
 								steps: tc.steps,
 								expected: tc.expected,

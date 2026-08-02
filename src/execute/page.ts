@@ -41,6 +41,18 @@ export interface PageSnapshot {
 	 * does not work — it passed.
 	 */
 	fieldLimits?: Record<string, number>;
+	/**
+	 * What the live screen will actually respond to a click on, named the way a reader would name it.
+	 *
+	 * Computed in the browser, which is the whole point: an app's dropdown trigger is often a `div`
+	 * with a class, no role, no aria-label and no text of its own, and the only thing marking it as
+	 * clickable is `cursor: pointer` — invisible to any scan that parses the HTML string. Probed live:
+	 * the account menu that a case has to open is exactly that shape, and it appears here as the
+	 * username it wraps, which a plain text locator then clicks successfully.
+	 *
+	 * Innermost wins, so a clickable row does not swallow the button inside it.
+	 */
+	clickables?: string[];
 	/** Optional base64 PNG data URL (real browser only) — evidence for human review. */
 	screenshot?: string;
 }
@@ -107,6 +119,20 @@ export interface Page {
 	 * login-feature case starts from a signed-out state instead of inheriting the shared session.
 	 */
 	resetSession?(): Promise<void>;
+	/**
+	 * Optional: requests the page made that never came back with a usable answer — a transport failure
+	 * or a 5xx — newest last, and cleared by the caller once read.
+	 *
+	 * A screen tells you nothing about why a submit did nothing. Measured on a live outage: the login
+	 * form filled correctly, the button enabled, the click landed, and the app simply stayed put — so
+	 * the engine reported "credentials refused or a slow login", because that is all a screen can say.
+	 * The truth was one layer below the DOM: the login POST goes to a different host and came back
+	 * `500 Internal server error`, which also failed its CORS preflight, so the browser never sent the
+	 * real request. Five probes to learn what the browser already knew.
+	 *
+	 * Diagnostic only. Nothing here decides a verdict; it lets a failure explain itself.
+	 */
+	requestFailures?(): string[];
 	/**
 	 * Optional per-case Playwright trace chunk hooks. Only the real `BrowserPage`
 	 * implements them; `FakePage` omits them so unit tests are unaffected.

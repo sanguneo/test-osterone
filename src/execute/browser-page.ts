@@ -222,6 +222,8 @@ export class BrowserPage implements Page {
 		private readonly ownsBrowser: boolean,
 		private readonly tracing: boolean,
 		private readonly phrases: Record<string, string[]>,
+		/** Ring of failed / 5xx requests, filled by listeners set up in `create`. */
+		private readonly failures: string[],
 	) {}
 
 	static async create(opts: BrowserPageOptions): Promise<BrowserPage> {
@@ -241,6 +243,27 @@ export class BrowserPage implements Page {
 		// retries, resetSession — into net::ERR_ABORTED, holding 66 of 98 cases two nights in a row at
 		// the same sheet position. Accepting is what a user does: leave the page, lose the draft.
 		pwPage.on("dialog", (d) => void (dialogAnswer(d.type()) === "accept" ? d.accept() : d.dismiss()).catch(() => {}));
+		/**
+		 * Keep the requests that came back with nothing usable, so a failure can explain itself.
+		 *
+		 * `ERR_ABORTED` is excluded: this engine cancels its own navigations routinely (a `goto` while
+		 * the app is mid-redirect), and reporting our own housekeeping as an app fault would bury the
+		 * one line that matters. A capped ring — this is a breadcrumb for a note, not a HAR.
+		 */
+		const failures: string[] = [];
+		const note = (line: string) => {
+			failures.push(line);
+			if (failures.length > 8) failures.shift();
+		};
+		pwPage.on("requestfailed", (req) => {
+			const err = req.failure()?.errorText ?? "failed";
+			if (err.includes("ERR_ABORTED")) return;
+			note(`${req.method()} ${req.url().slice(0, 120)} — ${err}`);
+		});
+		pwPage.on("response", (res) => {
+			if (res.status() < 500) return;
+			note(`${res.request().method()} ${res.url().slice(0, 120)} — HTTP ${res.status()}`);
+		});
 		return new BrowserPage(
 			browser,
 			context,
@@ -250,7 +273,13 @@ export class BrowserPage implements Page {
 			ownsBrowser,
 			tracing,
 			{ ...DEFAULT_PHRASES, ...(opts.phrases ?? {}) },
+			failures,
 		);
+	}
+
+	/** Failed / 5xx requests seen since the last read, newest last. Reading clears them. */
+	requestFailures(): string[] {
+		return this.failures.splice(0, this.failures.length);
 	}
 
 	async goto(path: string): Promise<void> {
@@ -727,6 +756,7 @@ export class BrowserPage implements Page {
 			fields: form.fields,
 			controls: form.controls,
 			fieldLimits: form.limits,
+			clickables: form.clickables,
 			screenshot,
 		};
 	}
@@ -751,6 +781,8 @@ export class BrowserPage implements Page {
 		controls: Record<string, boolean>;
 		limits: Record<string, number>;
 		writable: FieldEntry[];
+		/** Names of the things a click would actually reach — see `PageSnapshot.clickables`. */
+		clickables: string[];
 		/** Snapshot key of the element carrying `data-osteron-landed` — how a fill names where it wrote. */
 		landed?: string;
 	}> {
@@ -860,11 +892,34 @@ export class BrowserPage implements Page {
 							].filter(Boolean),
 						});
 					}
-					return { fields, controls, limits, writable, landed };
+					/**
+					 * What a click would actually reach, named as a reader would name it.
+					 *
+					 * `cursor: pointer` is the only marker on an app's `div`-with-a-class trigger, and a
+					 * computed style is exactly what a scan of the HTML string cannot see. Innermost wins so
+					 * a clickable row does not swallow the button inside it, and the name is the element's
+					 * own text — or its aria-label when it draws an icon instead.
+					 */
+					const clickable = (el: Element): boolean =>
+						el.tagName === "BUTTON" ||
+						el.tagName === "A" ||
+						el.getAttribute("role") === "button" ||
+						el.hasAttribute("onclick") ||
+						getComputedStyle(el).cursor === "pointer";
+					const clickables: string[] = [];
+					for (const el of document.querySelectorAll("*")) {
+						const r = el.getBoundingClientRect();
+						if (r.width < 6 || r.height < 6 || !clickable(el)) continue;
+						if ([...el.children].some((c) => clickable(c))) continue;
+						const own = text(el.textContent) || text(el.getAttribute("aria-label"));
+						// A long one is a paragraph that happens to be clickable, not a control's name.
+						if (own && own.length <= 40 && !clickables.includes(own)) clickables.push(own);
+					}
+					return { fields, controls, limits, writable, landed, clickables };
 				},
 				{ mark: tag, fillable: FILLABLE_CSS },
 			)
-			.catch(() => ({ fields: {}, controls: {}, limits: {}, writable: [] }));
+			.catch(() => ({ fields: {}, controls: {}, limits: {}, writable: [], clickables: [] }));
 	}
 
 	/** Self-heal candidate ranking: try the most specific locator first, widen to raw css last. */
