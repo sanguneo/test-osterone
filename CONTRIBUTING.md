@@ -37,7 +37,7 @@ bun run typecheck        # tsc --noEmit (engine)
 bun run studio:webcheck  # tsc for the web app
 bun run lint             # biome check
 bun run fmt              # biome format --write (fix style before committing)
-bun test                 # 298/298 must stay green
+bun test                 # 320/320 must stay green
 bun run studio:build     # only if you touched src/app/studio/web
 ```
 
@@ -68,7 +68,7 @@ run before it is called a regression; a moved invariant never is.
 ## Non-negotiable invariants
 
 1. **Determinism of the verdict.** Assertions are authored once and cached by `(caseId + ruleId + ruleVersion + caseHash)`; re-runs only *evaluate* the cache. No LLM at judge time. If a selector self-heals, the run may **not** auto-pass — it goes to `needs_review`. Don't touch `assertionCacheKey` / `baselineKey` formats without understanding the false-pass consequences.
-2. **Unit tests are deterministic and browserless.** They run against `FakePage` — no real Chromium. Keep it that way so `bun test` stays fast and CI needs no browser. Live-browser behavior is covered by fixtures/smoke, not the unit suite.
+2. **The engine suite is deterministic and browserless.** Engine tests run against `FakePage` — no real Chromium. Keep it that way so `bun test` stays fast and CI needs no browser. Live-browser behavior is covered by fixtures/smoke, not the unit suite. **Studio UI tests** are the one exception and still browserless: they render components against a DOM shim (happy-dom, registered by the `bunfig.toml` preload) — see `test/setup-dom.ts`. Two rules there, both learned the hard way: the shim may own the document but **not the network** (registering it replaced global `fetch` and broke the orchestration contract test, which drives a real HTTP worker), and it implements the DOM API but **not user-agent behavior** (a `<dialog>` opened with `showModal()` never raises `cancel` for Escape), so a UI test may only assert what a component does with an event, never what a browser would generate.
 3. **Never commit secrets or real app data.** Model tokens live in `~/.codex`; Studio project/run state lives in `~/.test-osterone/` — both outside the repo. Don't paste real credentials, tokens, or client URLs into code, tests, or fixtures (use neutral placeholders like `acme` / `admin`/`secret`).
 
 ## Style & tests

@@ -37,7 +37,7 @@ bun run typecheck        # tsc --noEmit (엔진)
 bun run studio:webcheck  # 웹 앱 tsc
 bun run lint             # biome check
 bun run fmt              # biome format --write (커밋 전 스타일 정리)
-bun test                 # 298/298 유지
+bun test                 # 320/320 유지
 bun run studio:build     # src/app/studio/web을 건드렸을 때만
 ```
 
@@ -59,7 +59,7 @@ bun run measure -- <projectId> <sheetId> [labelColumn]   # 터미널 2 · 기본
 ## 타협 불가 불변식
 
 1. **판정의 결정성.** assertion은 `(caseId + ruleId + ruleVersion + caseHash)`로 한 번 작성·캐시되고, 재실행은 캐시를 *평가만* 합니다. 판정 시점엔 LLM이 개입하지 않습니다. 셀렉터가 자가복구되면 자동 통과가 금지되고 `needs_review`로 갑니다. false-pass 결과를 이해하지 못한 채 `assertionCacheKey`·`baselineKey` 포맷을 건드리지 마세요.
-2. **유닛 테스트는 결정적이고 브라우저가 없습니다.** `FakePage`로 돌아 실제 Chromium이 필요 없습니다 — `bun test`가 빠르고 CI에 브라우저가 필요 없도록 유지하세요. 실브라우저 동작은 fixture/스모크가 커버하지 유닛 스위트가 아닙니다.
+2. **엔진 스위트는 결정적이고 브라우저가 없습니다.** 엔진 테스트는 `FakePage`로 돌아 실제 Chromium이 필요 없습니다 — `bun test`가 빠르고 CI에 브라우저가 필요 없도록 유지하세요. 실브라우저 동작은 fixture/스모크가 커버하지 유닛 스위트가 아닙니다. **Studio UI 테스트**만 예외인데 그것도 브라우저를 안 씁니다: DOM 셰임(happy-dom, `bunfig.toml` 프리로드로 등록)에 컴포넌트를 렌더합니다 — `test/setup-dom.ts` 참조. 거기 규칙 둘은 둘 다 비싸게 배운 것입니다. 셰임은 document는 가져도 **네트워크는 못 가집니다**(등록이 전역 `fetch`를 갈아치워 실제 HTTP 워커를 쓰는 오케스트레이션 계약 테스트가 깨졌습니다). 그리고 DOM API는 구현하지만 **UA 동작은 만들지 않습니다**(`showModal()`한 `<dialog>`는 Escape에 `cancel`을 올리지 않습니다) — 그래서 UI 테스트는 *컴포넌트가 이벤트를 받아 무엇을 하는지*만 물을 수 있고, 브라우저가 스스로 생성할 사건은 물을 수 없습니다.
 3. **시크릿·실데이터를 절대 커밋하지 마세요.** 모델 토큰은 `~/.codex`, Studio 프로젝트/실행 상태는 `~/.test-osterone/` — 둘 다 리포 밖입니다. 실제 자격증명·토큰·클라이언트 URL을 코드·테스트·fixture에 넣지 마세요(중립 플레이스홀더 `acme`·`admin`/`secret` 사용).
 
 ## 스타일 & 테스트
