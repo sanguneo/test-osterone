@@ -970,8 +970,15 @@ export async function runBatch(
 			}
 		};
 
-		for (const [index, tc] of cases.entries()) {
-			if (signal?.aborted) break;
+		/**
+		 * One case, start to finish: plan, session, setup, run, trace, review queue, result.
+		 *
+		 * Lifted out of the loop unchanged so a second caller can exist. A parallel lane needs exactly
+		 * this, with its own page — and the alternative, a second copy of it, is the shape this repo has
+		 * paid for twice (two results tables that drifted, two authoring funnels that diverged).
+		 */
+		const runCase = async (tc: NormalizedTC, index: number): Promise<void> => {
+			if (signal?.aborted) return;
 			const account = accountFor(tc);
 			// Top the window back up before waiting, so the model keeps working during this case.
 			authorAhead(index + 1);
@@ -980,7 +987,7 @@ export async function runBatch(
 			await prepareAuth(tc, account);
 			// Authored after auth so the setup starts from the session the case will actually run under.
 			const preparation = await preparationFor(tc);
-			if (signal?.aborted) break;
+			if (signal?.aborted) return;
 			const tracePath = trace ? tracePathFor(input.projectId ?? "sample", sid, tc.caseId) : undefined;
 			const r = await runScenario(tc, {
 				page,
@@ -1110,6 +1117,16 @@ export async function runBatch(
 			if (endsSignedOut(tc)) signedInAs = null;
 			// A case that aborted (or errored) left the shared page in an untrusted state — reset before the next one.
 			if (!input.sample && !signal?.aborted && (r.aborted || r.verdict === "error")) await recoverBetweenCases();
+		};
+
+		/**
+		 * Serial for now, and deliberately so: the write ledger that decides what may share a lane is
+		 * recorded by a run, so a sheet earns its partition by running once. `partitionForParallel`
+		 * reads that ledger and the lanes plug in here, each with its own page.
+		 */
+		for (const [index, tc] of cases.entries()) {
+			if (signal?.aborted) break;
+			await runCase(tc, index);
 		}
 	} finally {
 		await page.close().catch(() => {});
