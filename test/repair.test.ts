@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { extractStructure } from "../src/interpret/recon.ts";
-import { groundAction, pregroundAction, repairAction } from "../src/interpret/repair.ts";
+import { groundAction, pregroundAction, repairAction, unblockedTheOriginal } from "../src/interpret/repair.ts";
 import { FakeModelClient, type ModelMessage } from "../src/model/model-client.ts";
 
 /** A live screen whose labels drifted from the authored plan ("저장" is now "저장하기"). */
@@ -264,4 +264,34 @@ test("a repair may say it comes before the failed action, and the guard still ap
 			url: "/agency",
 		}),
 	).toBeNull();
+});
+
+test("an unblock is recognised from the screen, not from the model's word", () => {
+	// `when: "before"` asks the model to declare the relationship and the model is not reliable about
+	// it: across runs of one sheet the same setup was answered with the flag once and with a bare
+	// substitution the next time, which booked a username as the precondition step. The screen can
+	// settle the question without asking.
+	const closed = `<main><button>superadmin</button><button>확인</button></main>`;
+	const open = `<main><button>superadmin</button><button>확인</button><button>비밀번호 변경</button></main>`;
+	const failed = { kind: "click" as const, target: "비밀번호 변경" };
+	const trigger = { kind: "click" as const, target: "superadmin" };
+	// The fix uncovered the control that could not be found, so the original action still has to run.
+	expect(unblockedTheOriginal(failed, trigger, open, "/account")).toBe(true);
+	// It did not, so the fix stood in for the action.
+	expect(unblockedTheOriginal(failed, trigger, closed, "/account")).toBe(false);
+	// A rename is not an unblock. The sheet says 저장, the app paints 저장하기 — retrying the original
+	// after the fix already performed it would submit twice.
+	expect(
+		unblockedTheOriginal(
+			{ kind: "click", target: "저장" },
+			{ kind: "click", target: "저장하기" },
+			`<main><button>저장하기</button></main>`,
+			"/x",
+		),
+	).toBe(false);
+	// An unpainted screen is not evidence of anything. Unlike `targetOnScreen` there is no patient
+	// retry behind this decision — on the preparation ladder a wrong retry kills a completed setup.
+	expect(unblockedTheOriginal(failed, trigger, "<div id=app></div>", "/account")).toBe(false);
+	// A navigation has no target to re-aim.
+	expect(unblockedTheOriginal({ kind: "goto", path: "/x" }, trigger, open, "/account")).toBe(false);
 });

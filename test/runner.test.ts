@@ -1700,8 +1700,11 @@ class MenuPage implements Page {
 		this.did.push(`fill ${target}=${value}`);
 	}
 	async snapshot(): Promise<PageSnapshot> {
-		const text = this.did.join(" · ");
-		return { url: "/app", text, html: `<main>${text}</main>` };
+		// A real DOM reflecting the menu's state, so the runner's evidence check can see what is
+		// currently reachable — the item only exists once the trigger has opened it.
+		const buttons = [this.trigger, "확인", ...(this.open ? [this.item] : [])];
+		const html = `<main>${buttons.map((b) => `<button>${b}</button>`).join("")}</main>`;
+		return { url: "/app", text: this.did.join(" · "), html };
 	}
 }
 
@@ -1800,4 +1803,60 @@ test("a `before` repair on a case's own step retries the original, then stands i
 	expect(r2.aborted).toBeUndefined();
 	expect(r2.healEvents[0]).toContain("'검색'(click)로 교정해 진행했습니다");
 	expect(r2.verdict).toBe("needs_review");
+});
+
+test("a substitution that uncovers the failed control is treated as an unblock, unasked", async () => {
+	// The model is not reliable about declaring `before`: across runs of one sheet the same setup was
+	// answered with the flag once and with a bare substitution the next time, which booked a username
+	// as the precondition step and left the case running on a screen the dialog never opened on.
+	// Here the repair claims nothing (`before: false`) and the screen is asked instead.
+	const page = new MenuPage("superadmin", "비밀번호 변경");
+	const r = await runScenario(
+		loginTC({ caseId: "TC-prep-evidence", contentHash: "h-prep-evidence", steps: [], expected: "" }),
+		{
+			page,
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			recoveryDelayMs: 0,
+			preparation: [{ kind: "click", target: "비밀번호 변경" }],
+			plan: {
+				actions: [{ kind: "click", target: "확인" }],
+				assertions: [{ kind: "textIncludes", value: "click 확인" }],
+			},
+			repair: async () => ({ action: { kind: "click", target: "superadmin" }, before: false }),
+		},
+	);
+	// The trigger opened the menu, so the setup step itself ran — it was not replaced by the trigger.
+	expect(page.did).toEqual(["click superadmin", "click 비밀번호 변경", "click 확인"]);
+	expect(r.healEvents.join()).toContain("'superadmin'(click)를 먼저 거쳐 사전조건을 진행했습니다");
+	expect(r.healEvents.join()).not.toContain("precondition:");
+	expect(r.verdict).toBe("needs_review");
+});
+
+test("a substitution that does not uncover the failed control stays a substitution", async () => {
+	// 확인 is on screen the whole time and is not what the setup asked for; clicking it does not open
+	// the menu, so the failed control is still absent and the fix stands in — the behaviour every
+	// repair had before this rung existed.
+	const page = new MenuPage("superadmin", "비밀번호 변경");
+	const r = await runScenario(
+		loginTC({ caseId: "TC-prep-subst", contentHash: "h-prep-subst", steps: [], expected: "" }),
+		{
+			page,
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			recoveryDelayMs: 0,
+			preparation: [{ kind: "click", target: "비밀번호 변경" }],
+			plan: { actions: [{ kind: "click", target: "확인" }], assertions: [] },
+			repair: async () => ({ action: { kind: "click", target: "확인" }, before: false }),
+		},
+	);
+	expect(page.did).toEqual(["click 확인", "click 확인"]); // the fix, then the case's own step
+	expect(r.healEvents.join()).toContain("'확인'(click)로 사전조건을 진행했습니다");
+	expect(r.healEvents.join()).not.toContain("먼저 거쳐");
 });

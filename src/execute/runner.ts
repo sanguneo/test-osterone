@@ -27,7 +27,13 @@ import {
 	type RequirementCoverage,
 	requirementCoverage,
 } from "../interpret/interpret.ts";
-import { pregroundAction, type Repair, type RepairRequest, targetOnScreen } from "../interpret/repair.ts";
+import {
+	pregroundAction,
+	type Repair,
+	type RepairRequest,
+	targetOnScreen,
+	unblockedTheOriginal,
+} from "../interpret/repair.ts";
 import type { InterpretationRule } from "../interpret/rule.ts";
 import { type VisionCache, visionCacheKey } from "../interpret/vision.ts";
 import type { BaselineStore } from "../judge/baseline.ts";
@@ -347,6 +353,19 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				return err as Error;
 			}
 		};
+		/**
+		 * Is this repair an unblock rather than a substitution — so the failed action still has to run?
+		 *
+		 * The model may say so (`before`), and when it does not, the screen is asked instead: one cheap
+		 * DOM read after the fix, and if the control that could not be found is now there, the fix
+		 * uncovered it. Evidence beats the declaration because the declaration is not reliable — the
+		 * same setup was answered both ways across runs of one sheet.
+		 */
+		const openedTheWay = async (failed: PageAction, fix: Repair): Promise<boolean> => {
+			if (fix.before) return true;
+			const after = await opts.page.snapshot({ screenshot: false }).catch(() => null);
+			return !!after && unblockedTheOriginal(failed, fix.action, after.html, after.url);
+		};
 		let repairsLeft = opts.repair ? (opts.repairBudget ?? 2) : 0;
 		/**
 		 * Setup repairs come out of their own budget, not the case's.
@@ -475,21 +494,22 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 					: null;
 				if (fixed) {
 					const repairErr = await perform(fixed.action);
-					// A `before` repair only opened the way (a menu, a tab): the setup step is the retry of
-					// the original action, and booking the trigger click as the step itself is how a case
-					// starts on a screen its precondition never reached.
-					const retryErr = !repairErr && fixed.before ? await perform(step) : null;
+					// A repair that only opened the way (a menu, a tab) leaves the setup step still to do:
+					// the step is the retry of the original action, and booking the trigger click as the
+					// step itself is how a case starts on a screen its precondition never reached.
+					const unblock = !repairErr && (await openedTheWay(step, fixed));
+					const retryErr = unblock ? await perform(step) : null;
 					if (repairErr) err = repairErr;
 					else if (!retryErr) {
 						healEvents.push(
-							fixed.before
+							unblock
 								? `repair: ${targetOf(step)} — AI가 화면을 다시 읽고 '${targetOf(fixed.action)}'(${fixed.action.kind})를 먼저 거쳐 사전조건을 진행했습니다`
 								: `repair: ${targetOf(step)} — AI가 화면을 다시 읽고 '${targetOf(fixed.action)}'(${fixed.action.kind})로 사전조건을 진행했습니다`,
 						);
 						err = null;
 					}
-					// A `before` repair whose retry still failed leaves the original error standing: the
-					// setup step did not happen, whatever the trigger click managed to open.
+					// An unblock whose retry still failed leaves the original error standing: the setup step
+					// did not happen, whatever the trigger click managed to open.
 				}
 			}
 			if (err) {
@@ -612,14 +632,15 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 					: null;
 				if (fixed) {
 					const repairErr = await perform(fixed.action);
-					// A `before` repair claims it only opened the way, so the step is the retry of the
-					// original action — try that, and report it as the unblock it said it was.
-					const retryErr = !repairErr && fixed.before ? await perform(action) : null;
+					// A repair that only opened the way leaves the case's own step still to do — retry the
+					// original, and report it as the unblock it was.
+					const unblock = !repairErr && (await openedTheWay(action, fixed));
+					const retryErr = unblock ? await perform(action) : null;
 					if (!repairErr) {
 						// Repaired, not hidden: still a heal event, so the verdict stays capped at needs_review.
 						//
-						// A `before` whose retry failed falls back to standing in for the action, which is
-						// what every repair did before the flag existed. Measured over 98 cases: honouring
+						// An unblock whose retry failed falls back to standing in for the action, which is
+						// what every repair did before this rung existed. Measured over 98 cases: honouring
 						// the claim strictly here cost six cases the rest of their steps and bought no
 						// verdict — the model simply relabels a substitution it used to offer plainly. A
 						// case action is already under the abort guard and the heal cap, so a fix that
@@ -627,7 +648,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 						// gets no fallback: booking a trigger as the setup step leaves the case running on a
 						// screen its precondition never reached, with nothing verified at all.
 						healEvents.push(
-							fixed.before && !retryErr
+							unblock && !retryErr
 								? `repair: ${targetOf(action)} — AI가 화면을 다시 읽고 '${targetOf(fixed.action)}'(${fixed.action.kind})를 먼저 거쳐 원래 동작을 진행했습니다`
 								: `repair: ${targetOf(action)} — AI가 화면을 다시 읽고 '${targetOf(fixed.action)}'(${fixed.action.kind})로 교정해 진행했습니다`,
 						);

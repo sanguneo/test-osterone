@@ -186,6 +186,32 @@ export function targetOnScreen(action: PageAction, html: string, url: string): b
 	return pickFieldLabel(labels, [action.target]) !== null;
 }
 
+/**
+ * Did the repair merely *open the way* to the action that failed, rather than replace it?
+ *
+ * `when: "before"` asks the model to declare this, and the model is not reliable about it: measured
+ * across runs of the same sheet, the same setup was sometimes answered with the flag (the dialog
+ * opened, the real step ran) and sometimes with a bare substitution that booked a username as the
+ * step. The screen can settle the question without asking — if the control that could not be found
+ * is *now* on screen, the fix uncovered it.
+ *
+ * Two conditions, both load-bearing:
+ *  - the fix must not answer to the failed target itself. That is a rename (a sheet says 저장, the app
+ *    paints 저장하기), and retrying it would perform the same action twice — a double submit.
+ *  - the screen must positively carry the failed target. Unlike `targetOnScreen`, an unpainted page
+ *    answers **false** here: this decision has no patient retry behind it, and on the preparation
+ *    ladder a wrong retry turns a completed setup into a dead one.
+ */
+export function unblockedTheOriginal(failed: PageAction, fix: PageAction, html: string, url: string): boolean {
+	if (failed.kind !== "click" && failed.kind !== "fill") return false;
+	const fixTarget = fix.kind === "click" || fix.kind === "fill" ? fix.target : "";
+	if (fixTarget && pickFieldLabel([fixTarget], [failed.target]) !== null) return false;
+	const scan = extractStructure(html, url);
+	const labels = [...clickableLabels(scan), ...scan.formFields];
+	if (labels.length === 0) return false;
+	return pickFieldLabel(labels, [failed.target]) !== null;
+}
+
 /** Read one action out of the model's JSON reply (shape-checked, before grounding). */
 function parseCandidate(obj: Record<string, unknown>): PageAction | null {
 	if (obj.kind === "goto" && typeof obj.path === "string" && obj.path) return { kind: "goto", path: obj.path };
