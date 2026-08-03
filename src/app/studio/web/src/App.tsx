@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
-import { ProjectHome } from "./components/ProjectHome";
 import { DashboardPanel } from "./components/DashboardPanel";
 import { Icon } from "./components/Icon";
 import { ModalShell } from "./components/ModalShell";
 import { ModelPanel } from "./components/ModelPanel";
+import { ProjectHome } from "./components/ProjectHome";
 import { ProjectsPanel } from "./components/ProjectsPanel";
 import { ReviewPanel } from "./components/ReviewPanel";
 import { RulesPanel } from "./components/RulesPanel";
 import { RunPanel } from "./components/RunPanel";
 import { SheetEditorModal } from "./components/SheetEditorModal";
-import { WelcomeScreen } from "./components/WelcomeScreen";
 import { StudioChrome, type StudioTab } from "./components/StudioChrome";
+import { WelcomeScreen } from "./components/WelcomeScreen";
+import { getLang, useLang } from "./i18n";
 import type { Project, Status, TestSheet } from "./types";
-import { useLang, getLang } from "./i18n";
 
 const S = {
 	ko: {
@@ -137,6 +137,7 @@ export function App() {
 		probe.remove();
 		document.documentElement.style.setProperty("--sbw", `${width}px`);
 	}, []);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: runSequence and reviewCount are deliberate triggers, not reads — a finished run or an approval has to re-count the queue.
 	useEffect(() => {
 		api.reviewQueue(selectedProjectId, selectedSheetId || undefined).then((queue) => setNavReviewCount(queue.length)).catch(() => {});
 	}, [selectedProjectId, selectedSheetId, runSequence, reviewCount]);

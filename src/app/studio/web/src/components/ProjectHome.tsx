@@ -1,5 +1,5 @@
-import type { Project } from "../types";
 import { useLang } from "../i18n";
+import type { Project } from "../types";
 import { EmptyMotif } from "./DashboardParts";
 import { Icon } from "./Icon";
 

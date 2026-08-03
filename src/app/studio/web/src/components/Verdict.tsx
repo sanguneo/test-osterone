@@ -1,5 +1,5 @@
-import { selfHealPrefix, useLang } from "../i18n";
 import type { Lang } from "../i18n";
+import { selfHealPrefix, useLang } from "../i18n";
 import type { Verdict } from "../types";
 import { Icon } from "./Icon";
 
@@ -19,6 +19,7 @@ const V_COLOR: Record<Verdict, string> = {
 const VERDICTS: Verdict[] = ["pass", "fail", "needs_review", "error"];
 
 /** Playwright error strings carry ANSI color codes; strip them before display. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the ESC byte is what this matches — an ANSI stripper cannot be written without it.
 export const stripAnsi = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, "");
 
 /** Verdict as a 6px status dot + label — the app-wide standard (dots, not badges). */

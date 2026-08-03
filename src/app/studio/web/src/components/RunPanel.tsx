@@ -187,6 +187,7 @@ export function RunPanel({ project, selId, selSheetId, onDone, goTo }: { readonl
 	onDoneRef.current = onDone;
 	const sheet = useMemo(() => project?.sheets.find((item) => item.id === selSheetId) ?? project?.sheets[0], [project, selSheetId]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: keyed to the project change alone; setAi is a setter, not a read.
 	useEffect(() => setAi(true), [project]); // AI step interpretation is always on (natural-language steps need it)
 	const loadPreview = useCallback(() => {
 		if (!project) return;

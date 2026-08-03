@@ -91,6 +91,7 @@ textarea:focus-visible {
 
 button:disabled { cursor: not-allowed; opacity: 0.42; }
 
+/* biome-ignore lint/complexity/noImportantStyles: panels stay mounted and are hidden with [hidden] (see DESIGN-NOTES §9, 2026-07-20), so this has to beat every display rule a panel sets on itself. */
 [hidden] { display: none !important; }
 
 ::selection { background: var(--lime); color: var(--lime-ink); }
@@ -137,7 +138,6 @@ h3 { letter-spacing: -0.025em; line-height: 1.2; }
 .skip-link:focus { transform: translateY(0); }
 
 @media (prefers-reduced-motion: reduce) {
-	*,
-	*::before,
-	*::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+	/* biome-ignore lint/complexity/noImportantStyles: honouring prefers-reduced-motion means overriding whatever a component declared; that is what the media query is for. */
+	*, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
 }

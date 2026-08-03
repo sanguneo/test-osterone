@@ -1,5 +1,5 @@
-import type { Account, TestSheet } from "../types";
 import { useLang } from "../i18n";
+import type { Account, TestSheet } from "../types";
 import { Icon } from "./Icon";
 
 const S = {

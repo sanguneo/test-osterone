@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { useLang } from "../i18n";
 import type { Project, TestSheet } from "../types";
 import { Icon, type IconName } from "./Icon";
 import { LangToggle } from "./LangToggle";
-import { useLang } from "../i18n";
 
 const S = {
 	ko: {
@@ -152,10 +152,12 @@ export function StudioChrome(props: StudioChromeProps) {
 	const visibleProjects = useMemo(() => props.projects.filter((project) => project.name.toLocaleLowerCase().includes(projectQuery.trim().toLocaleLowerCase())), [projectQuery, props.projects]);
 	const visibleSheets = useMemo(() => (selected?.sheets ?? []).filter((sheet) => sheet.name.toLocaleLowerCase().includes(sheetQuery.trim().toLocaleLowerCase())), [selected, sheetQuery]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: keyed to the project change alone — adding the refs or the setter would re-scroll the rail and clear the sheet search on unrelated renders.
 	useEffect(() => {
 		revealContextItem(activeProjectRef.current);
 		setSheetQuery("");
 	}, [props.selectedProjectId]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: keyed to the sheet change alone — adding the ref would re-scroll the rail on unrelated renders.
 	useEffect(() => {
 		revealContextItem(activeSheetRef.current);
 	}, [props.selectedSheetId]);

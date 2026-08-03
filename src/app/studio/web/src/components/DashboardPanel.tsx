@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
-import { useLang } from "../i18n";
 import type { Lang } from "../i18n";
-import type { CaseView, Project, RunView, Verdict } from "../types";
+import { useLang } from "../i18n";
+import type { Project, RunView, Verdict } from "../types";
 import { CaseTable } from "./CaseTable";
 import { DashboardSkeleton, Spark } from "./DashboardParts";
 import { Icon } from "./Icon";

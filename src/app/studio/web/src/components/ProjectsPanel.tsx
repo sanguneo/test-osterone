@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { getLang, useLang } from "../i18n";
 import type { Project } from "../types";
-import { ProjectEnvironmentSection, type ProjectDraft } from "./ProjectFormSections";
+import { type ProjectDraft, ProjectEnvironmentSection } from "./ProjectFormSections";
 
 const S = {
 	ko: {

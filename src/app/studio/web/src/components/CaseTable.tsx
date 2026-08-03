@@ -123,6 +123,7 @@ export function CaseTable({
 									<td className="num">{result.confidence.toFixed(2)}</td>
 									<td>
 										{result.assertions.map((assertion, index) => (
+											// biome-ignore lint/suspicious/noArrayIndexKey: one case's assertion results are an ordered, append-only list with no id of their own, so caseId + position is a stable identity.
 											<div className="detail assertion-detail" key={`${result.caseId}-${index}`}>
 												<span className={assertion.passed ? "o" : "x"}>
 													<Icon name={assertion.passed ? "check" : "x"} size={14} />
@@ -153,6 +154,7 @@ export function CaseTable({
 														<span className="lbl">{t.stepsLabel}</span>
 														<ol className="rev-steps">
 															{result.steps.map((s, i) => (
+																// biome-ignore lint/suspicious/noArrayIndexKey: sheet steps are an ordered list the row never reorders; caseId + position is their only stable identity.
 																<li key={`${result.caseId}-tcs${i}`}>{stripStepOrdinal(s)}</li>
 															))}
 														</ol>

@@ -1,5 +1,5 @@
-import { parseCsv, toCsv } from "../../../../../intake/csv.ts";
 import { useCallback, useEffect, useState } from "react";
+import { parseCsv, toCsv } from "../../../../../intake/csv.ts";
 import { api } from "../api";
 import { getLang, useLang } from "../i18n";
 import type { Account, AnalyzeResult, ChatMsg, PreviewResult, TestSheet, XlsxSheet } from "../types";
@@ -315,10 +315,9 @@ export function SheetEditorModal({
 			.finally(() => setInterpretLoading(false));
 	}, [buildSheet, kind, sheetUrl, csvText, projectId, sheetId, baseUrl]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: loadInterpretation is deliberately excluded — it changes on every keystroke in the sheet fields, and depending on it would re-fire the interpretation while the user types. Reaching step 2 is the trigger.
 	useEffect(() => {
 		if (!editSheet && step === 2) loadInterpretation();
-		// step change alone should trigger the load; loadInterpretation is intentionally excluded to avoid re-firing on every keystroke.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [step, editSheet]);
 
 	const canProceedStep1 = name.trim().length > 0 && (kind === "sheet" ? sheetUrl.trim().length > 0 : csvText.trim().length > 0);
@@ -602,6 +601,7 @@ export function SheetEditorModal({
 							</div>
 						)}
 						{messages.map((m, index) => (
+							// biome-ignore lint/suspicious/noArrayIndexKey: the conversation is append-only and never reorders; position plus the message is its identity.
 							<div key={`${index}:${m.role}:${m.content}`} className={`msg ${m.role === "user" ? "u" : "a"}`}>
 								{m.content}
 							</div>

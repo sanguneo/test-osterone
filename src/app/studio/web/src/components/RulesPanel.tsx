@@ -178,10 +178,12 @@ export function RulesPanel({
 	const ruleVersion = status?.ruleVersion ?? 1;
 	const sheet = project?.sheets.find((item) => item.id === selSheetId) ?? project?.sheets[0];
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: selSheetId is a deliberate trigger, not a read — switching sheets must reset the textarea even when the fetched context string is identical.
 	useEffect(() => {
 		setAppCtx(status?.appContext ?? "");
 	}, [status?.appContext, selSheetId]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: selSheetId is a deliberate trigger, not a read — switching sheets must reset the textarea even when the fetched context string is identical.
 	useEffect(() => {
 		setCodeCtx(status?.codeContext ?? "");
 	}, [status?.codeContext, selSheetId]);
@@ -411,13 +413,17 @@ export function RulesPanel({
 							</div>
 						)}
 						{chat.map((message, index) => (
+							// biome-ignore lint/suspicious/noArrayIndexKey: the conversation is append-only and never reorders, so position is the message's identity — it has no id.
 							<div key={index} className={`msg ${message.role === "user" ? "u" : "a"}`}>
 								{message.content}
 							</div>
 						))}
 					</div>
 					<div className="warns">
-						{warnings.map((warning) => <span key={warning} className="warn"><Icon name="warning" size={14} /> {warning}</span>)}
+						{warnings.map((warning, index) => (
+							// biome-ignore lint/suspicious/noArrayIndexKey: warnings are an ordered list with no id; the text alone collided when the engine raised the same warning twice.
+							<span key={`${index}:${warning}`} className="warn"><Icon name="warning" size={14} /> {warning}</span>
+						))}
 					</div>
 					<label className="composer-label" htmlFor="rule-instruction">{t.ruleInstruction}</label>
 					<div className="rule-composer">

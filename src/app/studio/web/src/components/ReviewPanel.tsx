@@ -311,6 +311,7 @@ export function ReviewPanel({
 										<span className="lbl">{t.stepsLabel}</span>
 										<ol className="rev-steps">
 											{it.steps?.map((s, i) => (
+												// biome-ignore lint/suspicious/noArrayIndexKey: sheet steps are an ordered list this queue never reorders; caseId + position is their only stable identity.
 												<li key={`${it.caseId}-s${i}`}>{stripStepOrdinal(s)}</li>
 											))}
 										</ol>
@@ -340,6 +341,7 @@ export function ReviewPanel({
 							<span className="lbl">{t.checksLabel}</span>
 							{it.assertions?.length ? (
 								it.assertions.map((assertion, index) => (
+									// biome-ignore lint/suspicious/noArrayIndexKey: one case's assertion results are an ordered, append-only list with no id of their own, so caseId + position is a stable identity.
 									<div className="detail assertion-detail" key={`${it.caseId}-a${index}`}>
 										<span className={assertion.passed ? "o" : "x"}>
 											<Icon name={assertion.passed ? "check" : "x"} size={14} />
