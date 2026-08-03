@@ -1615,3 +1615,63 @@ test("with settleMs off the ladder is what it always was", async () => {
 	expect(absent.tried).toEqual(["저장"]);
 	expect(r.aborted).toBe(true);
 });
+
+test("setup gets the recovery ladder the case's own steps get", async () => {
+	// It used to get two locator attempts and nothing else. Measured over 98 cases: 21 preparation
+	// failures, 18 of them three clicks that timed out at the full budget — a ladder with its top
+	// rungs missing. A setup that cannot finish holds the case with nothing tested at all.
+	const page = new LadderPage([], ["신규 계정 생성"]);
+	const repaired: string[] = [];
+	const r = await runScenario(
+		loginTC({ caseId: "TC-prep-heal", contentHash: "h-prep-heal", steps: [], expected: "" }),
+		{
+			page,
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			recoveryDelayMs: 0,
+			preparation: [{ kind: "click", target: "신규 계정 생성" }],
+			plan: {
+				actions: [{ kind: "click", target: "확인" }],
+				assertions: [{ kind: "textIncludes", value: "click 확인" }],
+			},
+			repair: async (req) => {
+				repaired.push(req.action.kind === "click" ? req.action.target : req.action.kind);
+				return { kind: "click", target: "계정 생성" };
+			},
+		},
+	);
+	// The setup was repaired, so the case actually ran instead of being held with nothing tested.
+	expect(repaired).toEqual(["신규 계정 생성"]);
+	expect(page.did).toEqual(["click 계정 생성", "click 확인"]);
+	expect(r.healEvents.join()).toContain("사전조건을 진행했습니다");
+	expect(r.healEvents.join()).not.toContain("precondition:");
+	// Still a heal, so the verdict stays capped — a repaired setup is not a silent pass.
+	expect(r.verdict).toBe("needs_review");
+	expect(r.assertions.every((a) => a.passed)).toBe(true);
+});
+
+test("a setup nothing can rescue still holds the case, and its own steps never run", async () => {
+	const page = new LadderPage([], ["신규 계정 생성"]);
+	const r = await runScenario(
+		loginTC({ caseId: "TC-prep-dead", contentHash: "h-prep-dead", steps: [], expected: "" }),
+		{
+			page,
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			recoveryDelayMs: 0,
+			preparation: [{ kind: "click", target: "신규 계정 생성" }],
+			plan: { actions: [{ kind: "click", target: "확인" }], assertions: [] },
+			repair: async () => null, // the model declines rather than guessing
+		},
+	);
+	expect(r.healEvents[0]).toContain("precondition:");
+	expect(page.did).toEqual([]);
+	expect(r.verdict).toBe("needs_review");
+	expect(r.executedAsWritten).toBe(false);
+});

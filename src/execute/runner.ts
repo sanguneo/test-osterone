@@ -346,6 +346,16 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			}
 		};
 		let repairsLeft = opts.repair ? (opts.repairBudget ?? 2) : 0;
+		/**
+		 * Setup repairs come out of their own budget, not the case's.
+		 *
+		 * Sharing one pot meant a rescued precondition could leave the case's own failing step with
+		 * nothing left to spend — measured, giving setup the ladder halved `precondition unmet` (21 to
+		 * 11) while `ai repair` went 7 to 22 and two cases stopped agreeing, because the budget moved
+		 * rather than grew. One is enough for setup: a precondition is two or three actions, and a
+		 * second failure in the same setup is a sheet problem, not a drifted label.
+		 */
+		let prepRepairsLeft = opts.repair ? 1 : 0;
 		// Start the case's write ledger empty. The reader clears as it reads, and a sign-in or the tail
 		// of the previous case happens outside this function — without this, their POSTs would be
 		// counted against whichever case ran next.
@@ -420,9 +430,58 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		let preparationFailure: string | undefined;
 		for (const prep of opts.preparation ?? []) {
 			if (prep.kind === "verify" || prep.kind === "unknown") continue;
-			// Full patience on the retry: setup is not the thing under test, and a slow popup is not a
-			// finding about the app.
-			const err = (await perform(prep, opts.firstTryMs ?? 1200)) ? await perform(prep) : null;
+			/**
+			 * Setup gets the same recovery ladder the case's own steps get.
+			 *
+			 * It used to get two locator attempts and nothing else — no label snapping, no overlay
+			 * clearing, no repair — while a case action that failed identically was offered all three.
+			 * Measured over 98 cases: 21 preparation failures, and 18 of them were three clicks that
+			 * timed out at the full budget, which is what a ladder with its top rungs missing looks
+			 * like. A setup that cannot finish holds the case with nothing tested at all, so the rungs
+			 * are worth more here than anywhere else.
+			 */
+			let step: typeof prep = prep;
+			if (lastSeen) {
+				const g = pregroundAction(step, lastSeen.html, lastSeen.url);
+				// Grounding may return any action kind; setup only ever performs the four it was given.
+				if (g && g.action.kind !== "verify" && g.action.kind !== "unknown") step = g.action;
+			}
+			let err = await perform(step, opts.firstTryMs ?? 1200);
+			if (err && opts.page.dismissOverlays) {
+				await opts.page.dismissOverlays(targetOf(step)).catch(() => {});
+				await new Promise((r) => setTimeout(r, opts.recoveryDelayMs ?? 400));
+			}
+			if (err) err = await perform(step);
+			if (err && opts.repair && prepRepairsLeft > 0) {
+				prepRepairsLeft--;
+				const seen = await opts.page.snapshot().catch(() => null);
+				const fixed = seen
+					? await opts
+							.repair({
+								action: step,
+								error: err.message,
+								html: seen.html,
+								url: seen.url,
+								screenshot: seen.screenshot,
+								clickables: seen.clickables,
+								phrases: opts.rule.phrases,
+								title: tc.title,
+								steps: tc.steps,
+								expected: tc.expected,
+							})
+							.catch(() => null)
+					: null;
+				if (fixed) {
+					const repairErr = await perform(fixed);
+					if (repairErr) err = repairErr;
+					else {
+						healEvents.push(
+							`repair: ${targetOf(step)} — AI가 화면을 다시 읽고 '${targetOf(fixed)}'(${fixed.kind})로 사전조건을 진행했습니다`,
+						);
+						err = null;
+					}
+				}
+			}
 			if (err) {
 				preparationFailure = `${prep.kind}: ${targetOf(prep)} — ${err.message.split("\n")[0] ?? "실패"}`;
 				executedAsWritten = false;
