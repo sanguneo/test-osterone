@@ -36,10 +36,11 @@ CI가 정확히 이것들을 돌립니다. 로컬에서 먼저 돌려 루프를 
 bun run typecheck        # tsc --noEmit (엔진)
 bun run studio:webcheck  # 웹 앱 tsc
 bun run lint             # biome check
-bun run fmt              # biome format --write (커밋 전 스타일 정리)
 bun test                 # 320/320 유지
-bun run studio:build     # src/app/studio/web을 건드렸을 때만
+bun run studio:build     # UI 빌드도 게이트입니다 — 이걸 컴파일하는 곳이 달리 없습니다
 ```
+
+`bun run fmt`(`biome format --write`)은 게이트가 아니라 **고치는 도구**입니다: `bun run lint`가 이미 포맷으로 실패하므로, CI가 알려주기 전에 커밋 전에 돌리세요.
 
 ## 사람 판정 대비 실측
 

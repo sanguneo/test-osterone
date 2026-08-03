@@ -20,7 +20,8 @@ jobs:
         with:
           bun-version: latest
 
-      # Unit suites use FakePage — no real browser needed, so skip the Chromium download.
+      # No real browser is needed: engine tests run against FakePage and the Studio UI tests render
+      # against a DOM shim (happy-dom, a devDependency). So the Chromium download stays skipped.
       - run: bun install --ignore-scripts
 
       # Gate the release on the same checks CI enforces on main.
@@ -28,6 +29,9 @@ jobs:
       - run: bun run studio:webcheck
       - run: bun run lint
       - run: bun test
+      # The released binary is the thin CLI and does not carry the UI, but a release must not be cut
+      # from a tree whose UI does not build.
+      - run: bun run studio:build
 
       # One standalone binary per platform. `bun build --compile` bundles the CLI (which now
       # includes the star prompt) together with the Bun runtime, so each artifact runs with no

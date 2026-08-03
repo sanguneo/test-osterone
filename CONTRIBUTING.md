@@ -36,10 +36,12 @@ CI runs exactly these; run them locally first so the loop is fast:
 bun run typecheck        # tsc --noEmit (engine)
 bun run studio:webcheck  # tsc for the web app
 bun run lint             # biome check
-bun run fmt              # biome format --write (fix style before committing)
 bun test                 # 320/320 must stay green
-bun run studio:build     # only if you touched src/app/studio/web
+bun run studio:build     # the UI build is a gate too — nothing else compiles it
 ```
+
+`bun run fmt` (`biome format --write`) is the fixer, not a gate: `bun run lint` already fails on
+formatting, so run `fmt` before committing rather than after CI tells you.
 
 ## Measuring against human verdicts
 
