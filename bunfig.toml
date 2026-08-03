@@ -1,0 +1,5 @@
+[test]
+# The UI tests need DOM globals before React is imported, so the shim is registered in a preload.
+# Engine tests are unaffected: they never touch `document`, and registering the globals costs a few ms
+# once per run rather than per file.
+preload = ["./test/setup-dom.ts"]
