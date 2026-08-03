@@ -269,7 +269,7 @@ const withVision = (tc: NormalizedTC, agrees: boolean, extra: Partial<RunOptions
 
 test("vision may not turn a deterministically failed assertion into a pass", async () => {
 	// Measured on a live sheet: vision flipped five cases a human had marked Fail into `pass`, with
-	// details like `text lacks "dxsupport@aegisep.com" · 비전 확인`. The text was genuinely absent.
+	// details like `text lacks "support@acme.example" · 비전 확인`. The text was genuinely absent.
 	// A model's read of a screenshot is not a verdict — it routes the case to a human instead.
 	const tc = loginTC({ contentHash: "h-vision-1", steps: ["Navigate to /login"], expected: "Welcome, admin" });
 	const r = await withVision(tc, true);

@@ -172,9 +172,10 @@ export const DEFAULT_PHRASES: Record<PhraseKind, string[]> = {
 	// visible where a human can see what the engine will press.
 	overlayCloser: ["오늘 하루 보지 않기", "다시 보지 않기", "닫기", "건너뛰기", "Skip", "Close"],
 	// Measured over 99 in-run repairs: 12 substituted one of these for the control the case actually
-	// needed — `기관 유형 → 취소`, `열람여부 → 확인` — which cancels or commits the dialog and leaves every
-	// later step running on a screen the case never described. Clearing a blocking overlay is a
-	// different job and already has its own rung, before a repair is ever asked for.
+	// needed — a filter answered with 취소, a column header answered with 확인 — which cancels or
+	// commits the dialog and leaves every later step running on a screen the case never described.
+	// Clearing a blocking overlay is a different job and already has its own rung, before a repair
+	// is ever asked for.
 	abandonControl: ["취소", "닫기", "확인", "뒤로", "이전으로", "나가기", "cancel", "close", "back", "ok", "dismiss"],
 	// `-` introduces the copy a requirement is about; `*` is deliberately absent, because on the measured
 	// sheet it introduces a note *about* the requirement ("* 기본값 : 전체", "* 기관 생성 시 작성한 유형값

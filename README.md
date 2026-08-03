@@ -74,7 +74,7 @@ bun run setup          # if Chromium didn't install above, run it explicitly
 bun run studio         # ← the app: builds the UI and serves http://localhost:8686
 bun run demo           # or watch the pipeline run against a bundled fixture (no extra setup)
 
-bun test               # 281/281 (for contributors)
+bun test               # 298/298 (for contributors)
 ```
 
 > Requires **Bun ≥ 1.3**. test-osterone is **Studio-first** — the day-to-day UI is the browser Studio (`bun run studio`); the CLI is a thin bootstrap that exposes `setup`, `--version`, and `--help`.
@@ -202,12 +202,13 @@ Two interchangeable clients behind one interface:
 
 ## Status
 
-**Built & verified** (static, deterministic — 281/281 automated tests):
+**Built & verified** (static, deterministic — 298/298 automated tests):
 
 - **Core pipeline** — ingest → normalize → dedupe → rule → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract, plus the benchmark hard gate.
 - **Platform** — web dashboard · orchestration (node/host) · auth (API key + OAuth proxy + **native OpenAI device-code login**) · JUnit output.
 - **Studio** — per-sheet first-class runtime · AI column mapping + conversational refine · AI step interpretation (author-once plan, soft-fallback to rules) · account pool + role routing with **lazy per-case sessions** (sign in on demand · switch users by role · login cases start signed out) · **step recovery ladder** (overlay retry → grounded in-run AI repair → abort the case) · route/landing verification · multi-sheet run-all · headed runs · run lifecycle (survive refresh · reconnect · cancel) · XLSX one-sheet-per-file import + in-file categories + per-sheet TC auto-detect · KO/EN toggle + path-based routing · live recon → appContext (nav labels **and real routes**) · repo code-context → codeContext (CodeGraph optional) · popup/native-dialog auto-dismiss + interactive-first & whitespace-tolerant click · vision as a hold signal (never a verdict) + lenient match + typed-field values + async assertion retry · Codex auto-restore on startup · Playwright trace capture + self-hosted trace viewer.
 - **Measurement against human verdicts** — `bun run measure <projectId> <sheetId>` runs a labelled sheet live and scores every verdict against the QA verdict already recorded in it: `agree` / `false-pass` / `false-fail` / `held`. It **exits non-zero if any case a human filed as a defect came back green**, refuses to score a run that did not actually happen, and prints the human's own defect note (비고) on a false-pass row and the failing check on a false-fail row — so a disagreement is adjudicated from one line instead of a per-case dig.
+- **A reproducible run** — the same sheet, run twice against the same app, returns the same verdict for every case. Two model calls sat on that path and moved verdicts on their own: vision's read of a borderline screen, and the paint-timing race that chose between waiting for a control and giving up on it. Vision answers are now remembered per (case, expectation) and an absence is confirmed on a settled screen. This is what makes a measurement mean anything — a scorecard you accept or reject changes by has to agree with itself first.
 
 **Live-verified.** The engine is exercised daily against a real application in a browser with a real model connected — the current reference is a **98-case QA sheet with human verdicts**, scored end to end by `measure`. What that measurement is for: every remaining disagreement is a **sheet-vs-reality** question (the sheet quotes copy the app has since changed), not an engine defect. `held` is not a miss — declining to judge is the engine working.
 
@@ -228,7 +229,7 @@ src/
   testing/      fixture app + fixture model
   app/studio/   browser UI (Studio)
   cli.ts · index.ts
-test/           unit + smoke suites (281/281)
+test/           unit + smoke suites (298/298)
 examples/demo/  CLI live-run example
 scripts/        measure a labelled sheet against its human verdicts
 ```

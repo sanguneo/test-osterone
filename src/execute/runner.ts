@@ -610,7 +610,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			 *
 			 * It used to flip a failed `textIncludes` straight to `passed: true`. Measured on a live
 			 * sheet, that turned five cases a human had marked Fail into `pass`, with details reading
-			 * `text lacks "dxsupport@aegisep.com" · 비전 확인` — the text genuinely was not there and
+			 * `text lacks "support@acme.example" · 비전 확인` — the text genuinely was not there and
 			 * vision waved it through. That inverts the whole trust model: the engine judges
 			 * deterministically, the model only writes and repairs.
 			 *

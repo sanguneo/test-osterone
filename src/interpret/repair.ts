@@ -244,8 +244,8 @@ export async function repairAction(model: ModelClient, req: RepairRequest): Prom
  * Would this repair walk out of the case instead of carrying it forward?
  *
  * Grounding proves the control exists; it says nothing about intent. Measured over 99 in-run repairs,
- * 12 answered a control the model could not find with the dialog's own exit — `기관 유형 → 취소`,
- * `열람여부 → 확인`. Both are accepted by grounding and both are wrong in the same way: the dialog
+ * 12 answered a control the model could not find with the dialog's own way out — a filter answered
+ * with 취소, a column header answered with 확인. Both are accepted by grounding and both are wrong in
  * closes or commits, and every later step of the case runs on a screen it never described. A repair
  * that cancels is not a repair, and one that confirms may submit a form the case never meant to send.
  *

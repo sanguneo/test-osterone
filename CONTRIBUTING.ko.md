@@ -37,7 +37,7 @@ bun run typecheck        # tsc --noEmit (엔진)
 bun run studio:webcheck  # 웹 앱 tsc
 bun run lint             # biome check
 bun run fmt              # biome format --write (커밋 전 스타일 정리)
-bun test                 # 281/281 유지
+bun test                 # 298/298 유지
 bun run studio:build     # src/app/studio/web을 건드렸을 때만
 ```
 
@@ -51,6 +51,10 @@ bun run measure -- <projectId> <sheetId> [labelColumn]   # 터미널 2 · 기본
 ```
 
 시트를 라이브로 돌려 각 판정을 시트에 이미 적힌 QA 판정과 비교하고, **사람이 결함으로 기록한 케이스가 초록으로 돌아오면 종료 코드가 0이 아닙니다**. `held`는 놓친 게 아닙니다 — 판정을 보류하는 것이 엔진이 제대로 동작하는 모습입니다. `false-pass`를 먼저, `false-fail`을 그다음에 보세요.
+
+**스코어카드는 이 순서로 읽으세요:** `false-pass` / `false-fail`이 가장 단단한 숫자입니다. 그다음이 `agree`와 `held` 총계이고, **사유별 분포는 런마다 ±1~3 움직이므로 마지막에 봅니다.**
+
+판정은 재현됩니다 — 같은 시트를 두 번 돌리면 모든 케이스가 같은 판정을 냅니다(비전 답을 기억하고, 부재를 가라앉은 화면에서 확정하기 때문). 아직 재현되지 않는 건 **어느 heal이 떴는가**입니다. 액션은 어떤 런에서 타임아웃하고 어떤 런에서 안 합니다 — 앱·네트워크 타이밍이지 엔진의 판단이 아닙니다. 그래서 **케이스 하나가 움직였다면 회귀라 부르기 전에 한 번 더 돌려보고**, 불변식이 움직였다면 그럴 필요 없습니다.
 
 ## 타협 불가 불변식
 

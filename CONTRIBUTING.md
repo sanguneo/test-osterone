@@ -37,7 +37,7 @@ bun run typecheck        # tsc --noEmit (engine)
 bun run studio:webcheck  # tsc for the web app
 bun run lint             # biome check
 bun run fmt              # biome format --write (fix style before committing)
-bun test                 # 281/281 must stay green
+bun test                 # 298/298 must stay green
 bun run studio:build     # only if you touched src/app/studio/web
 ```
 
@@ -54,6 +54,16 @@ bun run measure -- <projectId> <sheetId> [labelColumn]   # in another; default c
 It runs the sheet live and compares each verdict to the QA verdict already recorded in the sheet,
 then **exits non-zero if any case a human filed as a defect came back green**. `held` is not a miss —
 declining to judge is the engine working. Watch `false-pass` first, `false-fail` second.
+
+**Read the scorecard in this order:** `false-pass` / `false-fail` first — those are the hard numbers.
+Then `agree` and the `held` total. The per-reason breakdown moves ±1–3 between runs and is the last
+thing to draw a conclusion from.
+
+Verdicts are reproducible: the same sheet run twice returns the same verdict for every case, because
+vision answers are remembered and an absence is confirmed on a settled screen. What is still not
+reproducible is *which* heal fired — an action can time out on one run and not the next, which is app
+and network timing rather than anything the engine decides. So a single case moving is worth a second
+run before it is called a regression; a moved invariant never is.
 
 ## Non-negotiable invariants
 

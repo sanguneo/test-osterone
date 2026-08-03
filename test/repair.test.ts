@@ -169,24 +169,25 @@ test("groundAction accepts a control only the browser can see, and still refuses
 	// a div with a class, no role and no aria-label, marked clickable by `cursor: pointer` alone — the
 	// scan structurally cannot find it. Probed live: it reports as the username it wraps, and a plain
 	// text locator clicks it, opening the menu the case needs.
-	const html = `<main><button>검색</button><div class="header__user"><b>superadmin</b></div></main>`;
+	const html = `<main><button>검색</button><div class="header__user"><b>admin</b></div></main>`;
 	const scan = extractStructure(html, "/document");
-	expect(groundAction({ kind: "click", target: "superadmin" }, scan)).toBeNull();
-	expect(groundAction({ kind: "click", target: "superadmin" }, scan, ["검색", "superadmin"])).toEqual({
+	expect(groundAction({ kind: "click", target: "admin" }, scan)).toBeNull();
+	expect(groundAction({ kind: "click", target: "admin" }, scan, ["검색", "admin"])).toEqual({
 		kind: "click",
-		target: "superadmin",
+		target: "admin",
 	});
 	// The declared scan still wins when it can answer, so nothing about the existing path changes.
-	expect(groundAction({ kind: "click", target: "검색" }, scan, ["superadmin"])).toEqual({
+	expect(groundAction({ kind: "click", target: "검색" }, scan, ["admin"])).toEqual({
 		kind: "click",
 		target: "검색",
 	});
 	// The widening stays grounded: a name on neither list is a model invention, and is refused.
-	expect(groundAction({ kind: "click", target: "결재 승인" }, scan, ["superadmin"])).toBeNull();
+	expect(groundAction({ kind: "click", target: "결재 승인" }, scan, ["admin"])).toBeNull();
 });
 
 test("a repair may not answer a missing control with the dialog's way out", async () => {
-	// Measured over 99 in-run repairs: 12 did exactly this — `기관 유형 → 취소`, `열람여부 → 확인`.
+	// Measured over 99 in-run repairs: 12 did exactly this — a filter answered with 취소, a column
+	// header answered with 확인.
 	// Grounding accepts them because the control is genuinely on screen; it says nothing about intent.
 	// Both cancel or commit the dialog, and every later step then runs on a screen the case never
 	// described. Clearing a blocking overlay is a different job, on its own rung before this one.
