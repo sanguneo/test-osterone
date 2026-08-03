@@ -23,10 +23,13 @@ const BASE = process.env.STUDIO_URL?.replace(/\/$/, "") || "http://localhost:868
 const argv = process.argv.slice(2);
 /** Score the run already in history instead of running again — a 15-minute run should not be repeated to re-score it. */
 const scoreOnly = argv.includes("--score-only");
+/** `--lanes N`: run the ledger-cleared cases across N browsers. Serial by default — a parallel run is
+ * only meaningful compared against one. */
+const lanes = Math.max(1, Math.trunc(Number(argv.find((a) => a.startsWith("--lanes="))?.split("=")[1] ?? 1)) || 1);
 const [projectId, sheetId, labelColumn = "검증 결과"] = argv.filter((a) => !a.startsWith("--"));
 
 if (!projectId || !sheetId) {
-	console.error("usage: measure-sheet.ts <projectId> <sheetId> [labelColumn] [--score-only]");
+	console.error("usage: measure-sheet.ts <projectId> <sheetId> [labelColumn] [--score-only] [--lanes=N]");
 	process.exit(2);
 }
 
@@ -74,6 +77,9 @@ const res = await fetch(`${BASE}/api/run`, {
 		referenceRepo: project.referenceRepo,
 		aiInterpret: project.aiInterpret,
 		lenientMatch: project.lenientMatch,
+		// `--lanes N` runs the cases a previous run observed not writing to the app across N browsers.
+		// Off unless asked for, because a measurement is only worth anything against a serial baseline.
+		...(lanes > 1 ? { lanes } : {}),
 	}),
 	});
 	if (!res.ok || !res.body) throw new Error(`POST /api/run -> ${res.status} ${await res.text()}`);

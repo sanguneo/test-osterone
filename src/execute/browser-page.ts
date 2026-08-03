@@ -25,6 +25,15 @@ export interface BrowserPageOptions {
 	/** Capture a Playwright trace (screenshots+DOM snapshots+sources); per-case chunks via start/stopTrace. */
 	trace?: boolean;
 	/**
+	 * Cookies and storage to start this context with, as `context.storageState()` returns them.
+	 *
+	 * How a lane gets a session without signing in again. Measured: giving each lane its own login
+	 * broke the run — this app keeps one session per user, so the second lane's sign-in invalidated
+	 * the first and cases that had passed came back as unmet preconditions when their `goto` bounced
+	 * to the login form. One sign-in, cloned N ways, is the only shape that holds for a single account.
+	 */
+	storageState?: Awaited<ReturnType<BrowserContext["storageState"]>>;
+	/**
 	 * The sheet's vocabulary, so the two things this adapter reads words for — which trailing noun is a
 	 * UI kind ("입력란"), and what a dismissable overlay's close control is called — are teachable per
 	 * sheet like the rest of the judgement vocabulary. Defaults when omitted.
@@ -231,7 +240,10 @@ export class BrowserPage implements Page {
 	static async create(opts: BrowserPageOptions): Promise<BrowserPage> {
 		const ownsBrowser = !opts.browser;
 		const browser = opts.browser ?? (await launchChromium({ headless: opts.headless ?? true, slowMo: opts.slowMo }));
-		const context = await browser.newContext({ viewport: opts.viewport ?? { width: 1280, height: 800 } });
+		const context = await browser.newContext({
+			viewport: opts.viewport ?? { width: 1280, height: 800 },
+			...(opts.storageState ? { storageState: opts.storageState } : {}),
+		});
 		const tracing = !!opts.trace;
 		// `sources: false`: the sources in a trace are this engine's own files, not the app under
 		// test, so they only inflate every kept trace — and hundreds of kept traces fill a disk.
@@ -291,6 +303,11 @@ export class BrowserPage implements Page {
 			failures,
 			writes,
 		);
+	}
+
+	/** This context's cookies and storage, so a lane can start from a session already signed in. */
+	sessionState(): Promise<Awaited<ReturnType<BrowserContext["storageState"]>>> {
+		return this.context.storageState();
 	}
 
 	/** Failed / 5xx requests seen since the last read, newest last. Reading clears them. */

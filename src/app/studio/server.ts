@@ -67,11 +67,13 @@ import { readModelPin, writeModelPin } from "./model-pin.ts";
 import {
 	authStepFor,
 	endsSignedOut,
+	partitionForParallel,
 	restoreTerminal,
 	runModelMeta,
 	stalePlaywrightTempDirs,
 	summarizeHeal,
 	tracesToEvict,
+	writeLedger,
 } from "./run-helpers.ts";
 import { deleteProjectSheets, deleteSheetContent, readSheetContent, writeSheetContent } from "./sheet-store.ts";
 import {
@@ -234,6 +236,14 @@ export interface RunInput {
 	projectId?: string;
 	/** Launch a visible (headed) browser window with slowMo so a human can watch the run. */
 	headed?: boolean;
+	/**
+	 * How many browser lanes may run cases at once. 1 (the default) is the serial run this has always
+	 * been, byte for byte.
+	 *
+	 * Only cases a previous run observed *not* writing to the app are eligible, so a sheet earns its
+	 * partition by running serially once. See `partitionForParallel`.
+	 */
+	lanes?: number;
 }
 const DEFAULT_OAUTH_MODEL = "gpt-5.6-sol";
 const DEFAULT_APIKEY_MODEL = "gpt-4o-mini";
@@ -977,20 +987,25 @@ export async function runBatch(
 		 * this, with its own page — and the alternative, a second copy of it, is the shape this repo has
 		 * paid for twice (two results tables that drifted, two authoring funnels that diverged).
 		 */
-		const runCase = async (tc: NormalizedTC, index: number): Promise<void> => {
+		const runCase = async (tc: NormalizedTC, index: number, lane?: BrowserPage): Promise<void> => {
 			if (signal?.aborted) return;
+			// A lane owns its own page and signed in once when it was created. It is only ever handed
+			// cases the ledger cleared — none of which touches the session — so the shared page's auth
+			// contract, its breaker and its inter-case recovery all stay where they belong: on the
+			// serial run. Without a lane this is exactly the function it was.
+			const casePage = lane ?? page;
 			const account = accountFor(tc);
 			// Top the window back up before waiting, so the model keeps working during this case.
 			authorAhead(index + 1);
 			const plan = await planning.get(tc.caseId);
 			planning.delete(tc.caseId);
-			await prepareAuth(tc, account);
+			if (!lane) await prepareAuth(tc, account);
 			// Authored after auth so the setup starts from the session the case will actually run under.
 			const preparation = await preparationFor(tc);
 			if (signal?.aborted) return;
 			const tracePath = trace ? tracePathFor(input.projectId ?? "sample", sid, tc.caseId) : undefined;
 			const r = await runScenario(tc, {
-				page,
+				page: casePage,
 				rule: sheetSt.rule,
 				cache,
 				env: { browser: "chromium", viewport: "1280x800", baseUrl },
@@ -1113,19 +1128,105 @@ export async function runBatch(
 			};
 			results.push(view);
 			onProgress?.({ type: "case", index: results.length - 1, total: cases.length, result: view });
-			// A logout case ends the session on purpose — don't let the next case inherit a dead one.
-			if (endsSignedOut(tc)) signedInAs = null;
-			// A case that aborted (or errored) left the shared page in an untrusted state — reset before the next one.
-			if (!input.sample && !signal?.aborted && (r.aborted || r.verdict === "error")) await recoverBetweenCases();
+			// The shared page's housekeeping. A lane never runs a session-owning case, and its own wreck
+			// cannot reach anyone else's page, so neither belongs to it.
+			if (!lane) {
+				// A logout case ends the session on purpose — don't let the next case inherit a dead one.
+				if (endsSignedOut(tc)) signedInAs = null;
+				// A case that aborted (or errored) left the shared page in an untrusted state — reset first.
+				if (!input.sample && !signal?.aborted && (r.aborted || r.verdict === "error")) await recoverBetweenCases();
+			}
 		};
 
 		/**
-		 * Serial for now, and deliberately so: the write ledger that decides what may share a lane is
-		 * recorded by a run, so a sheet earns its partition by running once. `partitionForParallel`
-		 * reads that ledger and the lanes plug in here, each with its own page.
+		 * What may share the app, decided by the ledger the last run left rather than by a guess.
+		 *
+		 * A sheet earns its partition by running serially once: with no history every case is unproven
+		 * and the split is empty, which is the same run this has always been. `lanes` defaults to 1, so
+		 * nothing here changes until somebody asks for it.
+		 */
+		const laneCount = Math.max(1, Math.min(Math.trunc(input.lanes ?? 1), 8));
+		const previous = sheetSt.history[0]?.results ?? [];
+		const split =
+			laneCount > 1 && !input.sample
+				? partitionForParallel(cases, writeLedger(previous))
+				: { parallel: [] as string[], serial: cases.map((c) => c.caseId) };
+		const order = new Map(cases.map((tc, i) => [tc.caseId, i]));
+		const shareable = cases.filter((tc) => split.parallel.includes(tc.caseId));
+
+		if (shareable.length > 1) {
+			/**
+			 * A lane is a browser context of its own, holding a **copy** of the session already signed in.
+			 *
+			 * Not its own login. Measured: giving each lane one broke the run — this app keeps a single
+			 * session per user, so the second lane's sign-in invalidated the first, and cases that had
+			 * passed came back as unmet preconditions when their `goto` bounced to the login form. Two
+			 * lanes were worse than four. Cloning the cookies signs in once and hands out copies.
+			 *
+			 * A lane needs nothing else: every case it will be handed is one the ledger cleared, and none
+			 * of those owns the session — the login and logout cases are exactly what the partition keeps
+			 * on the serial run. So a lane never switches user, never signs out, never trips a breaker.
+			 */
+			const laneAcct = defaultAccount;
+			if (hasCreds(laneAcct)) await ensureSignedInAs(laneAcct, "병렬 레인 준비");
+			const session = await page.sessionState().catch(() => undefined);
+			const makeLane = async (): Promise<BrowserPage | null> => {
+				const lane = await BrowserPage.create({
+					baseUrl,
+					timeoutMs: 4000,
+					browser: await sharedBrowser(),
+					phrases,
+					...(session ? { storageState: session } : {}),
+				}).catch(() => null);
+				if (!lane) return null;
+				// Put the lane where the shared page already is. A fresh context opens on `about:blank`,
+				// and a case whose plan starts with a click — no goto, because its precondition put the
+				// app on the right screen for the *serial* page — then clicks into an empty tab. Measured:
+				// three cases came back as `self-heal: click` at both two lanes and four, identically,
+				// which is what a structural difference looks like next to a load problem.
+				await lane.goto("/").catch(() => {});
+				await lane.dismissOverlays().catch(() => {});
+				return lane;
+			};
+			const lanes = (await Promise.all(Array.from({ length: laneCount }, makeLane))).filter(
+				(l): l is BrowserPage => !!l,
+			);
+			onProgress?.({
+				type: "notice",
+				message:
+					lanes.length > 1
+						? `${shareable.length}건을 ${lanes.length}개 레인으로 동시 실행합니다 (직전 실행에서 앱에 쓰지 않은 케이스)`
+						: "레인을 열지 못해 전부 순차 실행합니다",
+			});
+			if (lanes.length > 1) {
+				// The same bounded pump the orchestrator uses, over lanes instead of jobs: each lane takes
+				// the next case until there are none, so a slow case costs its own lane and nobody else's.
+				let next = 0;
+				const pump = async (lane: BrowserPage): Promise<void> => {
+					while (!signal?.aborted) {
+						const tc = shareable[next++];
+						if (!tc) return;
+						await runCase(tc, order.get(tc.caseId) ?? 0, lane);
+					}
+				};
+				try {
+					await Promise.all(lanes.map(pump));
+				} finally {
+					await Promise.all(lanes.map((l) => l.close().catch(() => {})));
+				}
+			} else {
+				for (const l of lanes) await l.close().catch(() => {});
+				split.serial = cases.map((c) => c.caseId);
+			}
+		}
+
+		/**
+		 * Whatever a lane could not take: the writers, the never-observed, the session-owning — and the
+		 * whole sheet when nothing was shared. One page, one at a time, exactly as before.
 		 */
 		for (const [index, tc] of cases.entries()) {
 			if (signal?.aborted) break;
+			if (!split.serial.includes(tc.caseId)) continue;
 			await runCase(tc, index);
 		}
 	} finally {
