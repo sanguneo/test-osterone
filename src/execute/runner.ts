@@ -27,7 +27,7 @@ import {
 	type RequirementCoverage,
 	requirementCoverage,
 } from "../interpret/interpret.ts";
-import { pregroundAction, type RepairRequest, targetOnScreen } from "../interpret/repair.ts";
+import { pregroundAction, type Repair, type RepairRequest, targetOnScreen } from "../interpret/repair.ts";
 import type { InterpretationRule } from "../interpret/rule.ts";
 import { type VisionCache, visionCacheKey } from "../interpret/vision.ts";
 import type { BaselineStore } from "../judge/baseline.ts";
@@ -168,10 +168,12 @@ export interface RunOptions {
 	 */
 	settleMs?: number;
 	/**
-	 * In-run AI intervention: given the failed action and the live page, return a grounded
-	 * replacement action (or null to give up). Absent = deterministic-only execution.
+	 * In-run AI intervention: given the failed action and the live page, return a grounded repair
+	 * (or null to give up). A `before` repair unblocks rather than replaces — the runner performs it
+	 * and then retries the original action, and only that retry counts as progress. Absent =
+	 * deterministic-only execution.
 	 */
-	repair?: (req: RepairRequest) => Promise<PageAction | null>;
+	repair?: (req: RepairRequest) => Promise<Repair | null>;
 	/** Max AI repairs per case (default 2 when `repair` is set) — bounds cost and blast radius. */
 	repairBudget?: number;
 	/** Pause before retrying a recovered action, letting the app settle (default 400ms). */
@@ -472,14 +474,22 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 							.catch(() => null)
 					: null;
 				if (fixed) {
-					const repairErr = await perform(fixed);
+					const repairErr = await perform(fixed.action);
+					// A `before` repair only opened the way (a menu, a tab): the setup step is the retry of
+					// the original action, and booking the trigger click as the step itself is how a case
+					// starts on a screen its precondition never reached.
+					const retryErr = !repairErr && fixed.before ? await perform(step) : null;
 					if (repairErr) err = repairErr;
-					else {
+					else if (!retryErr) {
 						healEvents.push(
-							`repair: ${targetOf(step)} — AI가 화면을 다시 읽고 '${targetOf(fixed)}'(${fixed.kind})로 사전조건을 진행했습니다`,
+							fixed.before
+								? `repair: ${targetOf(step)} — AI가 화면을 다시 읽고 '${targetOf(fixed.action)}'(${fixed.action.kind})를 먼저 거쳐 사전조건을 진행했습니다`
+								: `repair: ${targetOf(step)} — AI가 화면을 다시 읽고 '${targetOf(fixed.action)}'(${fixed.action.kind})로 사전조건을 진행했습니다`,
 						);
 						err = null;
 					}
+					// A `before` repair whose retry still failed leaves the original error standing: the
+					// setup step did not happen, whatever the trigger click managed to open.
 				}
 			}
 			if (err) {
@@ -601,11 +611,25 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 							.catch(() => null)
 					: null;
 				if (fixed) {
-					const repairErr = await perform(fixed);
+					const repairErr = await perform(fixed.action);
+					// A `before` repair claims it only opened the way, so the step is the retry of the
+					// original action — try that, and report it as the unblock it said it was.
+					const retryErr = !repairErr && fixed.before ? await perform(action) : null;
 					if (!repairErr) {
 						// Repaired, not hidden: still a heal event, so the verdict stays capped at needs_review.
+						//
+						// A `before` whose retry failed falls back to standing in for the action, which is
+						// what every repair did before the flag existed. Measured over 98 cases: honouring
+						// the claim strictly here cost six cases the rest of their steps and bought no
+						// verdict — the model simply relabels a substitution it used to offer plainly. A
+						// case action is already under the abort guard and the heal cap, so a fix that
+						// performed is no more dangerous than it was. Preparation is the opposite case and
+						// gets no fallback: booking a trigger as the setup step leaves the case running on a
+						// screen its precondition never reached, with nothing verified at all.
 						healEvents.push(
-							`repair: ${targetOf(action)} — AI가 화면을 다시 읽고 '${targetOf(fixed)}'(${fixed.kind})로 교정해 진행했습니다`,
+							fixed.before && !retryErr
+								? `repair: ${targetOf(action)} — AI가 화면을 다시 읽고 '${targetOf(fixed.action)}'(${fixed.action.kind})를 먼저 거쳐 원래 동작을 진행했습니다`
+								: `repair: ${targetOf(action)} — AI가 화면을 다시 읽고 '${targetOf(fixed.action)}'(${fixed.action.kind})로 교정해 진행했습니다`,
 						);
 						continue;
 					}

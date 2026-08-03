@@ -1322,7 +1322,7 @@ test("AI repair: a failed action is re-grounded on the live screen, recorded, an
 		{
 			repair: async (req) => {
 				seen.push(`${req.action.kind}:${req.error.slice(0, 20)}`);
-				return { kind: "click", target: "저장하기" };
+				return { action: { kind: "click", target: "저장하기" }, before: false };
 			},
 		},
 	);
@@ -1639,7 +1639,7 @@ test("setup gets the recovery ladder the case's own steps get", async () => {
 			},
 			repair: async (req) => {
 				repaired.push(req.action.kind === "click" ? req.action.target : req.action.kind);
-				return { kind: "click", target: "계정 생성" };
+				return { action: { kind: "click", target: "계정 생성" }, before: false };
 			},
 		},
 	);
@@ -1674,4 +1674,130 @@ test("a setup nothing can rescue still holds the case, and its own steps never r
 	expect(page.did).toEqual([]);
 	expect(r.verdict).toBe("needs_review");
 	expect(r.executedAsWritten).toBe(false);
+});
+
+/**
+ * A page whose target is inside a closed menu: it answers only after the trigger has been clicked.
+ * Stands in for the live shape that produced four unrepaired setups — an account menu that is a
+ * `div` with a class, holding the item the precondition needs.
+ */
+class MenuPage implements Page {
+	readonly did: string[] = [];
+	private open = false;
+	constructor(
+		private readonly trigger: string,
+		private readonly item: string,
+	) {}
+	async goto(path: string): Promise<void> {
+		this.did.push(`goto ${path}`);
+	}
+	async click(target: string): Promise<void> {
+		if (target === this.trigger) this.open = true;
+		else if (target === this.item && !this.open) throw new Error(`no element matches "${target}"`);
+		this.did.push(`click ${target}`);
+	}
+	async fill(target: string, value: string): Promise<void> {
+		this.did.push(`fill ${target}=${value}`);
+	}
+	async snapshot(): Promise<PageSnapshot> {
+		const text = this.did.join(" · ");
+		return { url: "/app", text, html: `<main>${text}</main>` };
+	}
+}
+
+test("a `before` repair unblocks the setup: trigger first, then the original action is the step", async () => {
+	// Measured shape: `click: 비밀번호 변경` timed out because the account menu was closed, and the
+	// substitution vocabulary had no way to say "open the menu first" — the model's honest answers
+	// were `none` (the setup died) or a trigger click booked as the setup step itself.
+	const page = new MenuPage("admin", "비밀번호 변경");
+	const r = await runScenario(
+		loginTC({ caseId: "TC-prep-before", contentHash: "h-prep-before", steps: [], expected: "" }),
+		{
+			page,
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			recoveryDelayMs: 0,
+			preparation: [{ kind: "click", target: "비밀번호 변경" }],
+			plan: {
+				actions: [{ kind: "click", target: "확인" }],
+				assertions: [{ kind: "textIncludes", value: "click 확인" }],
+			},
+			repair: async () => ({ action: { kind: "click", target: "admin" }, before: true }),
+		},
+	);
+	// The trigger ran, then the original setup action — not the trigger instead of it.
+	expect(page.did).toEqual(["click admin", "click 비밀번호 변경", "click 확인"]);
+	expect(r.healEvents.join()).toContain("'admin'(click)를 먼저 거쳐 사전조건을 진행했습니다");
+	expect(r.healEvents.join()).not.toContain("precondition:");
+	// Repaired, not hidden: the verdict stays capped.
+	expect(r.verdict).toBe("needs_review");
+	expect(r.assertions.every((a) => a.passed)).toBe(true);
+});
+
+test("a `before` repair whose retry still fails holds the case on the original error", async () => {
+	// The trigger click "succeeds" mechanically, but the setup step it was meant to unblock still
+	// cannot run — booking the trigger as progress is how a case starts on a screen its
+	// precondition never reached.
+	const page = new MenuPage("admin", "비밀번호 변경"); // only admin opens the menu
+	const r = await runScenario(
+		loginTC({ caseId: "TC-prep-before-dead", contentHash: "h-prep-before-dead", steps: [], expected: "" }),
+		{
+			page,
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			recoveryDelayMs: 0,
+			preparation: [{ kind: "click", target: "비밀번호 변경" }],
+			plan: { actions: [{ kind: "click", target: "확인" }], assertions: [] },
+			repair: async () => ({ action: { kind: "click", target: "검색" }, before: true }),
+		},
+	);
+	expect(r.healEvents[0]).toContain("precondition: click: 비밀번호 변경");
+	// The case's own steps never ran.
+	expect(page.did).toEqual(["click 검색"]);
+	expect(r.verdict).toBe("needs_review");
+	expect(r.executedAsWritten).toBe(false);
+});
+
+test("a `before` repair on a case's own step retries the original, then stands in for it", async () => {
+	const page = new MenuPage("admin", "비밀번호 변경");
+	const r = await runPlan(
+		page,
+		[
+			{ kind: "click", target: "비밀번호 변경" },
+			{ kind: "click", target: "확인" },
+		],
+		{
+			repair: async () => ({ action: { kind: "click", target: "admin" }, before: true }),
+		},
+	);
+	expect(page.did).toEqual(["click admin", "click 비밀번호 변경", "click 확인"]);
+	expect(r.healEvents[0]).toContain("'admin'(click)를 먼저 거쳐 원래 동작을 진행했습니다");
+	expect(r.verdict).toBe("needs_review");
+
+	// Same shape, but the unblock does not unblock. A case action falls back to the substitution the
+	// fix already performed — which is what every repair did before the flag existed. Measured over 98
+	// cases: holding the claim strictly here cost six cases the rest of their steps and moved no
+	// verdict. The setup ladder is the opposite and gets no fallback (see the test above).
+	const dead = new MenuPage("admin", "비밀번호 변경");
+	const r2 = await runPlan(
+		dead,
+		[
+			{ kind: "click", target: "비밀번호 변경" },
+			{ kind: "click", target: "확인" },
+		],
+		{
+			repair: async () => ({ action: { kind: "click", target: "검색" }, before: true }),
+		},
+	);
+	// The retry was attempted (and failed), so the fix stands in and the case carries on.
+	expect(dead.did).toEqual(["click 검색", "click 확인"]);
+	expect(r2.aborted).toBeUndefined();
+	expect(r2.healEvents[0]).toContain("'검색'(click)로 교정해 진행했습니다");
+	expect(r2.verdict).toBe("needs_review");
 });

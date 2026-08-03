@@ -55,7 +55,7 @@ test("repairAction: the prompt carries the failure + live page facts, and the re
 		expected: "저장되었습니다",
 	});
 	// grounded onto the real label, not the model's paraphrase
-	expect(fixed).toEqual({ kind: "click", target: "저장하기" });
+	expect(fixed).toEqual({ action: { kind: "click", target: "저장하기" }, before: false });
 	expect(seen).toContain('FAILED ACTION: click "저장"');
 	expect(seen).toContain("Timeout 4000ms exceeded");
 	expect(seen).toContain("저장하기"); // the live scan is in the prompt
@@ -198,8 +198,8 @@ test("a repair may not answer a missing control with the dialog's way out", asyn
 	expect(await repairAction(new FakeModelClient(() => '{"kind":"click","target":"확인"}'), req)).toBeNull();
 	// The repair that actually serves the case is untouched.
 	expect(await repairAction(new FakeModelClient(() => '{"kind":"click","target":"기관 유형 선택"}'), req)).toEqual({
-		kind: "click",
-		target: "기관 유형 선택",
+		action: { kind: "click", target: "기관 유형 선택" },
+		before: false,
 	});
 });
 
@@ -209,8 +209,8 @@ test("repairing a cancel into a differently-worded cancel is exactly right", asy
 	const dialog = `<main><h1>알림</h1><button>취소</button></main>`;
 	const req = { action: { kind: "click" as const, target: "닫기" }, error: "boom", html: dialog, url: "/x" };
 	expect(await repairAction(new FakeModelClient(() => '{"kind":"click","target":"취소"}'), req)).toEqual({
-		kind: "click",
-		target: "취소",
+		action: { kind: "click", target: "취소" },
+		before: false,
 	});
 });
 
@@ -228,8 +228,40 @@ test("the way-out vocabulary is the sheet's, like every other list", async () =>
 	const untaught = { ...req, phrases: { abandonControl: ["그만두기"] } };
 	expect(await repairAction(new FakeModelClient(() => '{"kind":"click","target":"기관 유형 선택"}'), untaught)).toEqual(
 		{
-			kind: "click",
-			target: "기관 유형 선택",
+			action: { kind: "click", target: "기관 유형 선택" },
+			before: false,
 		},
 	);
+});
+
+test("a repair may say it comes before the failed action, and the guard still applies to it", async () => {
+	// The failed target lives inside a closed account menu; the trigger is on screen (browser-reported,
+	// not in the markup scan). A substitution vocabulary cannot express "open the menu first" — the
+	// only honest answers were `none` or a trigger click booked as the step itself.
+	const menu = `<main><button>검색</button><div class="header__user"><b>admin</b></div></main>`;
+	const req = {
+		action: { kind: "click" as const, target: "비밀번호 변경" },
+		error: "boom",
+		html: menu,
+		url: "/account",
+		clickables: ["admin"],
+	};
+	expect(
+		await repairAction(new FakeModelClient(() => '{"kind":"click","target":"admin","when":"before"}'), req),
+	).toEqual({ action: { kind: "click", target: "admin" }, before: true });
+	// Any other value of "when" is a substitution, not a rung the runner should invent.
+	expect(
+		await repairAction(new FakeModelClient(() => '{"kind":"click","target":"admin","when":"maybe"}'), req),
+	).toEqual({ action: { kind: "click", target: "admin" }, before: false });
+	// The way-out guard reads the proposal itself: an exit click does not become acceptable by
+	// claiming it merely unblocks — clearing overlays is an earlier rung's job.
+	const dialog = `<main><h1>기관 생성</h1><button>취소</button></main>`;
+	expect(
+		await repairAction(new FakeModelClient(() => '{"kind":"click","target":"취소","when":"before"}'), {
+			action: { kind: "click", target: "기관 유형" },
+			error: "boom",
+			html: dialog,
+			url: "/agency",
+		}),
+	).toBeNull();
 });

@@ -50,6 +50,23 @@ export interface RepairRequest {
 }
 
 /**
+ * A grounded repair, and how it relates to the action that failed.
+ *
+ * `before: false` is a substitution — the proposal *is* the failed action under the label the page
+ * actually carries, so performing it is the step. `before: true` is an unblock: the failed target is
+ * behind a closed menu, dropdown or tab whose trigger is on screen, so the proposal opens the way and
+ * the original action must then be retried — only that retry counts as progress. The distinction was
+ * measured, not designed: four setups that had to press an item inside a closed account menu got no
+ * usable repair at all, because a substitution vocabulary cannot say "click the trigger first", and
+ * the honest answers left were `none` or a mechanically-successful click that the runner then wrongly
+ * booked as the setup step itself.
+ */
+export interface Repair {
+	action: PageAction;
+	before: boolean;
+}
+
+/**
  * Clickable vocabulary the live page exposes.
  *
  * Form controls belong here even though they are not buttons: a filter or a dropdown is *clicked* to
@@ -186,6 +203,8 @@ const REPAIR_SYSTEM =
 	'Output ONLY JSON, one of: {"kind":"click","target":"<label from the scan>"} | ' +
 	'{"kind":"fill","target":"<field label from the scan>","value":"<text>"} | {"kind":"goto","path":"/<route linked on the page>"} | ' +
 	'{"kind":"none"}. ' +
+	'When the failed target is likely inside a closed menu, dropdown, or tab whose trigger IS on the scan, add "when":"before" ' +
+	"to your action: your action runs first and the failed action is then retried as written. " +
 	"Answer none when the screen cannot serve the intent (wrong page, blocking dialog you cannot name, nothing equivalent) — " +
 	"giving up is correct and a wrong guess corrupts the rest of the test. Never invent a label, a field, or a route.";
 
@@ -197,10 +216,10 @@ function describeAction(a: PageAction): string {
 }
 
 /**
- * Ask the model for a grounded replacement action. Returns null when the model declines, replies
- * with garbage, names anything the live page does not actually have, or offers to leave the case.
+ * Ask the model for a grounded repair. Returns null when the model declines, replies with garbage,
+ * names anything the live page does not actually have, or offers to leave the case.
  */
-export async function repairAction(model: ModelClient, req: RepairRequest): Promise<PageAction | null> {
+export async function repairAction(model: ModelClient, req: RepairRequest): Promise<Repair | null> {
 	const scan = extractStructure(req.html, req.url);
 	const intent = [
 		req.title ? `CASE: ${req.title}` : "",
@@ -237,7 +256,8 @@ export async function repairAction(model: ModelClient, req: RepairRequest): Prom
 	if (!obj || obj.kind === "none") return null;
 	const candidate = parseCandidate(obj);
 	const grounded = candidate ? groundAction(candidate, scan, req.clickables ?? []) : null;
-	return grounded && abandonsTheCase(req.action, grounded, { phrases: req.phrases }) ? null : grounded;
+	if (!grounded || abandonsTheCase(req.action, grounded, { phrases: req.phrases })) return null;
+	return { action: grounded, before: obj.when === "before" };
 }
 
 /**
