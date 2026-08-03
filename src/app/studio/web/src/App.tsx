@@ -93,6 +93,18 @@ function routePath(project: string, sheet: string, tab: StudioTab): string {
 	return path;
 }
 
+/**
+ * What the top bar may still claim after a status read failed.
+ *
+ * Keeping the last status meant the bar went on naming a connected model after the server had stopped
+ * answering, and the first thing the person learned was a run that would not start. A failed read is
+ * not a connection, so the claim goes — but only the claim: the rules view's vocabulary and refine
+ * chat live on this same object, and wiping them on a blip is worse than a stale list.
+ */
+export function withoutConnectionClaim(previous: Status | null): Status | null {
+	return previous?.connected ? { ...previous, connected: false } : previous;
+}
+
 export function App() {
 	const t = S[useLang()];
 	const [projects, setProjects] = useState<Project[]>([]);
@@ -117,9 +129,14 @@ export function App() {
 	const connected = Boolean(status?.connected);
 
 	const refreshStatus = useCallback(() => {
-		api.status(selectedProjectId, selectedSheetId).then((nextStatus) => {
-			setStatus(nextStatus);
-		}).catch(() => {});
+		api.status(selectedProjectId, selectedSheetId)
+			.then((nextStatus) => {
+				setStatus(nextStatus);
+			})
+			.catch(() => {
+				// A failed read is not a connection — see `withoutConnectionClaim`.
+				setStatus(withoutConnectionClaim);
+			});
 	}, [selectedProjectId, selectedSheetId]);
 
 	const loadProjects = useCallback(() => {
@@ -139,7 +156,12 @@ export function App() {
 	}, []);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: runSequence and reviewCount are deliberate triggers, not reads — a finished run or an approval has to re-count the queue.
 	useEffect(() => {
-		api.reviewQueue(selectedProjectId, selectedSheetId || undefined).then((queue) => setNavReviewCount(queue.length)).catch(() => {});
+		// The queue count is a badge, not a decision: a failed read leaves the previous number rather
+		// than blanking the nav, and the review panel itself reports its own load errors.
+		api
+			.reviewQueue(selectedProjectId, selectedSheetId || undefined)
+			.then((queue) => setNavReviewCount(queue.length))
+			.catch(() => {});
 	}, [selectedProjectId, selectedSheetId, runSequence, reviewCount]);
 	useEffect(() => {
 		if (!selectedProject) return;
