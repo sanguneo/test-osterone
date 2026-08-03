@@ -19,11 +19,37 @@ function post(body: unknown): RequestInit {
 	return { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
 }
 
+/**
+ * Turn a failed response into an error a person can act on.
+ *
+ * The server answers failures as `{ "error": "<한국어 문장>" }`, and that sentence is the whole point —
+ * "이미 실행 중인 런이 있습니다. 먼저 중지하세요." tells the user what to do. Everything else here is a
+ * fallback so the message is never empty: `statusText` is absent over HTTP/2, and an empty error banner
+ * is indistinguishable from no error at all.
+ */
+export async function responseFailure(res: Response): Promise<Error> {
+	const text = await res.text().catch(() => "");
+	let message = "";
+	try {
+		const parsed = text ? (JSON.parse(text) as { error?: unknown }) : null;
+		if (parsed && typeof parsed.error === "string") message = parsed.error;
+	} catch {
+		// Not JSON. The status line below is all we have.
+	}
+	return new Error(message || res.statusText || `HTTP ${res.status}`);
+}
+
 async function j<T>(url: string, opts?: RequestInit): Promise<T> {
 	const r = await fetch(url, opts);
-	const d = (await r.json().catch(() => null)) as (T & { error?: string }) | null;
-	if (!r.ok) throw new Error((d?.error as string) || r.statusText);
-	return d as T;
+	if (!r.ok) throw await responseFailure(r);
+	const text = await r.text();
+	try {
+		return JSON.parse(text) as T;
+	} catch {
+		// A 2xx whose body will not parse used to become `null` cast to `T`, and the caller then failed
+		// several frames away on a field of the thing it believed it had. Name it here instead.
+		throw new Error(`${url}: response was not JSON (${r.status})`);
+	}
 }
 
 const q = (pid: string) => `projectId=${encodeURIComponent(pid)}`;
@@ -71,6 +97,10 @@ export const api = {
 	/** Stream a run: emits start / case / done / error events as they arrive. */
 	async runStream(cfg: RunInput, onEvent: (ev: RunEvent) => void, signal?: AbortSignal): Promise<void> {
 		const res = await fetch("/api/run", { ...post(cfg), signal });
+		// A refused run is an HTTP failure, not a stream. Read as one it parsed into an "event" with no
+		// `type`, the panel's if/else chain dropped it, and the run ended with nothing on screen — the
+		// server's own "이미 실행 중인 런이 있습니다. 먼저 중지하세요." never reached the person who needed it.
+		if (!res.ok) throw await responseFailure(res);
 		if (!res.body) throw new Error("no stream");
 		const reader = res.body.getReader();
 		const dec = new TextDecoder();
@@ -91,6 +121,8 @@ export const api = {
 	/** Stream a per-sheet "run all sheets" batch: all-start / sheet-start / start / case / sheet-done / sheet-error / all-done / error. */
 	async runAllStream(cfg: RunInput, onEvent: (ev: RunAllEvent) => void, signal?: AbortSignal): Promise<void> {
 		const res = await fetch("/api/run/all", { ...post(cfg), signal });
+		// Same as `runStream`: a 409 here is a refusal to start, not the first line of a stream.
+		if (!res.ok) throw await responseFailure(res);
 		if (!res.body) throw new Error("no stream");
 		const reader = res.body.getReader();
 		const dec = new TextDecoder();
