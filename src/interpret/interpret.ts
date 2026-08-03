@@ -168,6 +168,17 @@ export interface RequirementCoverage {
  * `controlSelected` counts because it is the opposite case — it is derived *only* when the expectation
  * names that control, so its name is a literal quoted from the requirement, which is exactly what this
  * gate asks for.
+ *
+ * **The field kinds (`fieldAtMost`, `fieldExcludes`, `fieldHolds`) are excluded on purpose, and this is
+ * the one exclusion that must not be "fixed".** They look like the `urlIncludes` case — "입력 제한되어야
+ * 한다" carries no literal to quote and `fieldAtMost` is the mechanical form of exactly that sentence,
+ * so counting them reads like an obvious correction. Measured on the 98-case sheet, it is a false-pass
+ * factory: `아이디 입력란 내 12자 초과 입력 → 입력 제한되어야 한다` has a **passing** `fieldAtMost 아이디
+ * ≤ 12자`, and the verdict a human recorded for that very box is *Fail* — "아이디 입력란 내 입력 제한이
+ * 동작하지 않는 현상". Counting it releases that case to `pass` and trips the only hard gate this repo
+ * has. 22 of 98 cases carry a field-kind assertion, so the blast radius is not small. The check reads
+ * the box back; whether the app *earned* that value is what `decidedByTheBrowser` and a human's approved
+ * baseline are for, not this gate.
  */
 export function requirementCoverage(expected: string, assertions: readonly Assertion[]): RequirementCoverage | null {
 	const reqs = expectedRequirements(expected);
