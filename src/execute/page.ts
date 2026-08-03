@@ -134,6 +134,18 @@ export interface Page {
 	 */
 	requestFailures?(): string[];
 	/**
+	 * Optional: did the page send anything but a GET since the last read — a POST, PUT, PATCH or
+	 * DELETE — and to where. Cleared by the caller once read.
+	 *
+	 * This is what makes a parallel schedule decidable. Two cases may share an app only if neither
+	 * changes what the other reads, and the honest test for that is not the label on a button: the
+	 * same Korean noun sits on the control that *opens* a create dialog and on the one that saves it,
+	 * so a vocabulary reads `신규 계정 생성` and `기관명 중복확인` as writes when both are lookups.
+	 * Measured over a 98-case sheet, that guess named 8 writers and every one of them was a read. The
+	 * request the app actually sent is not a guess.
+	 */
+	serverWrites?(): string[];
+	/**
 	 * Optional per-case Playwright trace chunk hooks. Only the real `BrowserPage`
 	 * implements them; `FakePage` omits them so unit tests are unaffected.
 	 * `stopTrace(path)` exports the chunk to `path`; `stopTrace()` discards it.

@@ -69,6 +69,18 @@ export interface StructuredResult {
 	 */
 	executedAsWritten?: boolean;
 	/**
+	 * Did the app write anything while this case ran — a POST, PUT, PATCH or DELETE?
+	 *
+	 * Recorded so a schedule can be decided from evidence instead of a guess. Two cases may share an
+	 * app only if neither changes what the other reads, and a button's label cannot answer that: the
+	 * same noun sits on the control that opens a create dialog and on the one that saves it. Measured
+	 * over 98 cases, a vocabulary named 8 writers and all 8 were lookups.
+	 *
+	 * So a run earns its own partition — whatever never wrote is a candidate to run beside something
+	 * else, and the rest stays in the serial tail.
+	 */
+	wroteToApp?: boolean;
+	/**
 	 * Why vision disagreed with a deterministic miss, when it did. A model's read of the screenshot
 	 * is not a verdict, so this only ever routes the case to a human — it never turns into a pass.
 	 */
@@ -334,6 +346,10 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			}
 		};
 		let repairsLeft = opts.repair ? (opts.repairBudget ?? 2) : 0;
+		// Start the case's write ledger empty. The reader clears as it reads, and a sign-in or the tail
+		// of the previous case happens outside this function — without this, their POSTs would be
+		// counted against whichever case ran next.
+		opts.page.serverWrites?.();
 		/**
 		 * Did the case actually carry out the steps it describes?
 		 *
@@ -848,6 +864,9 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			attempts: 1,
 			snapshot: snap,
 			executedAsWritten,
+			// The app's own record of having changed something, so a schedule can be decided from
+			// evidence rather than from what a button happens to be called.
+			...(opts.page.serverWrites?.().length ? { wroteToApp: true } : {}),
 			...(visionNote ? { visionNote } : {}),
 			...(vacuousNote ? { vacuousNote } : {}),
 			...(coverage ? { coverage } : {}),

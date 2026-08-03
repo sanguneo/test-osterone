@@ -224,6 +224,8 @@ export class BrowserPage implements Page {
 		private readonly phrases: Record<string, string[]>,
 		/** Ring of failed / 5xx requests, filled by listeners set up in `create`. */
 		private readonly failures: string[],
+		/** Ring of non-GET requests, filled by the listener set up in `create`. */
+		private readonly writes: string[],
 	) {}
 
 	static async create(opts: BrowserPageOptions): Promise<BrowserPage> {
@@ -264,6 +266,19 @@ export class BrowserPage implements Page {
 			if (res.status() < 500) return;
 			note(`${res.request().method()} ${res.url().slice(0, 120)} — HTTP ${res.status()}`);
 		});
+		/**
+		 * Every request that was not a GET — the app's own record of having changed something.
+		 *
+		 * A read-heavy case never appears here, and that is precisely the property a parallel schedule
+		 * needs: two cases may share an app only if neither writes what the other reads. Recorded at
+		 * request time rather than on the response, because a write that times out still wrote.
+		 */
+		const writes: string[] = [];
+		pwPage.on("request", (req) => {
+			if (req.method() === "GET") return;
+			if (writes.length > 24) return;
+			writes.push(`${req.method()} ${req.url().slice(0, 120)}`);
+		});
 		return new BrowserPage(
 			browser,
 			context,
@@ -274,12 +289,18 @@ export class BrowserPage implements Page {
 			tracing,
 			{ ...DEFAULT_PHRASES, ...(opts.phrases ?? {}) },
 			failures,
+			writes,
 		);
 	}
 
 	/** Failed / 5xx requests seen since the last read, newest last. Reading clears them. */
 	requestFailures(): string[] {
 		return this.failures.splice(0, this.failures.length);
+	}
+
+	/** Non-GET requests seen since the last read, newest last. Reading clears them. */
+	serverWrites(): string[] {
+		return this.writes.splice(0, this.writes.length);
 	}
 
 	async goto(path: string): Promise<void> {

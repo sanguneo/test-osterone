@@ -53,6 +53,8 @@ export interface CaseView {
 	passed: number;
 	total: number;
 	heal: string[];
+	/** The app sent a POST/PUT/PATCH/DELETE while this case ran — it changed what other cases read. */
+	wroteToApp?: boolean;
 	/** This `pass` came from a human-approved baseline matching, not from the assertions passing. */
 	baselineLifted?: boolean;
 	assertions: { detail: string; passed: boolean; kind?: string; value?: string }[];

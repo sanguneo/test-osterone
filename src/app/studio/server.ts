@@ -1095,6 +1095,7 @@ export async function runBatch(
 				passed: r.assertions.filter((a) => a.passed).length,
 				total: r.assertions.length,
 				heal: r.healEvents,
+				...(r.wroteToApp ? { wroteToApp: true } : {}),
 				...(r.baselineLifted ? { baselineLifted: true } : {}),
 				assertions: r.assertions.map((a) => ({
 					detail: a.detail,
