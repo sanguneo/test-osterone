@@ -12,6 +12,7 @@ import type { NormalizedTC } from "../src/intake/schema.ts";
 import { MemoryAssertionCache } from "../src/interpret/assertion.ts";
 import { getOrAuthorAssertions, type PageAction } from "../src/interpret/interpret.ts";
 import { bumpRuleVersion, establishRuleFromHeaders } from "../src/interpret/rule.ts";
+import { MemoryVisionCache } from "../src/interpret/vision.ts";
 import { MemoryBaselineStore } from "../src/judge/baseline.ts";
 
 const RULE = establishRuleFromHeaders(["Test ID", "Title", "Steps", "Expected Result", "Role", "Environment"]);
@@ -286,6 +287,99 @@ test("vision disagreeing about nothing leaves a plain fail alone", async () => {
 	const r = await withVision(tc, false);
 	expect(r.verdict).toBe("fail");
 	expect(r.visionNote).toBeUndefined();
+});
+
+test("a remembered vision answer makes a rerun reproducible, even when the judge changes its mind", async () => {
+	// Measured across consecutive runs of the same 98-case sheet: 5 of the 7 verdict changes were one
+	// case whose failing checks were identical both times and whose vision answer had simply flipped,
+	// moving it between `fail` and `needs_review`. A baseline that disagrees with itself cannot be the
+	// reference every change here is accepted or rejected against.
+	const visionCache = new MemoryVisionCache();
+	let asked = 0;
+	const flipflop = async () => {
+		asked++;
+		return asked === 1; // yes the first time, no ever after
+	};
+	const tc = loginTC({ contentHash: "h-vision-cache", steps: ["Navigate to /login"], expected: "Welcome, admin" });
+	const go = () =>
+		runScenario(tc, {
+			page: shotPage(),
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			visionAssert: flipflop,
+			visionCache,
+			ruleId: RULE.ruleId,
+			ruleVersion: RULE.ruleVersion,
+		});
+	const first = await go();
+	const second = await go();
+	expect(asked).toBe(1); // the question is put to the model once
+	expect(second.verdict).toBe(first.verdict);
+	expect(second.visionNote).toBe(first.visionNote);
+
+	// A remembered answer survives a restart, because the sheet's state file carries it.
+	const reloaded = new MemoryVisionCache();
+	reloaded.load(visionCache.entries());
+	const third = await runScenario(tc, {
+		page: shotPage(),
+		rule: RULE,
+		cache: new MemoryAssertionCache(),
+		env: ENV,
+		now: () => 0,
+		executionId: "fixed",
+		visionAssert: flipflop,
+		visionCache: reloaded,
+		ruleId: RULE.ruleId,
+		ruleVersion: RULE.ruleVersion,
+	});
+	expect(asked).toBe(1);
+	expect(third.verdict).toBe(first.verdict);
+});
+
+test("a rule version bump retires remembered vision answers, like it retires plans", async () => {
+	const visionCache = new MemoryVisionCache();
+	let asked = 0;
+	const judge = async () => {
+		asked++;
+		return true;
+	};
+	const tc = loginTC({ contentHash: "h-vision-bump", steps: ["Navigate to /login"], expected: "Welcome, admin" });
+	const go = (ruleVersion: number) =>
+		runScenario(tc, {
+			page: shotPage(),
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			now: () => 0,
+			executionId: "fixed",
+			visionAssert: judge,
+			visionCache,
+			ruleId: RULE.ruleId,
+			ruleVersion,
+		});
+	await go(1);
+	await go(1);
+	expect(asked).toBe(1);
+	await go(2);
+	expect(asked).toBe(2);
+});
+
+test("without a cache the vision path behaves exactly as before", async () => {
+	let asked = 0;
+	const tc = loginTC({ contentHash: "h-vision-nocache", steps: ["Navigate to /login"], expected: "Welcome, admin" });
+	const go = () =>
+		withVision(tc, true, {
+			visionAssert: async () => {
+				asked++;
+				return true;
+			},
+		});
+	await go();
+	await go();
+	expect(asked).toBe(2);
 });
 
 test("vision may not invent a passing assertion for a case that had none", async () => {

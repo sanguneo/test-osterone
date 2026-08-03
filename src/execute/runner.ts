@@ -29,6 +29,7 @@ import {
 } from "../interpret/interpret.ts";
 import { pregroundAction, type RepairRequest, targetOnScreen } from "../interpret/repair.ts";
 import type { InterpretationRule } from "../interpret/rule.ts";
+import { type VisionCache, visionCacheKey } from "../interpret/vision.ts";
 import type { BaselineStore } from "../judge/baseline.ts";
 import type { Page, PageSnapshot } from "./page.ts";
 
@@ -126,6 +127,24 @@ export interface RunOptions {
 	tracePath?: string;
 	/** Vision fallback: when a text assertion fails, judge the screenshot (for visual/image expectations). */
 	visionAssert?: (screenshot: string, expected: string) => Promise<boolean>;
+	/**
+	 * Remembers what vision answered, so the same question gets the same answer on every run.
+	 *
+	 * Vision is a model opinion on a borderline screen, and it wavers: measured across consecutive
+	 * runs of the same 98-case sheet, 5 of the 7 verdict changes were one case whose failing checks
+	 * were identical both times and whose vision answer had simply flipped, moving it between `fail`
+	 * and `needs_review`. A baseline that disagrees with itself cannot be the reference a change is
+	 * measured against — and every change here is accepted or rejected by that reference.
+	 *
+	 * Safe to remember because of what vision may do: it never flips a check to passed (that was tried
+	 * and reverted), only raises a note that holds a `fail` for review. So a stale answer costs at most
+	 * a case sitting in the review queue that could have been failed outright — a human reads it either
+	 * way — and a false pass is not reachable from here.
+	 */
+	visionCache?: VisionCache;
+	/** Identity for `visionCacheKey`, so a rule version bump retires remembered answers with the plans. */
+	ruleId?: string;
+	ruleVersion?: number;
 	/** Lenient text matching: ignore whitespace/punctuation so near-miss assertions still pass. */
 	lenientMatch?: boolean;
 	/** Re-check failing assertions for up to this many ms (async content like toasts). 0 = no retry. */
@@ -579,10 +598,26 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			 * screen as a golden baseline, later runs pass deterministically — the sanctioned route for
 			 * a purely visual expectation to go green.
 			 */
+
+			/**
+			 * Asked once per (case, expectation) and remembered, so a run can be compared with the run
+			 * before it. See `RunOptions.visionCache` for why remembering is safe here specifically.
+			 */
+			const askVision = async (expected: string): Promise<boolean> => {
+				const key =
+					opts.visionCache && opts.ruleId
+						? visionCacheKey(tc.caseId, expected, opts.ruleId, opts.ruleVersion ?? 0)
+						: null;
+				const remembered = key ? opts.visionCache?.get(key) : undefined;
+				if (remembered !== undefined) return remembered;
+				const ok = await opts.visionAssert?.(snap.screenshot ?? "", expected).catch(() => false);
+				if (key && ok !== undefined) opts.visionCache?.set(key, ok);
+				return ok ?? false;
+			};
 			for (let i = 0; i < results.length; i++) {
 				const r = results[i];
 				if (r && !r.passed && r.assertion.kind === "textIncludes") {
-					const ok = await opts.visionAssert(snap.screenshot, String(r.assertion.value ?? "")).catch(() => false);
+					const ok = await askVision(String(r.assertion.value ?? ""));
 					if (ok) {
 						results[i] = { ...r, detail: `${r.detail} · 비전 판단: 화면상 충족(사람 확인 필요)` };
 						visionNote = `텍스트로는 확인되지 않았지만 화면상으로는 충족해 보입니다 — 사람 확인이 필요합니다: ${String(
@@ -596,7 +631,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			if (results.length === 0 && tc.expected.trim()) {
 				// A purely visual expectation with no checkable text assertion. The case is already
 				// heading for review (no assertions); vision only explains why a human should look.
-				const ok = await opts.visionAssert(snap.screenshot, tc.expected).catch(() => false);
+				const ok = await askVision(tc.expected);
 				if (ok)
 					visionNote = `검증 가능한 텍스트 assertion이 없습니다. 화면상으로는 기대와 일치해 보입니다 — 사람 확인이 필요합니다: ${tc.expected
 						.replace(/\s+/g, " ")

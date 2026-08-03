@@ -993,6 +993,12 @@ export async function runBatch(
 				baselineEnv,
 				tracePath,
 				visionAssert: visionFn,
+				// Remembered per sheet so a rerun asks the same question once. Vision is a model opinion
+				// on a borderline screen and it wavers — measured, that waver was 5 of the 7 verdict
+				// changes between consecutive runs of this very sheet.
+				visionCache: sheetSt.visionCache,
+				ruleId: sheetSt.rule.ruleId,
+				ruleVersion: sheetSt.rule.ruleVersion,
 				lenientMatch: !!input.lenientMatch,
 				assertRetryMs: 2500,
 				// A live SPA paints asynchronously; settle the pre-interaction screen so the

@@ -23,6 +23,7 @@ import { join } from "node:path";
 import type { Verdict } from "../../execute/runner.ts";
 import { MemoryPlanCache, type PlanCacheEntry } from "../../interpret/author.ts";
 import { establishRuleFromHeaders, type InterpretationRule, parseRule } from "../../interpret/rule.ts";
+import { MemoryVisionCache, type VisionCacheEntry } from "../../interpret/vision.ts";
 import {
 	type Baseline,
 	type BaselineGate,
@@ -122,6 +123,8 @@ export interface SheetState {
 	rule: InterpretationRule;
 	refineChat: ModelMessage[];
 	planCache: MemoryPlanCache;
+	/** Remembered vision judgements, so a rerun asks the same question once and answers it the same. */
+	visionCache: MemoryVisionCache;
 	baseline: MemoryBaselineStore;
 	history: RunView[];
 	reviewQueue: Map<string, ReviewItem>;
@@ -153,6 +156,7 @@ export function newSheetState(seedRule: InterpretationRule): SheetState {
 		rule: cloneRule(seedRule),
 		refineChat: [],
 		planCache: new MemoryPlanCache(),
+		visionCache: new MemoryVisionCache(),
 		baseline: new MemoryBaselineStore(),
 		history: [],
 		reviewQueue: new Map(),
@@ -247,6 +251,8 @@ interface PersistedSheet {
 	rule: InterpretationRule;
 	refineChat: ModelMessage[];
 	planCache: PlanCacheEntry[];
+	/** Optional: absent on every sheet written before vision answers were remembered. */
+	visionCache?: VisionCacheEntry[];
 	baselines: Baseline[];
 	history: RunView[];
 	reviewQueue: ReviewItem[];
@@ -345,6 +351,7 @@ export function serializeProjectState(st: ProjectState): PersistedState {
 			rule: s.rule,
 			refineChat: s.refineChat,
 			planCache: s.planCache.entries(),
+			visionCache: s.visionCache.entries(),
 			baselines: s.baseline.entries(),
 			history: s.history,
 			reviewQueue: [...s.reviewQueue.values()],
@@ -364,6 +371,7 @@ export function restoreProjectState(st: ProjectState, raw: unknown, defaultSheet
 		ss.rule = safeParseRule(s.rule) ?? cloneRule(st.defaultRule);
 		ss.refineChat = Array.isArray(s.refineChat) ? s.refineChat : [];
 		ss.planCache.load(Array.isArray(s.planCache) ? s.planCache : []);
+		ss.visionCache.load(Array.isArray(s.visionCache) ? s.visionCache : []);
 		ss.baseline.load(Array.isArray(s.baselines) ? s.baselines : []);
 		ss.history = Array.isArray(s.history) ? s.history : [];
 		ss.reviewQueue = new Map((Array.isArray(s.reviewQueue) ? s.reviewQueue : []).map((it) => [it.caseId, it]));
