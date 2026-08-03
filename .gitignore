@@ -26,3 +26,6 @@ HANDOVER.md
 # QA scratch / evidence (not product)
 .artifacts/
 .omo/
+
+# throwaway diagnostics (named *.tmp.* by convention, deleted when the question is answered)
+*.tmp.*
