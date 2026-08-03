@@ -185,10 +185,9 @@ if (!scoreOnly && (run.at ?? 0) < startedAt) {
 			"\n  Fix the run first, or pass --score-only to score the stored run on purpose.",
 	);
 }
-const queue = await get<{ caseId: string; reason: string }[] | { queue: { caseId: string; reason: string }[] }>(
+const items = await get<{ caseId: string; reason: string }[]>(
 	`/api/review/queue?projectId=${encodeURIComponent(projectId)}&sheetId=${encodeURIComponent(sheetId)}`,
 );
-const items = Array.isArray(queue) ? queue : (queue.queue ?? []);
 const reasonOf = new Map(items.map((i) => [i.caseId, i.reason]));
 
 const card = scoreAgainstLabels(
