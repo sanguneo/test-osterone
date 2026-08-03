@@ -169,16 +169,21 @@ export interface RequirementCoverage {
  * names that control, so its name is a literal quoted from the requirement, which is exactly what this
  * gate asks for.
  *
- * **The field kinds (`fieldAtMost`, `fieldExcludes`, `fieldHolds`) are excluded on purpose, and this is
- * the one exclusion that must not be "fixed".** They look like the `urlIncludes` case — "입력 제한되어야
- * 한다" carries no literal to quote and `fieldAtMost` is the mechanical form of exactly that sentence,
- * so counting them reads like an obvious correction. Measured on the 98-case sheet, it is a false-pass
- * factory: `아이디 입력란 내 12자 초과 입력 → 입력 제한되어야 한다` has a **passing** `fieldAtMost 아이디
- * ≤ 12자`, and the verdict a human recorded for that very box is *Fail* — "아이디 입력란 내 입력 제한이
- * 동작하지 않는 현상". Counting it releases that case to `pass` and trips the only hard gate this repo
- * has. 22 of 98 cases carry a field-kind assertion, so the blast radius is not small. The check reads
- * the box back; whether the app *earned* that value is what `decidedByTheBrowser` and a human's approved
- * baseline are for, not this gate.
+ * **The field kinds (`fieldAtMost`, `fieldExcludes`, `fieldHolds`) are excluded, and the exclusion is
+ * load-bearing today — but not for the reason it first appears.** They look like the `urlIncludes`
+ * case: "입력 제한되어야 한다" carries no literal to quote and `fieldAtMost` is the mechanical form of
+ * exactly that sentence, so counting them reads like an obvious correction. Counting them releases
+ * three cases on the 98-case sheet straight to `pass`, and one of those is recorded `Fail` by a human
+ * — "아이디 입력란 내 입력 제한이 동작하지 않는 현상". 22 of 98 cases carry a field-kind assertion, so
+ * the blast radius is not small.
+ *
+ * The honest part: that recorded `Fail` is **stale**. The stored evidence for it shows the box holding
+ * exactly 12 characters after more than 12 were typed, the read is of the very element the fill tagged
+ * (not a same-named sibling), and `decidedByTheBrowser` did not refuse it — so nothing declared
+ * `maxlength` and the app's own logic did the clamping. The engine is right and the sheet is out of
+ * date. So the rule to take from here is **not** "the human is always right"; it is that a change which
+ * moves verdicts toward green may not lean on labels that have never been re-checked. Re-verify the
+ * sheet first, correct it, and only then ask this question again against the 98-case gate.
  */
 export function requirementCoverage(expected: string, assertions: readonly Assertion[]): RequirementCoverage | null {
 	const reqs = expectedRequirements(expected);
