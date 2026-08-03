@@ -184,3 +184,51 @@ test("groundAction accepts a control only the browser can see, and still refuses
 	// The widening stays grounded: a name on neither list is a model invention, and is refused.
 	expect(groundAction({ kind: "click", target: "결재 승인" }, scan, ["superadmin"])).toBeNull();
 });
+
+test("a repair may not answer a missing control with the dialog's way out", async () => {
+	// Measured over 99 in-run repairs: 12 did exactly this — `기관 유형 → 취소`, `열람여부 → 확인`.
+	// Grounding accepts them because the control is genuinely on screen; it says nothing about intent.
+	// Both cancel or commit the dialog, and every later step then runs on a screen the case never
+	// described. Clearing a blocking overlay is a different job, on its own rung before this one.
+	const dialog = `<main><h1>기관 생성</h1><label for="t">기관 유형 선택</label>
+		<select id="t"><option>전체</option></select><button>확인</button><button>취소</button></main>`;
+	const req = { action: { kind: "click" as const, target: "기관 유형" }, error: "boom", html: dialog, url: "/agency" };
+	expect(await repairAction(new FakeModelClient(() => '{"kind":"click","target":"취소"}'), req)).toBeNull();
+	expect(await repairAction(new FakeModelClient(() => '{"kind":"click","target":"확인"}'), req)).toBeNull();
+	// The repair that actually serves the case is untouched.
+	expect(await repairAction(new FakeModelClient(() => '{"kind":"click","target":"기관 유형 선택"}'), req)).toEqual({
+		kind: "click",
+		target: "기관 유형 선택",
+	});
+});
+
+test("repairing a cancel into a differently-worded cancel is exactly right", async () => {
+	// Only substitution is refused. When the case's own action *is* the way out, re-grounding it is the
+	// repair — otherwise a sheet that says 닫기 on an app that paints 취소 could never be healed.
+	const dialog = `<main><h1>알림</h1><button>취소</button></main>`;
+	const req = { action: { kind: "click" as const, target: "닫기" }, error: "boom", html: dialog, url: "/x" };
+	expect(await repairAction(new FakeModelClient(() => '{"kind":"click","target":"취소"}'), req)).toEqual({
+		kind: "click",
+		target: "취소",
+	});
+});
+
+test("the way-out vocabulary is the sheet's, like every other list", async () => {
+	const dialog = `<main><h1>기관 생성</h1><button>그만두기</button><button>기관 유형 선택</button></main>`;
+	const req = {
+		action: { kind: "click" as const, target: "기관 유형" },
+		error: "boom",
+		html: dialog,
+		url: "/agency",
+		phrases: { abandonControl: ["그만두기"] },
+	};
+	expect(await repairAction(new FakeModelClient(() => '{"kind":"click","target":"그만두기"}'), req)).toBeNull();
+	// A default word this sheet did not teach is no longer a way out for it.
+	const untaught = { ...req, phrases: { abandonControl: ["그만두기"] } };
+	expect(await repairAction(new FakeModelClient(() => '{"kind":"click","target":"기관 유형 선택"}'), untaught)).toEqual(
+		{
+			kind: "click",
+			target: "기관 유형 선택",
+		},
+	);
+});

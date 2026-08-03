@@ -1566,3 +1566,52 @@ test("the same case passes once the setup actually enters a value", async () => 
 	expect(r.verdict).toBe("pass");
 	expect(r.healEvents).toEqual([]);
 });
+
+/** A control that only paints after a few reads — the SPA shape the absence check kept racing. */
+class LatePaintPage implements Page {
+	readonly tried: string[] = [];
+	private reads = 0;
+	constructor(private readonly paintsAfter: number) {}
+	async goto(): Promise<void> {}
+	async click(target: string): Promise<void> {
+		this.tried.push(target);
+		if (this.reads < this.paintsAfter) throw new Error(`locator.click: Timeout exceeded — ${target}`);
+	}
+	async fill(): Promise<void> {}
+	async snapshot(): Promise<PageSnapshot> {
+		this.reads++;
+		const painted = this.reads >= this.paintsAfter;
+		// Rendered either way — an empty shell is deliberately read as "not painted yet, stay patient",
+		// and the race being fixed here is about a painted screen that does not carry the control *yet*.
+		const html = painted
+			? "<main><h1>목록</h1><button>검색</button><button>저장</button></main>"
+			: "<main><h1>목록</h1><button>검색</button></main>";
+		return { url: "/app", text: painted ? "목록 검색 저장" : "목록 검색", html };
+	}
+}
+
+test("an absence is confirmed on a settled screen, so paint timing cannot choose the recovery path", async () => {
+	// One read after the quick attempt decided the whole ladder: present meant "wait properly", absent
+	// meant "give up now". Measured across consecutive runs, a case alternated between the two and one
+	// flip moved its verdict from pass to needs_review. Polling the cheap DOM read removes the race — a
+	// few ms against the 4s locator budget the decision is protecting.
+	const patient = new LatePaintPage(3);
+	const r = await runPlan(patient, [{ kind: "click", target: "저장" }], { settleMs: 1 });
+	expect(patient.tried.length).toBeGreaterThan(1); // the settle saw it paint, so the patient rung ran
+	expect(r.healEvents).toEqual([]);
+
+	// A target that never paints still fails fast: the poll is bounded, so a genuinely absent control
+	// does not buy a second full locator timeout — which is the reason the fast path exists.
+	const absent = new LatePaintPage(99);
+	const r2 = await runPlan(absent, [{ kind: "click", target: "저장" }], { settleMs: 1 });
+	expect(absent.tried).toEqual(["저장"]);
+	expect(r2.aborted).toBe(true);
+});
+
+test("with settleMs off the ladder is what it always was", async () => {
+	// FakePage-driven unit runs pass no settle, and they must not start paying for a poll.
+	const absent = new LatePaintPage(99);
+	const r = await runPlan(absent, [{ kind: "click", target: "저장" }]);
+	expect(absent.tried).toEqual(["저장"]);
+	expect(r.aborted).toBe(true);
+});

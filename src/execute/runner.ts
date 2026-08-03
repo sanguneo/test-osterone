@@ -468,6 +468,25 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			// The live screen at the moment of failure — reused for the presence check and the repair,
 			// so a miss costs one cheap DOM read instead of a second full locator timeout.
 			let live = err ? await opts.page.snapshot({ screenshot: false }).catch(() => null) : null;
+			/**
+			 * A control the app has not painted yet is indistinguishable from one that is not there.
+			 *
+			 * That single read decides the whole ladder — present means "wait properly", absent means
+			 * "give up now" — so paint timing was choosing the path. Measured across consecutive runs of
+			 * one sheet, the same case alternated between `click: X — Timeout 1200ms` (read said absent,
+			 * fast fail) and a repair that found it (read said present, patient retry), and one such flip
+			 * moved a verdict from `pass` to `needs_review`.
+			 *
+			 * So an absence is confirmed on a settled screen, polled cheaply — a DOM read costs a few ms
+			 * against the 4s locator budget this decision is protecting. Off when `settleMs` is 0, which
+			 * is what a deterministic `FakePage` runs with, so unit behaviour is unchanged.
+			 */
+			const settle = opts.settleMs ?? 0;
+			for (let waited = 0; err && live && settle > 0 && waited < settle * 4; waited += settle) {
+				if (targetOnScreen(action, live.html, live.url)) break;
+				await new Promise((r) => setTimeout(r, settle));
+				live = await opts.page.snapshot({ screenshot: false }).catch(() => live);
+			}
 			if (err && (!live || targetOnScreen(action, live.html, live.url))) {
 				// 1. Deterministic recovery: the target *is* on screen, so it is blocked or still
 				// settling — clear whatever intercepts input and give it the full budget this time.
@@ -497,6 +516,9 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 								// own: without it the model has no name for a `div`-with-a-class trigger and
 								// grounding would refuse the one answer that works.
 								clickables: seen.clickables,
+								// The sheet's own words for a control that walks out of the case, so a repair
+								// offering the dialog's cancel instead of the control it could not find is refused.
+								phrases: opts.rule.phrases,
 								title: tc.title,
 								steps: tc.steps,
 								expected: tc.expected,

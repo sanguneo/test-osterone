@@ -18,7 +18,7 @@
 import type { ContentPart, ModelClient } from "../model/model-client.ts";
 import type { PageAction } from "./interpret.ts";
 import { extractStructure, normLabel, pickFieldLabel, type ReconPage, renderPageForPrompt } from "./recon.ts";
-import { extractJsonObject } from "./rule.ts";
+import { DEFAULT_PHRASES, extractJsonObject } from "./rule.ts";
 
 export interface RepairRequest {
 	/** The action that could not be performed. */
@@ -41,6 +41,8 @@ export interface RepairRequest {
 	 * no name to propose and grounding would refuse the right answer.
 	 */
 	clickables?: string[];
+	/** The sheet's vocabulary, so `abandonControl` is teachable rather than hard-coded. */
+	phrases?: Record<string, string[]>;
 	/** Case intent, so the repair serves the test's goal rather than the literal selector. */
 	title?: string;
 	steps?: string[];
@@ -196,7 +198,7 @@ function describeAction(a: PageAction): string {
 
 /**
  * Ask the model for a grounded replacement action. Returns null when the model declines, replies
- * with garbage, or names anything the live page does not actually have.
+ * with garbage, names anything the live page does not actually have, or offers to leave the case.
  */
 export async function repairAction(model: ModelClient, req: RepairRequest): Promise<PageAction | null> {
 	const scan = extractStructure(req.html, req.url);
@@ -234,5 +236,34 @@ export async function repairAction(model: ModelClient, req: RepairRequest): Prom
 	const obj = extractJsonObject(reply);
 	if (!obj || obj.kind === "none") return null;
 	const candidate = parseCandidate(obj);
-	return candidate ? groundAction(candidate, scan, req.clickables ?? []) : null;
+	const grounded = candidate ? groundAction(candidate, scan, req.clickables ?? []) : null;
+	return grounded && abandonsTheCase(req.action, grounded, { phrases: req.phrases }) ? null : grounded;
+}
+
+/**
+ * Would this repair walk out of the case instead of carrying it forward?
+ *
+ * Grounding proves the control exists; it says nothing about intent. Measured over 99 in-run repairs,
+ * 12 answered a control the model could not find with the dialog's own exit — `기관 유형 → 취소`,
+ * `열람여부 → 확인`. Both are accepted by grounding and both are wrong in the same way: the dialog
+ * closes or commits, and every later step of the case runs on a screen it never described. A repair
+ * that cancels is not a repair, and one that confirms may submit a form the case never meant to send.
+ *
+ * Only ever a substitution: if the failed action was itself the cancel or the confirm, repairing it to
+ * a differently-worded one is exactly right. And clearing a blocking overlay is a different job with
+ * its own rung, which runs before a repair is ever asked for.
+ */
+function abandonsTheCase(
+	failed: PageAction,
+	repaired: PageAction,
+	vocab: { phrases?: Record<string, string[]> } = {},
+): boolean {
+	if (repaired.kind !== "click") return false;
+	const words = { ...DEFAULT_PHRASES, ...(vocab.phrases ?? {}) }.abandonControl ?? [];
+	const isExit = (text: string) => {
+		const t = normLabel(text);
+		return words.some((w) => normLabel(w) === t);
+	};
+	const from = failed.kind === "click" || failed.kind === "fill" ? failed.target : "";
+	return isExit(repaired.target) && !isExit(from);
 }

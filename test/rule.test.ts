@@ -53,6 +53,7 @@ test("serializeRule -> parseRule round-trips every field, including the optional
 			selected: ["ends up chosen"],
 			reflected: ["is kept"],
 			overlayCloser: ["dismiss this"],
+			abandonControl: ["give up"],
 			quotedLine: [">"],
 			pagerFirst: ["to the start"],
 			pagerPrev: ["back one"],
