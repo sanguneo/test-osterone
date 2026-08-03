@@ -5,6 +5,7 @@ import {
 	authStepFor,
 	endsSignedOut,
 	parseHealEvent,
+	partitionForParallel,
 	restoreTerminal,
 	runModelMeta,
 	stalePlaywrightTempDirs,
@@ -13,6 +14,7 @@ import {
 	TERMINAL_RESTORE_SEQ,
 	TRACE_KEEP_LIMIT,
 	tracesToEvict,
+	writeLedger,
 } from "../src/app/studio/run-helpers.ts";
 
 const ADMIN = { id: "a1", username: "admin", password: "pw" };
@@ -288,4 +290,51 @@ test("restoreTerminal never throws on a half-closed terminal", () => {
 	expect(() =>
 		restoreTerminal({ stdin: { isTTY: true }, stdout: { isTTY: false }, stderr: { isTTY: false }, writeSync: boom }),
 	).not.toThrow();
+});
+
+test("partitionForParallel: only a case the app was never asked to change may share a lane", () => {
+	// The evidence is the ledger a previous run left, not a guess at what a button does. Measured on the
+	// gate sheet: 0 of 98 cases sent a POST, so a vocabulary that called 66 of them writers was wrong
+	// about every one — the control named 생성 opens the create dialog, it does not save.
+	const cases = [
+		{ caseId: "read-1", title: "목록 확인" },
+		{ caseId: "writer", title: "항목 저장" },
+		{ caseId: "read-2", title: "필터 확인" },
+		{ caseId: "fresh", title: "새로 추가된 케이스" },
+		{ caseId: "login", title: "로그인" },
+		{ caseId: "logout", title: "로그아웃" },
+	];
+	const ledger = writeLedger([
+		{ caseId: "read-1" },
+		{ caseId: "writer", wroteToApp: true },
+		{ caseId: "read-2" },
+		{ caseId: "login" },
+		{ caseId: "logout" },
+	]);
+	expect(partitionForParallel(cases, ledger)).toEqual({
+		parallel: ["read-1", "read-2"],
+		// writer: it edits what the others read. fresh: never observed, and absence is not innocence.
+		// login/logout: the case is *about* the session, so running it beside anything measures timing.
+		serial: ["writer", "fresh", "login", "logout"],
+	});
+});
+
+test("partitionForParallel: a first run has no ledger, so nothing shares a lane", () => {
+	// The bootstrap. A sheet earns its partition by running serially once — never by assumption.
+	const cases = [
+		{ caseId: "a", title: "목록 확인" },
+		{ caseId: "b", title: "상세 확인" },
+	];
+	expect(partitionForParallel(cases, writeLedger([]))).toEqual({ parallel: [], serial: ["a", "b"] });
+	// Once it has run clean, both may share.
+	expect(partitionForParallel(cases, writeLedger([{ caseId: "a" }, { caseId: "b" }]))).toEqual({
+		parallel: ["a", "b"],
+		serial: [],
+	});
+	// A case that starts writing is pulled back out by the very next run that observes it — no
+	// vocabulary to update, and the correction costs one serial run rather than a wrong verdict.
+	expect(partitionForParallel(cases, writeLedger([{ caseId: "a" }, { caseId: "b", wroteToApp: true }]))).toEqual({
+		parallel: ["a"],
+		serial: ["b"],
+	});
 });

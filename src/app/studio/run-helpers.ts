@@ -107,6 +107,58 @@ export function authStepFor(
 	return { kind: "signIn", accountId: account.id };
 }
 
+/** What a finished run tells the next one about which cases touched the app's data. */
+export interface WriteLedger {
+	/** Cases observed sending a POST/PUT/PATCH/DELETE. */
+	wrote: Set<string>;
+	/** Cases the ledger has any observation for. Absence is not innocence — see `partitionForParallel`. */
+	known: Set<string>;
+}
+
+/** Read the ledger a previous run left behind. */
+export function writeLedger(results: readonly { caseId: string; wroteToApp?: boolean }[]): WriteLedger {
+	const wrote = new Set<string>();
+	const known = new Set<string>();
+	for (const r of results) {
+		known.add(r.caseId);
+		if (r.wroteToApp) wrote.add(r.caseId);
+	}
+	return { wrote, known };
+}
+
+/**
+ * Split a sheet into what may share the app and what may not.
+ *
+ * Two cases can run at the same time when neither changes what the other reads. Everything local is
+ * already private — each lane owns a browser context, so a filled box or an open dialog belongs to
+ * whoever did it — which leaves the app's own data, and the only honest evidence about that is
+ * whether the app was asked to change it. A previous run recorded exactly that, per case.
+ *
+ * Three ways to stay serial, and all of them fail closed:
+ *
+ *  - **The ledger says it wrote.** It edits what someone else is reading.
+ *  - **The ledger has never seen it.** A case added since the last run, or a first run on a new sheet.
+ *    Absence of evidence is not evidence: it runs alone, and earns its place next time.
+ *  - **It owns the session.** A login case starts signed out and a logout case ends signed in as
+ *    nobody. Lanes each hold their own cookies, but these cases are *about* the session, and running
+ *    them beside anything turns the run into a statement about timing rather than about the app.
+ *
+ * Sheet order is preserved inside both halves, so a run still reads the way the sheet does.
+ */
+export function partitionForParallel(
+	cases: readonly { caseId: string; title?: string | null; category?: string | null }[],
+	ledger: WriteLedger,
+): { parallel: string[]; serial: string[] } {
+	const parallel: string[] = [];
+	const serial: string[] = [];
+	for (const tc of cases) {
+		const ownsSession = startsSignedOut(tc) || endsSignedOut(tc);
+		const unproven = !ledger.known.has(tc.caseId) || ledger.wrote.has(tc.caseId);
+		(ownsSession || unproven ? serial : parallel).push(tc.caseId);
+	}
+	return { parallel, serial };
+}
+
 /** Default number of per-case traces a sheet keeps on disk. */
 export const TRACE_KEEP_LIMIT = 60;
 
