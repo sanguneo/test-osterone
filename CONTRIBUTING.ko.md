@@ -36,7 +36,7 @@ CI가 정확히 이것들을 돌립니다. 로컬에서 먼저 돌려 루프를 
 bun run typecheck        # tsc --noEmit (엔진)
 bun run studio:webcheck  # 웹 앱 tsc
 bun run lint             # biome check
-bun test                 # 320/320 유지
+bun test                 # 322/322 유지
 bun run studio:build     # UI 빌드도 게이트입니다 — 이걸 컴파일하는 곳이 달리 없습니다
 ```
 

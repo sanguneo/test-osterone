@@ -74,7 +74,7 @@ bun run setup          # if Chromium didn't install above, run it explicitly
 bun run studio         # ← the app: builds the UI and serves http://localhost:8686
 bun run demo           # or watch the pipeline run against a bundled fixture (no extra setup)
 
-bun test               # 320/320 (for contributors)
+bun test               # 322/322 (for contributors)
 ```
 
 > Requires **Bun ≥ 1.3**. test-osterone is **Studio-first** — the day-to-day UI is the browser Studio (`bun run studio`); the CLI is a thin bootstrap that exposes `setup`, `--version`, and `--help`.
@@ -203,7 +203,7 @@ Two interchangeable clients behind one interface:
 
 ## Status
 
-**Built & verified** (static, deterministic — 320/320 automated tests):
+**Built & verified** (static, deterministic — 322/322 automated tests):
 
 - **Core pipeline** — ingest → normalize → dedupe → rule → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract, plus the benchmark hard gate.
 - **Platform** — web dashboard · orchestration (node/host) · auth (API key + OAuth proxy + **native OpenAI device-code login**) · JUnit output.
@@ -230,7 +230,7 @@ src/
   testing/      fixture app + fixture model
   app/studio/   browser UI (Studio)
   cli.ts · index.ts
-test/           unit + smoke suites (320/320)
+test/           unit + smoke suites (322/322)
 examples/demo/  CLI live-run example
 scripts/        measure a labelled sheet against its human verdicts
 ```

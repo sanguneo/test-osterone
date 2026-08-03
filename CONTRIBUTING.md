@@ -36,7 +36,7 @@ CI runs exactly these; run them locally first so the loop is fast:
 bun run typecheck        # tsc --noEmit (engine)
 bun run studio:webcheck  # tsc for the web app
 bun run lint             # biome check
-bun test                 # 320/320 must stay green
+bun test                 # 322/322 must stay green
 bun run studio:build     # the UI build is a gate too — nothing else compiles it
 ```
 
