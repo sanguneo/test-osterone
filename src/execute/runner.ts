@@ -115,6 +115,8 @@ export interface StructuredResult {
 	 * "Clear runs" deliberately keeps approvals, so this is the only way to see one at work.
 	 */
 	baselineLifted?: boolean;
+	/** True only when completed execution has passing, complete, discriminating checks. */
+	baselineEligible?: boolean;
 	/** Relative path of the captured Playwright trace chunk (only kept for non-pass verdicts). */
 	tracePath?: string;
 }
@@ -139,6 +141,8 @@ export interface RunOptions {
 	 * opening a popup during setup is not mistaken for the case's own effect.
 	 */
 	preparation?: PageAction[];
+	/** Supplied only when the caller has independent evidence that this prerequisite already holds. */
+	preconditionSatisfied?: boolean;
 	/** Optional golden-baseline store: an approved match lifts a needs_review to pass; drift keeps it. */
 	baseline?: BaselineStore;
 	/** Stable env key for baselines (defaults to env.baseUrl, which may be ephemeral). */
@@ -403,6 +407,12 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			executedAsWritten = false;
 			healEvents.push("skip: the authored plan contains no actions for the written steps");
 		}
+		const authoredPlanBlocked =
+			!!opts.plan && (!executedAsWritten || actions.some((action) => action.kind === "unknown"));
+		if (authoredPlanBlocked) {
+			executedAsWritten = false;
+			healEvents.push("skip: incomplete authored plan was blocked before any preparation or case action");
+		}
 		/**
 		 * The screens this case actually passed through, in order, after each successful action.
 		 *
@@ -461,12 +471,12 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		 * `executedAsWritten` false so no approved baseline can sign it off either.
 		 */
 		let preparationFailure: string | undefined;
-		if (tc.precondition?.trim() && !opts.preparation?.length) {
+		if (tc.precondition?.trim() && !opts.preparation?.length && opts.preconditionSatisfied !== true) {
 			preparationFailure = "written precondition has no executable preparation";
 			executedAsWritten = false;
 			healEvents.push(`precondition: ${preparationFailure}`);
 		}
-		for (const prep of opts.preparation ?? []) {
+		for (const prep of authoredPlanBlocked ? [] : (opts.preparation ?? [])) {
 			if (preparationFailure) break;
 			if (prep.kind === "verify" || prep.kind === "unknown") {
 				preparationFailure = prep.text;
@@ -545,7 +555,8 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		}
 		// A case whose starting state was never reached must not run its own steps: performing them
 		// against the wrong screen manufactures evidence about something that was never exercised.
-		const actionsToRun = preparationFailure ? [] : withoutRestatedSetup(actions, opts.preparation ?? []);
+		const actionsToRun =
+			preparationFailure || authoredPlanBlocked ? [] : withoutRestatedSetup(actions, opts.preparation ?? []);
 		for (let i = 0; i < actionsToRun.length; i++) {
 			let action = actionsToRun[i];
 			if (!action) continue;
@@ -951,7 +962,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			requirementCoverage(
 				tc.expected,
 				assertions.filter((a) => !decidedByTheBrowser(a)),
-				{ phrases: opts.rule.phrases },
+				{ phrases: opts.rule.phrases, routes: opts.rule.routes },
 			) ?? undefined;
 		const underChecked = coverage ? coverage.covered < coverage.total : false;
 		if (verdict === "pass" && coverage && underChecked) {
@@ -959,13 +970,16 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			confidence = round2(coverage.covered / coverage.total);
 		}
 
-		// A golden baseline substitutes for an assertion we could not author — it does not substitute
-		// for running the case. Lifting a review whose cause was a skipped/failed/aborted step would
-		// pass a case that never exercised the app: on a prose sheet with no model connected, rule
-		// interpretation executes nothing, the browser sits on the landing screen, and any baseline
-		// approved for that screen turns the whole sheet green.
+		// A baseline may confirm a repaired execution whose checks are already complete and passing.
+		// It never substitutes for missing, failed, or non-discriminating verification.
+		const baselineEligible =
+			executedAsWritten &&
+			results.length > 0 &&
+			results.every((check) => check.passed) &&
+			!vacuousNote &&
+			(!coverage || coverage.covered === coverage.total);
 		let baselineLifted = false;
-		if (verdict === "needs_review" && executedAsWritten && opts.baseline) {
+		if (verdict === "needs_review" && baselineEligible && opts.baseline) {
 			const env = opts.baselineEnv ?? opts.env.baseUrl;
 			// gate() proposes a pending baseline on first sight; an approved + masked match lifts to pass.
 			if (opts.baseline.gate(tc.caseId, opts.rule.ruleVersion, env, snap.text).status === "match") {
@@ -986,6 +1000,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			attempts: 1,
 			snapshot: snap,
 			executedAsWritten,
+			baselineEligible,
 			// The app's own record of having changed something, so a schedule can be decided from
 			// evidence rather than from what a button happens to be called.
 			...(opts.page.serverWrites?.().length ? { wroteToApp: true } : {}),

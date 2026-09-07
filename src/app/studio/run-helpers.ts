@@ -40,6 +40,37 @@ export function endsSignedOut(tc: { category?: string | null; title?: string | n
 	return LOGOUT_RE.test(caseLabel(tc));
 }
 
+/** Only a plain login prerequisite may be discharged by the runner-owned authenticated account. */
+export function sessionSatisfiesPrecondition(
+	precondition: string,
+	accountId: string | undefined,
+	signedInAs: string | null,
+): boolean {
+	if (!accountId || signedInAs !== accountId) return false;
+	const text = precondition
+		.trim()
+		.replace(/[.!。]$/, "")
+		.replace(/\s+/g, "")
+		.toLowerCase();
+	return [
+		"로그인",
+		"로그인상태",
+		"로그인완료",
+		"로그인완료상태",
+		"로그인한상태",
+		"로그인된상태",
+		"로그인되어있는상태",
+		"사용자가로그인한상태",
+		"사용자가로그인된상태",
+		"loggedin",
+		"userisloggedin",
+		"theuserisloggedin",
+		"signedin",
+		"userissignedin",
+		"theuserissignedin",
+	].includes(text);
+}
+
 /** What the runner must do to the browser session before a case can be trusted to run. */
 export type AuthStep =
 	| { kind: "none" }

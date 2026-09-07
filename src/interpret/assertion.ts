@@ -234,7 +234,12 @@ export function evaluateAssertion(
 	};
 	switch (a.kind) {
 		case "urlIncludes": {
-			const passed = snap.url.includes(a.value);
+			const isPath = a.value.startsWith("/") && !a.value.startsWith("//") && !/[?#]/.test(a.value);
+			const actualPath = isPath ? new URL(snap.url, "http://test-osterone.invalid").pathname : "";
+			const expectedPath = a.value.replace(/\/+$/, "") || "/";
+			const passed = isPath
+				? actualPath === expectedPath || (expectedPath !== "/" && actualPath.startsWith(`${expectedPath}/`))
+				: snap.url.includes(a.value);
 			return { assertion: a, passed, detail: passed ? `url has "${a.value}"` : `url "${snap.url}" lacks "${a.value}"` };
 		}
 		case "textIncludes": {
@@ -385,7 +390,7 @@ export function authorableAssertions(assertions: Assertion[]): Assertion[] {
  * filter only landed because plans are re-sanitized on read; a prompt change has no such escape
  * hatch. Making it part of the key is what lets authoring be fixed at all.
  */
-export const AUTHOR_VERSION = 7;
+export const AUTHOR_VERSION = 8;
 
 /** Cache key: any change to the case, the rule, or the authoring contract forces a miss -> re-author. */
 export function assertionCacheKey(caseId: string, ruleId: string, ruleVersion: number, caseHash: string): string {

@@ -26,7 +26,8 @@ import {
 	parseStep,
 	verificationAssertions,
 } from "./interpret.ts";
-import { normLabel, type RouteEntry } from "./recon.ts";
+import type { RouteEntry } from "./recon.ts";
+import { matchRoute } from "./route-match.ts";
 import {
 	DEFAULT_CHAR_CLASSES,
 	DEFAULT_PHRASES,
@@ -34,6 +35,8 @@ import {
 	extractJsonObject,
 	type InterpretationRule,
 } from "./rule.ts";
+
+export { matchRoute } from "./route-match.ts";
 
 export interface AuthoredPlan {
 	actions: PageAction[];
@@ -339,31 +342,6 @@ function namesOnWordBoundary(text: string, needle: string): boolean {
 }
 
 /**
- * Which route, if any, a piece of prose unambiguously names.
- *
- * Shared by the assertion above and by preparation, because both need the same question answered from
- * the same table: the model will not use a route even when it is handed one (measured 0/10 for
- * assertions, and 27 of 58 failed preparations were a click on prose like "전체 기관 관리" while
- * `기관 관리 = /agency` sat unused in the prompt). Prompt instructions are not a mechanism here.
- */
-export function matchRoute(text: string, routes: readonly RouteEntry[] = []): RouteEntry | null {
-	if (routes.length === 0) return null;
-	const haystack = normLabel(text);
-	const hits = routes.filter((r) => {
-		// A "/" route is contained in every url and names every page — it identifies nothing.
-		// Recon does produce these: a dashboard's 일간/월간 toggles are anchors with no real href.
-		if (r.path === "/") return false;
-		const label = normLabel(r.label);
-		return label.length >= 2 && haystack.includes(label);
-	});
-	const best = hits[0];
-	if (!best) return null;
-	// Same label length, different destination → we cannot tell which was meant.
-	if (hits.some((h) => h.path !== best.path && h.label.length === best.label.length)) return null;
-	return best;
-}
-
-/**
  * Keep only well-formed, deduped assertions.
  *
  * Prose is dropped even though the prompt forbids it, because the model authors it anyway: a real
@@ -497,6 +475,8 @@ export async function authorPlanAI(
 	const actions = withRowClicks(sanitizeActions(obj.actions), { phrases: rule?.phrases });
 	const assertions = sanitizeAssertions(obj.assertions);
 	const covered = new Set<number>();
+	const outOfOrder = new Set<number>();
+	let previousStep = 0;
 	const interpretation = rule ?? establishRuleFromHeaders([]);
 	const sourceStep = (item: unknown): number | null => {
 		if (!item || typeof item !== "object") return null;
@@ -506,7 +486,13 @@ export async function authorPlanAI(
 	for (const [i, item] of (Array.isArray(obj.actions) ? obj.actions : []).entries()) {
 		const n = sourceStep(item);
 		const action = actions[i];
-		if (n === null || !action || action.kind === "unknown" || action.kind === "verify") continue;
+		if (!action || action.kind === "unknown" || action.kind === "verify") continue;
+		if (n === null) {
+			actions[i] = { kind: "unknown", text: "Authored action has no valid source step" };
+			continue;
+		}
+		if (n < previousStep) outOfOrder.add(n);
+		previousStep = Math.max(previousStep, n);
 		const written = parseStep(tc.steps[n - 1] ?? "", interpretation);
 		// Concrete DSL steps can be checked independently of the model's attribution. Free prose
 		// still requires one explicit binding per step; missing/duplicate source indices cannot hide it.
@@ -521,7 +507,11 @@ export async function authorPlanAI(
 		if (checks.length && checks.every((check) => assertions.some((a) => JSON.stringify(a) === JSON.stringify(check))))
 			covered.add(n);
 	}
-	return { actions, assertions, unresolvedSteps: tc.steps.flatMap((_step, i) => (covered.has(i + 1) ? [] : [i + 1])) };
+	return {
+		actions,
+		assertions,
+		unresolvedSteps: tc.steps.flatMap((_step, i) => (covered.has(i + 1) && !outOfOrder.has(i + 1) ? [] : [i + 1])),
+	};
 }
 
 /**
@@ -583,9 +573,9 @@ export function withDerivedAssertions(
  * approvals for the old starting state.
  */
 export function preparationCacheKey(precondition: string, ruleId: string, ruleVersion: number): string {
-	const canonical = precondition.replace(/\s+/g, " ").trim();
+	const canonical = precondition.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 	const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 16);
-	return `prep|${ruleId}|v${ruleVersion}|a${AUTHOR_VERSION}|${hash}`;
+	return `prep2|${ruleId}|v${ruleVersion}|a${AUTHOR_VERSION}|${hash}`;
 }
 
 /**

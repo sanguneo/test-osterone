@@ -38,7 +38,7 @@ import {
 	preparationCacheKey,
 	withRowClicks,
 } from "../../interpret/author.ts";
-import type { PageAction } from "../../interpret/interpret.ts";
+import { type PageAction, parseStep } from "../../interpret/interpret.ts";
 import {
 	attemptLogin,
 	extractStructure,
@@ -70,6 +70,7 @@ import {
 	partitionForParallel,
 	restoreTerminal,
 	runModelMeta,
+	sessionSatisfiesPrecondition,
 	stalePlaywrightTempDirs,
 	summarizeHeal,
 	tracesToEvict,
@@ -77,6 +78,7 @@ import {
 } from "./run-helpers.ts";
 import { deleteProjectSheets, deleteSheetContent, readSheetContent, writeSheetContent } from "./sheet-store.ts";
 import {
+	baselineReviewEligible,
 	type CaseView,
 	clearSheetRuns,
 	deleteProjectState,
@@ -88,6 +90,8 @@ import {
 	type ReviewItem,
 	type RunView,
 	resolveSheetId,
+	reviewForClient,
+	reviewMatchesExecution,
 	sheetState,
 } from "./store.ts";
 
@@ -944,9 +948,16 @@ export async function runBatch(
 		 * so keying on the text authors one plan between them instead of seven identical ones. Cached in
 		 * the same per-sheet plan cache, which the rule version and AUTHOR_VERSION already invalidate.
 		 */
-		const preparationFor = async (tc: NormalizedTC): Promise<PageAction[] | undefined> => {
+		const preparationFor = async (tc: NormalizedTC, satisfied: boolean): Promise<PageAction[] | undefined> => {
 			const text = tc.precondition?.trim();
-			if (!ai || !modelClient || !text) return undefined;
+			if (!text || satisfied) return undefined;
+			if (!ai || !modelClient) {
+				const actions = text
+					.split("\n")
+					.filter((line) => line.trim())
+					.map((line) => parseStep(line, sheetSt.rule));
+				return derivePreparationActions(text, actions, sheetSt.rule.routes);
+			}
 			const key = preparationCacheKey(text, sheetSt.rule.ruleId, sheetSt.rule.ruleVersion);
 			const cached = sheetSt.planCache.get(key);
 			// Derived on the way out, not only at author time: navigating by route is a rule about what a
@@ -965,7 +976,7 @@ export async function runBatch(
 			} catch (err) {
 				onProgress?.({
 					type: "notice",
-					message: `사전조건 해석 실패(${tc.title || tc.caseId}) — 준비 없이 실행합니다: ${(err as Error).message.slice(0, 100)}`,
+					message: `사전조건 해석 실패(${tc.title || tc.caseId}) — 이 케이스를 보류합니다: ${(err as Error).message.slice(0, 100)}`,
 				});
 				return undefined;
 			}
@@ -978,6 +989,7 @@ export async function runBatch(
 		 * this, with its own page — and the alternative, a second copy of it, is the shape this repo has
 		 * paid for twice (two results tables that drifted, two authoring funnels that diverged).
 		 */
+		const laneAccounts = new WeakMap<BrowserPage, string>();
 		const runCase = async (tc: NormalizedTC, index: number, lane?: BrowserPage): Promise<void> => {
 			if (signal?.aborted) return;
 			// A lane owns its own page and signed in once when it was created. It is only ever handed
@@ -992,7 +1004,12 @@ export async function runBatch(
 			planning.delete(tc.caseId);
 			if (!lane) await prepareAuth(tc, account);
 			// Authored after auth so the setup starts from the session the case will actually run under.
-			const preparation = await preparationFor(tc);
+			const preconditionSatisfied = sessionSatisfiesPrecondition(
+				tc.precondition ?? "",
+				account?.id,
+				lane ? (laneAccounts.get(lane) ?? null) : signedInAs,
+			);
+			const preparation = await preparationFor(tc, preconditionSatisfied);
 			if (signal?.aborted) return;
 			const tracePath = trace ? tracePathFor(input.projectId ?? "sample", sid, tc.caseId) : undefined;
 			const r = await runScenario(tc, {
@@ -1002,6 +1019,7 @@ export async function runBatch(
 				env: { browser: "chromium", viewport: "1280x800", baseUrl },
 				plan,
 				preparation,
+				preconditionSatisfied,
 				baseline: layeredBaseline(st, sid),
 				baselineEnv,
 				tracePath,
@@ -1084,7 +1102,10 @@ export async function runBatch(
 					screenshot: r.snapshot?.screenshot,
 					trace: keptTrace,
 					// Only a case that actually ran can be signed off with a golden baseline.
-					baselineEligible: r.executedAsWritten !== false,
+					baselineEligible: r.baselineEligible === true,
+					baselinePolicy: 2,
+					executionId: r.executionId,
+					...(r.baselineEligible ? { baselineText: r.snapshot?.text ?? "" } : {}),
 					ruleVersion: r.ruleVersion,
 					env: baselineEnv,
 					sheetId: sid,
@@ -1143,7 +1164,12 @@ export async function runBatch(
 				? partitionForParallel(cases, writeLedger(previous))
 				: { parallel: [] as string[], serial: cases.map((c) => c.caseId) };
 		const order = new Map(cases.map((tc, i) => [tc.caseId, i]));
-		const shareable = cases.filter((tc) => split.parallel.includes(tc.caseId));
+		const shareable = cases.filter(
+			(tc) => split.parallel.includes(tc.caseId) && accountFor(tc)?.id === defaultAccount?.id,
+		);
+		const shareableIds = new Set(shareable.map((tc) => tc.caseId));
+		split.serial = cases.filter((tc) => !shareableIds.has(tc.caseId)).map((tc) => tc.caseId);
+		if (shareable.length < 2) split.serial = cases.map((tc) => tc.caseId);
 
 		if (shareable.length > 1) {
 			/**
@@ -1162,6 +1188,7 @@ export async function runBatch(
 			if (hasCreds(laneAcct)) await ensureSignedInAs(laneAcct, "병렬 레인 준비");
 			const session = await page.sessionState().catch(() => undefined);
 			const makeLane = async (): Promise<BrowserPage | null> => {
+				if (hasCreds(laneAcct) && (!session || signedInAs !== laneAcct.id)) return null;
 				const lane = await BrowserPage.create({
 					baseUrl,
 					timeoutMs: 4000,
@@ -1170,6 +1197,7 @@ export async function runBatch(
 					...(session ? { storageState: session } : {}),
 				}).catch(() => null);
 				if (!lane) return null;
+				if (session && signedInAs) laneAccounts.set(lane, signedInAs);
 				// Put the lane where the shared page already is. A fresh context opens on `about:blank`,
 				// and a case whose plan starts with a click — no goto, because its precondition put the
 				// app on the right screen for the *serial* page — then clicks into an empty tab. Measured:
@@ -1841,12 +1869,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		const pid = url.searchParams.get("projectId") || "sample";
 		const st = stateFor(pid);
 		const reconcile = (items: ReviewItem[]): ReviewItem[] =>
-			items.filter((it) => {
-				if (layeredBaseline(st, it.sheetId).get(it.caseId, it.ruleVersion, it.env)?.approved === true) return false;
-				const rej = sheetState(st, it.sheetId).rejections.get(it.caseId);
-				if (rej && rej.ruleVersion === it.ruleVersion && rej.env === it.env) return false;
-				return true;
-			});
+			items
+				.filter((it) => {
+					const rej = sheetState(st, it.sheetId).rejections.get(it.caseId);
+					if (rej && rej.ruleVersion === it.ruleVersion && rej.env === it.env) return false;
+					return true;
+				})
+				.map(reviewForClient);
 		if (url.searchParams.get("all")) {
 			const all = [...st.sheets.values()].flatMap((s) => [...s.reviewQueue.values()]);
 			return send(res, 200, JSON.stringify(reconcile(all)));
@@ -1857,10 +1886,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 	}
 	if (req.method === "POST" && url.pathname === "/api/review/approve") {
 		try {
-			const { caseId, projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
+			const { caseId, projectId, sheetId, executionId } = JSON.parse((await readBody(req)) || "{}") as {
 				caseId?: string;
 				projectId?: string;
 				sheetId?: string;
+				executionId?: string;
 			};
 			const pid = projectId || "sample";
 			const st = stateFor(pid);
@@ -1879,7 +1909,14 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				}
 			}
 			if (!item || !sid) return send(res, 404, JSON.stringify({ error: "unknown case in review queue" }));
-			if (item.baselineEligible === false) {
+			if (!reviewMatchesExecution(item, executionId)) {
+				return send(
+					res,
+					409,
+					JSON.stringify({ error: "실행 근거가 없거나 변경되었습니다. 현재 실행 결과를 다시 불러와 검토하세요." }),
+				);
+			}
+			if (!baselineReviewEligible(item) || item.baselineText === undefined) {
 				// A case that never ran has no proposed baseline, and signing off the screen it happened
 				// to stop on would pass it without exercising anything. Say why instead of throwing.
 				return send(
@@ -1887,11 +1924,12 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 					400,
 					JSON.stringify({
 						error:
-							"작성된 대로 실행되지 않은 케이스입니다(스텝 미해석·동작 실패·중단). 기준 화면으로 승인할 수 없습니다 — 규칙을 고치거나 모델을 연결해 다시 실행하세요.",
+							"실행과 검증 근거가 충분하지 않은 케이스입니다. 누락·실패한 검증은 기준 화면으로 승인할 수 없습니다 — 규칙이나 사전조건을 수정한 뒤 다시 실행하세요.",
 					}),
 				);
 			}
-			// The run's gate() already proposed a full-text pending baseline; approving flips it.
+			// Approve the exact reviewed snapshot, not an older approved baseline that has since drifted.
+			sheetState(st, sid).baseline.propose(item.caseId, item.ruleVersion, item.env, item.baselineText);
 			sheetState(st, sid).baseline.approve(item.caseId, item.ruleVersion, item.env);
 			sheetState(st, sid).reviewQueue.delete(item.caseId);
 			saveState(pid, st);
@@ -1901,7 +1939,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				JSON.stringify({
 					approved: true,
 					caseId: item.caseId,
-					queue: [...sheetState(st, sid).reviewQueue.values()],
+					queue: [...sheetState(st, sid).reviewQueue.values()].map(reviewForClient),
 				}),
 			);
 		} catch (err) {
@@ -1910,10 +1948,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 	}
 	if (req.method === "POST" && url.pathname === "/api/review/reject") {
 		try {
-			const { caseId, projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
+			const { caseId, projectId, sheetId, executionId } = JSON.parse((await readBody(req)) || "{}") as {
 				caseId?: string;
 				projectId?: string;
 				sheetId?: string;
+				executionId?: string;
 			};
 			const pid = projectId || "sample";
 			const st = stateFor(pid);
@@ -1932,6 +1971,13 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				}
 			}
 			if (!item || !sid) return send(res, 404, JSON.stringify({ error: "unknown case in review queue" }));
+			if (!reviewMatchesExecution(item, executionId)) {
+				return send(
+					res,
+					409,
+					JSON.stringify({ error: "실행 근거가 없거나 변경되었습니다. 현재 실행 결과를 다시 불러와 검토하세요." }),
+				);
+			}
 			// Human verdict: this held case is a real fail. Recorded per (caseId, ruleVersion, env) so it
 			// doesn't re-surface until the case content or rule changes (symmetric with baseline approval).
 			sheetState(st, sid).rejections.set(item.caseId, {
@@ -1948,7 +1994,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 				JSON.stringify({
 					rejected: true,
 					caseId: item.caseId,
-					queue: [...sheetState(st, sid).reviewQueue.values()],
+					queue: [...sheetState(st, sid).reviewQueue.values()].map(reviewForClient),
 				}),
 			);
 		} catch (err) {

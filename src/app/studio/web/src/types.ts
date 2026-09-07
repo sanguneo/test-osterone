@@ -192,8 +192,9 @@ export interface ReviewItem {
 	text: string;
 	screenshot?: string;
 	trace?: boolean;
-	/** False when the case never ran as written — a golden baseline must not sign it off. */
+	/** True only when this execution has complete, passing verification eligible for approval. */
 	baselineEligible?: boolean;
+	executionId?: string;
 	ruleVersion: number;
 	env: string;
 	sheetId: string;

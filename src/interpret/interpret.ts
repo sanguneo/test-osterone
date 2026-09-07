@@ -6,6 +6,8 @@
 
 import type { NormalizedTC } from "../intake/schema.ts";
 import { type Assertion, type AssertionCache, assertionCacheKey, authorableAssertions } from "./assertion.ts";
+import type { RouteEntry } from "./recon.ts";
+import { matchRoute } from "./route-match.ts";
 import { DEFAULT_PHRASES, type InterpretationRule } from "./rule.ts";
 
 export type PageAction =
@@ -175,7 +177,7 @@ export interface RequirementCoverage {
 export function requirementCoverage(
 	expected: string,
 	assertions: readonly Assertion[],
-	vocab: { phrases?: Record<string, string[]> } = {},
+	vocab: { phrases?: Record<string, string[]>; routes?: readonly RouteEntry[] } = {},
 ): RequirementCoverage | null {
 	const reqs = expectedRequirements(expected);
 	if (reqs.length === 0) return null;
@@ -186,7 +188,19 @@ export function requirementCoverage(
 		const hits = reqs.flatMap((req, index) => {
 			const body = req.replace(/^(?:\d+[.)]|[-*•·])\s*/, "").trim();
 			let matches = false;
-			if (a.kind === "fieldAtMost" || a.kind === "fieldExcludes") matches = matchesPhrase(body, phrases.restriction);
+			if (a.kind === "urlIncludes") {
+				const path = a.value;
+				const usablePath = path.startsWith("/") && !path.startsWith("//") && path !== "/" && !/[?#]/.test(path);
+				const positive = matchesPhrase(body, phrases.navigation) && !/\b(?:not|never)\b|않|이동하지/i.test(body);
+				const literalPaths = [...body.matchAll(/(?:^|[\s"'(])(\/[^\s"'<>),;]+)/g)].map((hit) =>
+					hit[1]?.replace(/[.!]$/, ""),
+				);
+				matches =
+					usablePath &&
+					(body === path ||
+						(positive && (matchRoute(body, vocab.routes)?.path === path || literalPaths.includes(path))));
+			} else if (a.kind === "fieldAtMost" || a.kind === "fieldExcludes")
+				matches = matchesPhrase(body, phrases.restriction);
 			else if (a.kind === "fieldHolds") matches = matchesPhrase(body, phrases.reflected);
 			else if (a.kind === "controlSelected")
 				matches = matchesPhrase(body, phrases.selected) && loose(body).includes(loose(a.control));

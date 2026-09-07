@@ -69,7 +69,7 @@ const S = {
 		markFail: "실패로 처리",
 		processing: "처리 중…",
 		rejectFailed: (msg: string) => `실패 처리 실패: ${msg} — 다시 시도하세요.`,
-		notBaselineable: "작성된 대로 실행되지 않아 기준 화면으로 승인할 수 없습니다 — 규칙을 고치거나 모델을 연결해 다시 실행하세요.",
+		notBaselineable: "실행과 검증 근거가 충분하지 않아 기준 화면으로 승인할 수 없습니다 — 누락·실패한 항목을 수정한 뒤 다시 실행하세요.",
 	},
 	en: {
 		sectionTitle: "Review queue",
@@ -135,7 +135,7 @@ const S = {
 		processing: "Processing…",
 		rejectFailed: (msg: string) => `Mark-as-fail failed: ${msg} — try again.`,
 		notBaselineable:
-			"This case did not run as written, so it can't be approved as a baseline — fix the rule or connect a model and re-run.",
+			"This case lacks complete execution and verification evidence. Fix missing or failed checks before re-running.",
 	},
 } as const;
 
@@ -199,6 +199,7 @@ export function ReviewPanel({
 
 	const load = useCallback(() => {
 		void refreshKey;
+		setConfirmId("");
 		setItems(null);
 		setLoadErr("");
 		api
@@ -219,7 +220,8 @@ export function ReviewPanel({
 		setBusyId(caseId);
 		setApproveErr("");
 		try {
-			const { queue } = await api.reviewApprove(caseId, selId, selSheetId);
+			const item = items?.find((entry) => entry.caseId === caseId);
+			const { queue } = await api.reviewApprove(caseId, selId, selSheetId, item?.executionId);
 			setItems(queue);
 			onCount(queue.length);
 		} catch (e) {
@@ -234,7 +236,8 @@ export function ReviewPanel({
 		setBusyId(caseId);
 		setApproveErr("");
 		try {
-			const { queue } = await api.reviewReject(caseId, selId, selSheetId);
+			const item = items?.find((entry) => entry.caseId === caseId);
+			const { queue } = await api.reviewReject(caseId, selId, selSheetId, item?.executionId);
 			setItems(queue);
 			onCount(queue.length);
 		} catch (e) {
@@ -396,7 +399,7 @@ export function ReviewPanel({
 								<button className="button secondary compact" type="button" onClick={() => setConfirmId("")}>{t.cancel}</button>
 								<button className="approve" type="button" onClick={() => approve(it.caseId)}>{t.saveConfirm}</button>
 							</>
-						) : it.baselineEligible === false ? (
+						) : it.baselineEligible !== true ? (
 							<>
 								{/* The case never ran as written, so there is no screen worth signing off — offer
 								    only the honest verdict. */}

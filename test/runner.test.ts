@@ -150,10 +150,9 @@ test("plan: a provided AI plan replays its actions + assertions and ignores raw 
 	expect(r.assertions[0]?.passed).toBe(true);
 });
 
-test("baseline gate: unapproved stays needs_review; approving lifts a matching re-run to pass", async () => {
+test("baseline gate cannot substitute for missing assertions", async () => {
 	const store = new MemoryBaselineStore(() => 0);
-	// The case runs to completion — it is held only because no assertion could be authored for it,
-	// which is exactly what a human-approved golden baseline is for.
+	// Completing actions does not prove an expectation that has no executable check.
 	const tc = loginTC({
 		contentHash: "hash-baseline",
 		steps: ["Navigate to /login"],
@@ -170,14 +169,17 @@ test("baseline gate: unapproved stays needs_review; approving lifts a matching r
 			baseline: store,
 			baselineEnv: "test",
 		});
-	const first = await run2(); // no assertions -> needs_review; gate proposes a pending baseline
+	const first = await run2();
 	expect(first.verdict).toBe("needs_review");
 	expect(first.healEvents).toEqual([]);
 	expect(first.executedAsWritten).toBe(true);
+	expect(first.baselineEligible).toBe(false);
+	expect(store.get(tc.caseId, RULE.ruleVersion, "test")).toBeUndefined();
+	store.propose(tc.caseId, RULE.ruleVersion, "test", first.snapshot?.text ?? "");
 	store.approve(tc.caseId, RULE.ruleVersion, "test");
-	const second = await run2(); // approved + same masked snapshot -> pass
-	expect(second.verdict).toBe("pass");
-	expect(second.confidence).toBe(0.9);
+	const second = await run2();
+	expect(second.verdict).toBe("needs_review");
+	expect(second.baselineLifted).toBeUndefined();
 });
 
 test("baseline gate: a case whose action failed is never lifted to pass by an approved baseline", async () => {
@@ -278,8 +280,9 @@ test("vision may not turn a deterministically failed assertion into a pass", asy
 	expect(r.assertions[0]?.passed).toBe(false); // the deterministic truth is untouched
 	expect(r.assertions[0]?.detail).toContain("비전 판단");
 	expect(r.visionNote).toContain("사람 확인이 필요");
-	// The case did run, so the human's approved baseline is still the route to green.
+	// Executing the case does not make its failed assertion eligible for baseline approval.
 	expect(r.executedAsWritten).toBe(true);
+	expect(r.baselineEligible).toBe(false);
 });
 
 test("vision disagreeing about nothing leaves a plain fail alone", async () => {
@@ -397,35 +400,45 @@ test("vision may not invent a passing assertion for a case that had none", async
 	expect(r.visionNote).toContain("사람 확인이 필요");
 });
 
-test("a vision-disputed case still reaches pass through a human-approved baseline", async () => {
-	// Vision never decides, but the sanctioned route stays open: a human approves the screen once,
-	// and later runs match it deterministically.
+test("a vision-disputed failed check cannot be lifted by an approved text baseline", async () => {
 	const store = new MemoryBaselineStore(() => 0);
 	const tc = loginTC({ contentHash: "h-vision-4", steps: ["Navigate to /login"], expected: "Welcome, admin" });
 	const go = () => withVision(tc, true, { baseline: store, baselineEnv: "test" });
-	expect((await go()).verdict).toBe("needs_review");
+	const first = await go();
+	expect(first.verdict).toBe("needs_review");
+	expect(first.baselineEligible).toBe(false);
+	store.propose(tc.caseId, RULE.ruleVersion, "test", first.snapshot?.text ?? "");
 	store.approve(tc.caseId, RULE.ruleVersion, "test");
 	const second = await go();
-	expect(second.verdict).toBe("pass");
-	expect(second.confidence).toBe(0.9);
+	expect(second.verdict).toBe("needs_review");
+	expect(second.assertions[0]?.passed).toBe(false);
 });
 
-test("a pass carried by an approved baseline is marked as such", async () => {
-	// A green case from assertions and a green case from a year-old approval look identical in a
-	// report otherwise — and "Clear runs" keeps approvals, so the approval outlives the run history
-	// that would have explained it.
+test("a verified repaired action can use a baseline and records its contribution", async () => {
 	const store = new MemoryBaselineStore(() => 0);
-	const tc = loginTC({ contentHash: "h-lift-marked", steps: ["Navigate to /login"], expected: "Welcome, admin" });
-	const go = () => withVision(tc, true, { baseline: store, baselineEnv: "test" });
+	const tc = loginTC({ contentHash: "h-lift-marked", steps: ["Click Submit"], expected: "Done" });
+	const go = () =>
+		runScenario(tc, {
+			page: new FakePage({ url: "/form", text: "Editor Save", html: "<button>Save</button>" }, (action) => {
+				if (action.target !== "Save") throw new Error("Submit is missing");
+				return { url: "/form", text: "Done", html: "<main>Done</main>" };
+			}),
+			rule: RULE,
+			cache: new MemoryAssertionCache(),
+			env: ENV,
+			baseline: store,
+			baselineEnv: "test",
+			repair: async () => ({ action: { kind: "click", target: "Save" } }),
+		});
 	const first = await go();
 	expect(first.verdict).toBe("needs_review");
 	expect(first.baselineLifted).toBeUndefined();
+	expect(first.baselineEligible).toBe(true);
 	store.approve(tc.caseId, RULE.ruleVersion, "test");
 	const second = await go();
 	expect(second.verdict).toBe("pass");
 	expect(second.baselineLifted).toBe(true);
-	// The assertion itself still failed — the approval is what made it green, and it says so.
-	expect(second.assertions[0]?.passed).toBe(false);
+	expect(second.assertions[0]?.passed).toBe(true);
 });
 
 /**
@@ -460,8 +473,9 @@ test("a check that already held before the click cannot carry the case to pass",
 	expect(r.assertions[0]?.passed).toBe(true);
 	expect(r.verdict).toBe("needs_review");
 	expect(r.vacuousNote).toContain("동작 전 화면에서도");
-	// The case did run, so a human can still sign the screen off as the baseline.
+	// A non-discriminating check cannot be rescued by a matching text baseline.
 	expect(r.executedAsWritten).toBe(true);
+	expect(r.baselineEligible).toBe(false);
 });
 
 test("a check that only holds after the click still passes", async () => {

@@ -10,7 +10,6 @@
 export const DEFAULT_MASKS: RegExp[] = [
 	/\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}(:\d{2})?/gi, // ISO-ish timestamps
 	/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, // uuid
-	/\b\d{6,}\b/g, // long digit runs (epochs, ids)
 ];
 
 export function maskDynamic(text: string, masks: RegExp[] = DEFAULT_MASKS): string {

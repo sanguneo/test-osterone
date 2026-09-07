@@ -88,7 +88,7 @@ test("authorPlanAI drops a prose assertion the model returned despite being told
 	// human had marked Fail — so the model path enforces the same prose rule the rule path does.
 	const model = new FakeModelClient(() =>
 		JSON.stringify({
-			actions: [{ kind: "click", target: "개인정보처리방침" }],
+			actions: [{ kind: "click", target: "개인정보처리방침", sourceStep: 1 }],
 			assertions: [
 				{ kind: "textIncludes", value: "1. 팝업이 종료되어야 한다." },
 				{ kind: "textIncludes", value: "The popup should close" },
@@ -341,7 +341,7 @@ test("a cached plan picks up a derived check it was never authored with", async 
 		expected: "1. 비활성 라디오 버튼 선택되어야 한다.",
 	});
 	const model = new FakeModelClient(() =>
-		JSON.stringify({ actions: [{ kind: "click", target: "비활성" }], assertions: [] }),
+		JSON.stringify({ actions: [{ kind: "click", target: "비활성", sourceStep: 1 }], assertions: [] }),
 	);
 	const first = await getOrAuthorPlan(radio, rule, cache, model, {});
 	expect(first.cacheHit).toBe(false);

@@ -22,9 +22,9 @@ function tc(over: Partial<NormalizedTC> = {}): NormalizedTC {
 
 const PLAN_JSON = JSON.stringify({
 	actions: [
-		{ kind: "goto", path: "/" },
-		{ kind: "fill", target: "Username", value: "admin" },
-		{ kind: "click", target: "Log in" },
+		{ kind: "goto", path: "/", sourceStep: 1 },
+		{ kind: "fill", target: "Username", value: "admin", sourceStep: 2 },
+		{ kind: "click", target: "Log in", sourceStep: 3 },
 		{ kind: "bogus", target: "x" }, // retained as unknown: unsupported kind
 		{ kind: "fill", target: "only-target" }, // retained as unknown: missing value
 	],

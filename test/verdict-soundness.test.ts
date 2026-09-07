@@ -230,14 +230,16 @@ test("a failed original retry cannot be lifted by an approved baseline", async (
 });
 
 test("changing the authoring account invalidates a cached literal credential", async () => {
-	const c = tc();
+	const c = tc({ steps: ["Use the configured credentials"] });
 	const cache = new MemoryPlanCache();
 	let calls = 0;
 	const model = new FakeModelClient((messages) => {
 		calls++;
 		const text = messages.map((m) => m.content).join("\n");
 		return JSON.stringify({
-			actions: [{ kind: "fill", target: "Username", value: text.includes("username: alice") ? "alice" : "bob" }],
+			actions: [
+				{ kind: "fill", target: "Username", value: text.includes("username: alice") ? "alice" : "bob", sourceStep: 1 },
+			],
 			assertions: [],
 		});
 	});
@@ -301,4 +303,64 @@ test("a changing field check cannot conceal a pre-existing text assertion", asyn
 	expect(result.assertions.every((a) => a.passed)).toBe(true);
 	expect(result.verdict).toBe("needs_review");
 	expect(result.vacuousNote).toBeDefined();
+});
+
+for (const order of [
+	[2, 1],
+	[1, 2, 1],
+]) {
+	test(`a model plan cannot reorder or return to an earlier written step: ${order}`, async () => {
+		const c = tc({ steps: ["Click Save", "Click Confirm"], expected: "Saved" });
+		const model = new FakeModelClient(() =>
+			JSON.stringify({
+				actions: order.map((sourceStep) => ({
+					kind: "click",
+					target: sourceStep === 1 ? "Save" : "Confirm",
+					sourceStep,
+				})),
+				assertions: [{ kind: "textIncludes", value: "Saved" }],
+			}),
+		);
+		const cache = new MemoryPlanCache();
+		for (let attempt = 0; attempt < 2; attempt++) {
+			let calls = 0;
+			const authored = await getOrAuthorPlan(c, rule, cache, model);
+			const result = await run(
+				c,
+				new FakePage(screen("Editor"), () => {
+					calls++;
+					return screen("Saved");
+				}),
+				{ plan: authored.plan },
+			);
+			expect(result.verdict).toBe("needs_review");
+			expect(result.executedAsWritten).toBe(false);
+			expect(calls).toBe(0);
+		}
+	});
+}
+
+test("an extra action without a source step blocks even an otherwise complete plan", async () => {
+	const c = tc({ steps: ["Click Save"], expected: "Saved" });
+	const model = new FakeModelClient(() =>
+		JSON.stringify({
+			actions: [
+				{ kind: "click", target: "Save", sourceStep: 1 },
+				{ kind: "click", target: "Delete" },
+			],
+			assertions: [{ kind: "textIncludes", value: "Saved" }],
+		}),
+	);
+	const authored = await getOrAuthorPlan(c, rule, new MemoryPlanCache(), model);
+	let calls = 0;
+	const result = await run(
+		c,
+		new FakePage(screen("Editor"), () => {
+			calls++;
+			return screen("Saved");
+		}),
+		{ plan: authored.plan },
+	);
+	expect(result.verdict).toBe("needs_review");
+	expect(calls).toBe(0);
 });

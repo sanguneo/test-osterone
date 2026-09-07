@@ -103,14 +103,40 @@ export interface ReviewItem {
 	/** True when a Playwright trace was captured for this held case (served via /api/trace). */
 	trace?: boolean;
 	/**
-	 * May a human sign this case off as a golden baseline? False when the case never ran as written
-	 * (a step could not be interpreted, an action failed, the tail was abandoned) — approving the
-	 * screen it happened to end on would pass a case that never exercised the app.
+	 * May a human approve this repaired execution? Requires complete execution, passing and
+	 * discriminating checks, and full requirement coverage under the current evidence policy.
 	 */
 	baselineEligible?: boolean;
+	/** Older reviews must be re-run before using the stricter evidence policy. */
+	baselinePolicy?: 2;
+	/** Binds a decision to the exact execution whose evidence the reviewer saw. */
+	executionId?: string;
+	/** Full pending text, kept server-side so approval updates the reviewed baseline rather than an old one. */
+	baselineText?: string;
 	ruleVersion: number;
 	env: string;
 	sheetId: string;
+}
+
+export function baselineReviewEligible(
+	item: Pick<ReviewItem, "baselineEligible" | "baselinePolicy" | "baselineText" | "executionId">,
+): boolean {
+	return (
+		item.baselinePolicy === 2 &&
+		item.baselineEligible === true &&
+		typeof item.baselineText === "string" &&
+		!!item.executionId
+	);
+}
+
+export function reviewMatchesExecution(item: Pick<ReviewItem, "executionId">, executionId?: string): boolean {
+	return !!executionId && item.executionId === executionId;
+}
+
+export function reviewForClient(item: ReviewItem): ReviewItem {
+	const view = { ...item, baselineEligible: baselineReviewEligible(item) };
+	delete view.baselineText;
+	return view;
 }
 
 /** A human "this held case is a fail" decision, kept per (caseId, ruleVersion, env) like an approval. */
