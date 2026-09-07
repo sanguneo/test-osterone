@@ -12,6 +12,7 @@
  */
 
 import type { Verdict } from "../execute/runner.ts";
+import type { NormalizedTC } from "../intake/schema.ts";
 
 /** A human verdict as QA sheets actually spell it. */
 export type HumanVerdict = "pass" | "fail" | "unlabeled";
@@ -25,6 +26,55 @@ export function parseHumanVerdict(raw: string | null | undefined): HumanVerdict 
 	if (t === "pass" || t === "p" || t === "성공" || t === "통과") return "pass";
 	if (t === "fail" || t === "f" || t === "실패") return "fail";
 	return "unlabeled";
+}
+
+export interface SheetLabel {
+	label: string;
+	source: string;
+	note: string;
+}
+
+/** Pair normalized records by semantic identity, never by a numeric ID that restarts in each tab. */
+export function labelsByCase(
+	cases: readonly Pick<NormalizedTC, "caseId" | "sourceId" | "category" | "recordedVerdict" | "note">[],
+): Map<string, SheetLabel> {
+	const labels = new Map<string, SheetLabel>();
+	for (const tc of cases) {
+		const source = [tc.category, tc.sourceId ?? tc.caseId].filter(Boolean).join(" / ");
+		const cells = (tc.recordedVerdict ?? "")
+			.split(/\r?\n/)
+			.map((value) => value.trim())
+			.filter(Boolean);
+		const verdicts = new Set(cells.map(parseHumanVerdict).filter((value) => value !== "unlabeled"));
+		if (verdicts.size > 1)
+			throw new Error(`Conflicting recorded verdicts for ${source}; select a specific verdict column.`);
+		const label = cells.find((value) => parseHumanVerdict(value) !== "unlabeled") ?? cells[0] ?? "";
+		const previous = labels.get(tc.caseId);
+		const before = parseHumanVerdict(previous?.label);
+		const current = parseHumanVerdict(label);
+		if (previous && before !== "unlabeled" && current !== "unlabeled" && before !== current) {
+			throw new Error(`Conflicting labels for duplicate case ${tc.caseId}: ${previous.source} and ${source}`);
+		}
+		if (!previous || (before === "unlabeled" && current !== "unlabeled")) {
+			labels.set(tc.caseId, { label, source, note: tc.note ?? "" });
+		}
+	}
+	return labels;
+}
+
+/** A cancelled, filtered, duplicated, or stale run cannot be scored as the complete current sheet. */
+export function requireCompleteRun(expectedCaseIds: readonly string[], results: readonly { caseId: string }[]): void {
+	const expected = new Set(expectedCaseIds);
+	if (expected.size === 0) throw new Error("Cannot score an empty sheet.");
+	const seen = new Set<string>();
+	for (const result of results) {
+		if (!expected.has(result.caseId)) throw new Error(`Run contains an unknown or stale case: ${result.caseId}`);
+		if (seen.has(result.caseId)) throw new Error(`Run contains a duplicate result: ${result.caseId}`);
+		seen.add(result.caseId);
+	}
+	if (seen.size !== expected.size) {
+		throw new Error(`Incomplete run: ${seen.size} of ${expected.size} current cases were recorded.`);
+	}
 }
 
 export interface ScoredCase {

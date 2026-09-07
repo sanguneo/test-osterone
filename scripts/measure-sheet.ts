@@ -10,14 +10,20 @@
  *
  *   node --experimental-transform-types scripts/measure-sheet.ts <projectId> <sheetId> [labelColumn]
  *
- * `labelColumn` defaults to `검증 결과`. Cases whose label is NT/NA/blank are reported separately
+ * `labelColumn` defaults to the saved mapping or detected verdict column. NT/NA/blank are reported separately
  * rather than counted as agreement.
  */
 
-import { csvToRawTable } from "../src/intake/ingest.ts";
-import { parseCsv } from "../src/intake/csv.ts";
-import { ingestCsv } from "../src/intake/ingest.ts";
-import { formatScorecard, scoreAgainstLabels, type ScoreInput } from "../src/report/label-scorecard.ts";
+import { csvToRawTable, ingestCsv, mapColumns, toCsvExportUrl } from "../src/intake/ingest.ts";
+import type { TcField } from "../src/intake/schema.ts";
+import {
+	formatScorecard,
+	labelsByCase,
+	parseHumanVerdict,
+	requireCompleteRun,
+	type ScoreInput,
+	scoreAgainstLabels,
+} from "../src/report/label-scorecard.ts";
 
 const BASE = process.env.STUDIO_URL?.replace(/\/$/, "") || "http://localhost:8686";
 const argv = process.argv.slice(2);
@@ -26,7 +32,7 @@ const scoreOnly = argv.includes("--score-only");
 /** `--lanes N`: run the ledger-cleared cases across N browsers. Serial by default — a parallel run is
  * only meaningful compared against one. */
 const lanes = Math.max(1, Math.trunc(Number(argv.find((a) => a.startsWith("--lanes="))?.split("=")[1] ?? 1)) || 1);
-const [projectId, sheetId, labelColumn = "검증 결과"] = argv.filter((a) => !a.startsWith("--"));
+const [projectId, sheetId, labelColumn] = argv.filter((a) => !a.startsWith("--"));
 
 if (!projectId || !sheetId) {
 	console.error("usage: measure-sheet.ts <projectId> <sheetId> [labelColumn] [--score-only] [--lanes=N]");
@@ -41,7 +47,14 @@ const get = async <T>(path: string): Promise<T> => {
 
 interface Project {
 	id: string;
-	sheets: { id: string; name: string; kind: string; sheetUrl: string; csvText: string }[];
+	sheets: {
+		id: string;
+		name: string;
+		kind: string;
+		sheetUrl: string;
+		csvText: string;
+		mapping?: Partial<Record<TcField, string>>;
+	}[];
 	baseUrl?: string;
 	env?: string;
 	accounts?: unknown[];
@@ -56,7 +69,38 @@ if (!project) throw new Error(`no project ${projectId}`);
 const sheet = project.sheets.find((s) => s.id === sheetId);
 if (!sheet) throw new Error(`no sheet ${sheetId} in ${projectId}`);
 
-// Run it. The server hydrates the sheet content from disk, so csvText stays empty on the wire.
+// Freeze the source text before executing: labels and execution must use the same records.
+const state = await get<{ mapping: Partial<Record<TcField, string>> }>(
+	`/api/status?projectId=${encodeURIComponent(projectId)}&sheetId=${encodeURIComponent(sheetId)}`,
+);
+let csvText: string;
+if (sheet.kind === "sheet") {
+	const source = await fetch(toCsvExportUrl(sheet.sheetUrl));
+	if (!source.ok) throw new Error(`sheet fetch failed: ${source.status}`);
+	csvText = await source.text();
+} else {
+	({ csvText } = await get<{ csvText: string }>(
+		`/api/sheet/content?projectId=${encodeURIComponent(projectId)}&sheetId=${encodeURIComponent(sheetId)}`,
+	));
+}
+const table = csvToRawTable(csvText);
+const overrides = Object.fromEntries(
+	Object.entries({ ...state.mapping, ...sheet.mapping }).filter(([, header]) => table.headers.includes(header)),
+);
+const mapping = { ...mapColumns(table.headers), ...overrides };
+const verdictColumn = labelColumn ?? mapping.recordedVerdict;
+if (!verdictColumn || !table.headers.includes(verdictColumn)) {
+	throw new Error(`No usable verdict column. Columns: ${table.headers.join(", ")}`);
+}
+const ingested = ingestCsv(csvText, { ...mapping, recordedVerdict: verdictColumn });
+const unique = ingested.unique;
+const labels = labelsByCase(ingested.all);
+if (![...labels.values()].some((entry) => parseHumanVerdict(entry.label) !== "unlabeled")) {
+	throw new Error("No recorded Pass/Fail labels are available for comparison.");
+}
+console.log(`labels paired by normalized case identity: ${unique.length} cases / ${ingested.all.length} records`);
+
+// Run the same source snapshot used to pair the recorded labels.
 // `startedAt` is the guard against scoring the wrong thing: a run that dies (the batch aborted on a
 // login timeout, the browser never launched) records nothing, and the history's newest entry is then
 // yesterday's. Scoring that silently is how a stale run gets reported as today's measurement — it
@@ -64,29 +108,30 @@ if (!sheet) throw new Error(`no sheet ${sheetId} in ${projectId}`);
 const startedAt = Date.now();
 let runError = "";
 if (!scoreOnly) {
-const res = await fetch(`${BASE}/api/run`, {
-	method: "POST",
-	headers: { "content-type": "application/json" },
-	body: JSON.stringify({
-		projectId,
-		sheetId,
-		sheets: [{ ...sheet, csvText: "" }],
-		baseUrl: project.baseUrl,
-		env: project.env,
-		accounts: project.accounts,
-		referenceRepo: project.referenceRepo,
-		aiInterpret: project.aiInterpret,
-		lenientMatch: project.lenientMatch,
-		// `--lanes N` runs the cases a previous run observed not writing to the app across N browsers.
-		// Off unless asked for, because a measurement is only worth anything against a serial baseline.
-		...(lanes > 1 ? { lanes } : {}),
-	}),
+	const res = await fetch(`${BASE}/api/run`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({
+			projectId,
+			sheetId,
+			sheets: [{ ...sheet, kind: "csv", csvText, mapping: { ...mapping, recordedVerdict: verdictColumn } }],
+			baseUrl: project.baseUrl,
+			env: project.env,
+			accounts: project.accounts,
+			referenceRepo: project.referenceRepo,
+			aiInterpret: project.aiInterpret,
+			lenientMatch: project.lenientMatch,
+			// `--lanes N` runs the cases a previous run observed not writing to the app across N browsers.
+			// Off unless asked for, because a measurement is only worth anything against a serial baseline.
+			...(lanes > 1 ? { lanes } : {}),
+		}),
 	});
 	if (!res.ok || !res.body) throw new Error(`POST /api/run -> ${res.status} ${await res.text()}`);
 
 	let buf = "";
+	const decoder = new TextDecoder();
 	for await (const chunk of res.body) {
-		buf += Buffer.from(chunk as Uint8Array).toString("utf8");
+		buf += decoder.decode(chunk, { stream: true });
 		const lines = buf.split("\n");
 		buf = lines.pop() ?? "";
 		for (const line of lines) {
@@ -107,61 +152,15 @@ const res = await fetch(`${BASE}/api/run`, {
 	}
 }
 
-/**
- * The sheet's own verdict column is the ground truth — so a case has to be paired with *its* row.
- *
- * This used to pair the Nth unique case with the Nth data row, on the assumption that row order
- * survives ingest. It does not: ingest drops content-duplicate rows. On the sheet measured here 100
- * rows produced 98 cases, and from the first duplicate onward every pairing slid — 24 of 98 cases were
- * scored against another case's verdict. Every aggregate built on that was wrong by a quarter.
- *
- * So pair by the sheet's own id (`sourceId`, from the NO/ID column), and refuse to fall back to index
- * pairing when the counts differ, because then it is known to be wrong rather than merely unverified.
- */
-const { csvText } = await get<{ csvText: string }>(
-	`/api/sheet/content?projectId=${encodeURIComponent(projectId)}&sheetId=${encodeURIComponent(sheetId)}`,
-);
-const rows = parseCsv(csvText);
-const header = rows[0] ?? [];
-const labelIdx = header.indexOf(labelColumn);
-if (labelIdx < 0) {
-	throw new Error(`sheet has no "${labelColumn}" column. Columns: ${csvToRawTable(csvText).headers.join(", ")}`);
-}
-const idIdx = header.findIndex((h) => ["no", "no.", "id", "시험 id", "tc id"].includes(h.toLowerCase().trim()));
-// The human's own words for the defect. Printed on every mismatch row because they adjudicate it:
-// a false-pass whose 비고 says "기획서와 상이" is the engine judging the sheet while the human judged a
-// document the engine has never seen — a documented class, not a defect — and telling the two apart
-// used to cost a per-case archaeology dig into the sheet.
-const noteIdx = header.findIndex((h) => ["비고", "note", "notes", "remark", "remarks"].includes(h.toLowerCase().trim()));
-const dataRows = rows.slice(1).filter((r) => (idIdx < 0 ? r.some(Boolean) : (r[idIdx] ?? "").trim()));
-const unique = ingestCsv(csvText, {}).unique;
-const labels = new Map<string, { label: string; source: string; note: string }>();
-const bySourceId = new Map<string, string[]>();
-if (idIdx >= 0) {
-	for (const row of dataRows) {
-		const id = (row[idIdx] ?? "").trim();
-		if (id) bySourceId.set(id, row);
-	}
-}
-const pairedById = idIdx >= 0 && unique.every((c) => c.sourceId && bySourceId.has(c.sourceId));
-if (!pairedById && unique.length !== dataRows.length) {
-	throw new Error(
-		`cannot pair cases with their labels: ${unique.length} cases vs ${dataRows.length} rows and no usable id column. ` +
-			`Ingest deduplicates, so index pairing would score cases against other cases' verdicts.`,
-	);
-}
-unique.forEach((c, i) => {
-	const row = (pairedById && c.sourceId ? bySourceId.get(c.sourceId) : dataRows[i]) as string[] | undefined;
-	labels.set(c.caseId, {
-		label: row?.[labelIdx] ?? "",
-		source: (idIdx >= 0 ? row?.[idIdx] : "") ?? "",
-		note: (noteIdx >= 0 ? row?.[noteIdx] : "")?.replace(/\s+/g, " ").trim() ?? "",
-	});
-});
-console.log(`labels paired by ${pairedById ? "sheet id" : "row order"} · ${unique.length} cases / ${dataRows.length} rows`);
-
 interface RunView {
-	results: { caseId: string; verdict: ScoreInput["verdict"]; title: string; passed: number; total: number }[];
+	results: {
+		caseId: string;
+		verdict: ScoreInput["verdict"];
+		title: string;
+		passed: number;
+		total: number;
+		assertions?: { detail: string; passed: boolean }[];
+	}[];
 	counts: Record<string, number>;
 	durationMs?: number;
 	model?: string;
@@ -175,6 +174,11 @@ const history = await get<RunView[]>(
 );
 const run = history[0];
 if (!run) throw new Error("no run recorded");
+if (runError) throw new Error(`Run failed: ${runError}`);
+requireCompleteRun(
+	unique.map((tc) => tc.caseId),
+	run.results,
+);
 // The run we just asked for has to be the run we score. A batch that aborts records nothing, and the
 // newest history entry is then whatever ran last time — plausible numbers for the wrong code.
 if (!scoreOnly && (run.at ?? 0) < startedAt) {
@@ -218,7 +222,9 @@ for (const c of card.cases) {
 	const id = entry?.source || c.caseId.slice(0, 6);
 	// A mismatch row carries the human's own defect note — it adjudicates the row on the spot.
 	const note =
-		(c.outcome === "false-pass" || c.outcome === "false-fail") && entry?.note ? ` · 비고: ${entry.note.slice(0, 60)}` : "";
+		(c.outcome === "false-pass" || c.outcome === "false-fail") && entry?.note
+			? ` · 비고: ${entry.note.slice(0, 60)}`
+			: "";
 	// A row the human passed carries no defect note, so a false-fail needs the other half of the
 	// argument: what the engine looked for and did not find. Measured (NO 216): the sheet quotes one
 	// guidance line and the app paints a different one — sheet↔app copy drift, the mirror of the

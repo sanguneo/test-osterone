@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test";
 
-import { formatScorecard, parseHumanVerdict, scoreAgainstLabels } from "../src/report/label-scorecard.ts";
+import { ingestCsv } from "../src/intake/ingest.ts";
+import {
+	formatScorecard,
+	labelsByCase,
+	parseHumanVerdict,
+	requireCompleteRun,
+	scoreAgainstLabels,
+} from "../src/report/label-scorecard.ts";
 
 test("parseHumanVerdict reads the verdicts QA sheets actually contain", () => {
 	expect(parseHumanVerdict("Pass")).toBe("pass");
@@ -61,4 +68,67 @@ test("unlabeled cases are reported separately, never folded into agreement", () 
 	expect(s.unlabeled).toBe(2);
 	expect(s.agree).toBe(1);
 	expect(s.total).toBe(3);
+});
+
+test("source IDs repeated across tabs retain their own labels and notes", () => {
+	const { all, unique } = ingestCsv(
+		[
+			"Category,NO,Title,Steps,Expected,verdict,note",
+			"Admin,1,Permissions,Click Save,Done,Pass,admin note",
+			"Viewer,1,Permissions,Click Save,Done,Fail,viewer note",
+		].join("\n"),
+	);
+	const labels = labelsByCase(all);
+	expect(unique).toHaveLength(2);
+	expect([...labels.values()]).toEqual([
+		{ label: "Pass", source: "Admin / 1", note: "admin note" },
+		{ label: "Fail", source: "Viewer / 1", note: "viewer note" },
+	]);
+});
+
+test("custom mappings and continuation rows retain labels on their normalized case", () => {
+	const { all } = ingestCsv("Ref,Case,Procedure,Outcome,QA\n1,Login,Open form,,Pass\n,,Submit,Welcome,", {
+		id: "Ref",
+		title: "Case",
+		step: "Procedure",
+		expected: "Outcome",
+		recordedVerdict: "QA",
+	});
+	expect(all).toHaveLength(1);
+	expect(all[0]?.steps).toEqual(["Open form", "Submit"]);
+	expect([...labelsByCase(all).values()]).toEqual([{ label: "Pass", source: "1", note: "" }]);
+});
+
+test("contradictory labels for identical cases cannot be silently overwritten", () => {
+	const { all } = ingestCsv(
+		"ID,Title,Steps,Expected,verdict\n1,Login,Open form,Welcome,Pass\n2,Login,Open form,Welcome,Fail",
+	);
+	expect(() => labelsByCase(all)).toThrow("Conflicting labels");
+	expect(() =>
+		labelsByCase([
+			{
+				caseId: "case",
+				sourceId: "1",
+				category: "A",
+				recordedVerdict: "Pass\nFail",
+			},
+		]),
+	).toThrow("Conflicting recorded verdicts");
+});
+
+test("consistent duplicate labels are usable, including repeated browser results", () => {
+	const labels = labelsByCase([
+		{ caseId: "case", sourceId: "1", category: "A", recordedVerdict: "Pass\nPass" },
+		{ caseId: "case", sourceId: "2", category: "A", recordedVerdict: "Pass" },
+	]);
+	expect(labels.size).toBe(1);
+	expect(labels.get("case")?.label).toBe("Pass");
+});
+
+test("only a complete current run can be scored, independent of result order", () => {
+	expect(() => requireCompleteRun(["a", "b"], [{ caseId: "b" }, { caseId: "a" }])).not.toThrow();
+	expect(() => requireCompleteRun(["a", "b"], [{ caseId: "a" }])).toThrow("Incomplete run");
+	expect(() => requireCompleteRun(["a"], [{ caseId: "old" }])).toThrow("unknown or stale");
+	expect(() => requireCompleteRun(["a"], [{ caseId: "a" }, { caseId: "a" }])).toThrow("duplicate result");
+	expect(() => requireCompleteRun([], [])).toThrow("empty sheet");
 });
