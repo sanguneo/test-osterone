@@ -4,6 +4,10 @@
 export interface RawTable {
 	headers: string[];
 	rows: Record<string, string>[];
+	/** Unique physical-column keys for repeated header names. */
+	columnGroups?: Record<string, string[]>;
+	/** Row indexes preceded by a blank record or repeated header; continuation cannot cross these. */
+	rowBreaks?: number[];
 }
 
 /** Canonical test-case fields the raw sheet is mapped onto. */
@@ -33,10 +37,9 @@ export interface NormalizedTC {
 	 * The starting state the case assumes, verbatim from the sheet ("계정 관리 페이지 내 신규 계정 생성
 	 * 버튼 선택된 상태").
 	 *
-	 * Not part of `contentHash` on purpose. It is not what the case verifies, and folding it in would
-	 * change every `caseId` — orphaning every approved baseline in every project. The preparation it
-	 * produces is cached under its own text instead, which also means the seven cases that share one
-	 * precondition share one plan.
+	 * Part of case identity when present: identical actions under different starting conditions
+	 * are different tests and must not share an approved baseline. Preparation plans still share
+	 * their own text-keyed cache when multiple cases have the same starting condition.
 	 */
 	precondition?: string;
 	/**
@@ -47,9 +50,8 @@ export interface NormalizedTC {
 	 * leaving the screen — the same pairing `measure` prints, which is what makes a disagreement
 	 * readable in one line ("사람 Fail · 엔진 pass · 비고: 기획서와 상이").
 	 *
-	 * Outside `contentHash` for the same reason `precondition` is: this is bookkeeping *about* the
-	 * case, not what the case verifies, and hashing it would change every caseId whenever somebody
-	 * filled a result in — orphaning every approved baseline.
+	 * Outside `contentHash`: this is bookkeeping about a case, not its execution context or what
+	 * it verifies. Filling in a result must not change the case identity.
 	 */
 	recordedVerdict?: string;
 	note?: string;
@@ -58,6 +60,6 @@ export interface NormalizedTC {
 	env: string | null;
 	/** In-sheet grouping (from a 분류/category column, or a `[말머리]` title prefix). Null when uncategorized. */
 	category: string | null;
-	/** sha256 prefix over normalized (title, steps, expected, role, env). Drives caseId + assertion-cache invalidation. */
+	/** sha256 prefix over normalized content plus category/precondition when present. Context-free legacy IDs are preserved. */
 	contentHash: string;
 }

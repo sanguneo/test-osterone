@@ -312,14 +312,19 @@ export function App() {
 					projectId={selectedProject.id}
 					accounts={selectedProject.accounts}
 					onClose={() => setSheetModalOpen(false)}
+					onAnalyzed={(sheetId, mapping) => {
+						setProjects((current) => current.map((project) => project.id === selectedProject.id
+							? { ...project, sheets: project.sheets.map((sheet) => sheet.id === sheetId ? { ...sheet, mapping } : sheet) }
+							: project));
+					}}
 					onSave={(sheet) => {
-						const nextSheets = editingSheet ? selectedProject.sheets.map((item) => item.id === editingSheet.id ? sheet : item) : [...selectedProject.sheets, sheet];
+						const nextSheets = selectedProject.sheets.some((item) => item.id === sheet.id) ? selectedProject.sheets.map((item) => item.id === sheet.id ? sheet : item) : [...selectedProject.sheets, sheet];
 						void persistSheets(nextSheets);
 						setSelectedSheetId(sheet.id);
 						setSheetModalOpen(false);
 					}}
 					onPersist={async (sheet) => {
-						const nextSheets = editingSheet ? selectedProject.sheets.map((item) => (item.id === editingSheet.id ? sheet : item)) : [...selectedProject.sheets, sheet];
+						const nextSheets = selectedProject.sheets.some((item) => item.id === sheet.id) ? selectedProject.sheets.map((item) => item.id === sheet.id ? sheet : item) : [...selectedProject.sheets, sheet];
 						await persistSheets(nextSheets);
 						setSelectedSheetId(sheet.id);
 					}}

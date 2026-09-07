@@ -1,155 +1,73 @@
-/**
- * Intake: parse a sheet into a RawTable, map columns onto canonical fields,
- * normalize deterministically, and dedupe by content hash. Everything here is
- * pure + deterministic so re-runs produce identical caseIds and dedupe results.
- */
-
+/** Deterministic normalization and content-hash deduplication over browser-safe sheet tables. */
 import { createHash } from "node:crypto";
-
-import { parseCsv } from "./csv.ts";
 import type { NormalizedTC, RawTable, TcField } from "./schema.ts";
+import { csvToRawTable, mapColumns, tableCell } from "./table.ts";
 
-export { parseCsv };
-
-/** First non-empty grid row is the header; remaining rows become header-keyed objects. */
-export function csvToRawTable(text: string): RawTable {
-	const grid = parseCsv(text).filter((r) => r.some((c) => c.trim() !== ""));
-	const first = grid[0];
-	if (!first) return { headers: [], rows: [] };
-	const headers = first.map((h) => h.trim());
-	const rows = grid.slice(1).map((r) => {
-		const obj: Record<string, string> = {};
-		headers.forEach((h, i) => {
-			obj[h] = (r[i] ?? "").trim();
-		});
-		return obj;
-	});
-	return { headers, rows };
-}
-
-const FIELD_ALIASES: Record<TcField, string[]> = {
-	id: ["test id", "tc id", "case id", "tcid", "id", "no", "번호", "순번"],
-	title: ["title", "name", "summary", "test case", "scenario", "소분류", "테스트 항목", "항목", "제목", "시나리오명"],
-	step: [
-		"steps",
-		"step",
-		"actions",
-		"action",
-		"procedure",
-		"test procedure",
-		"시험절차",
-		"테스트 절차",
-		"재현 절차",
-		"절차",
-		"단계",
-		"시나리오",
-		// Last resort only: a precondition describes the starting state, not what to do. A sheet that
-		// carries both (사전조건 + 시험절차) must map its *procedure* column, whichever comes first.
-		"사전조건",
-	],
-	expected: [
-		"expected result",
-		"test expected result",
-		"expected",
-		"result",
-		"assertion",
-		"예상결과",
-		"기대결과",
-		"기대 결과",
-	],
-	priority: ["priority", "prio", "severity", "중요도", "우선순위"],
-	role: ["role", "persona", "account", "user", "담당자"],
-	env: ["environment", "env", "stage", "환경"],
-	category: ["category", "분류", "카테고리", "구분", "그룹", "group", "대분류", "중분류", "메뉴", "menu"],
-	// The starting state a case assumes, which the engine has to reach before the case's own steps
-	// mean anything. Measured on a real sheet: of 57 cases the engine could not drive, 57 had one
-	// written here — it was being dropped, so the model re-derived it mid-run, expensively, and every
-	// success was capped at needs_review.
-	precondition: [
-		"precondition",
-		"pre-condition",
-		"preconditions",
-		"given",
-		"setup",
-		"사전조건",
-		"전제조건",
-		"선행조건",
-	],
-	// Bookkeeping a person already filled in: the QA verdict and the defect note beside it. Read so a
-	// reviewer can adjudicate the engine against the sheet's own record in place. Aliases stay
-	// specific — a bare "결과" would swallow 예상결과 on every sheet that has no verdict column.
-	recordedVerdict: [
-		"검증 결과",
-		"검증결과",
-		"시험 결과",
-		"시험결과",
-		"테스트 결과",
-		"테스트결과",
-		"수행결과",
-		"판정결과",
-		"verdict",
-		"test result",
-		"pass/fail",
-	],
-	note: ["비고", "note", "notes", "remark", "remarks", "특이사항", "메모", "comment", "comments"],
-};
-
-/**
- * Deterministic header→field mapping. **Alias priority decides**, not column order: with an
- * exact-match-first-across-all-aliases rule a sheet listing 사전조건 before 시험절차 would map its
- * steps to the precondition and silently never execute the real procedure. Within one alias, an
- * exact header match still beats a substring match.
- */
-export function mapColumns(headers: string[]): Partial<Record<TcField, string>> {
-	const mapping: Partial<Record<TcField, string>> = {};
-	const lower = headers.map((h) => ({ raw: h, low: h.toLowerCase().trim() }));
-	for (const field of Object.keys(FIELD_ALIASES) as TcField[]) {
-		for (const alias of FIELD_ALIASES[field]) {
-			const hit = lower.find((h) => h.low === alias) ?? lower.find((h) => h.low.includes(alias));
-			if (hit) {
-				mapping[field] = hit.raw;
-				break;
-			}
-		}
-	}
-	// A sheet with only a 사전조건 column and no 시험절차 uses it *as* the procedure (that is what the
-	// step field's last-resort alias is for). Claiming the same column twice would replay the steps as
-	// their own setup, so the procedure wins and there is no separate precondition.
-	if (mapping.precondition && mapping.precondition === mapping.step) delete mapping.precondition;
-	// Neither record-keeping column may share one with the case's own content. They are matched last,
-	// so they can only ever double-claim — and a sheet with no verdict column having its 예상결과 read
-	// as one would put a fabricated "this is what the human recorded" in front of a reviewer.
-	for (const field of ["recordedVerdict", "note"] as const) {
-		const claimed = mapping[field];
-		if (!claimed) continue;
-		const ownedByCase =
-			claimed === mapping.expected ||
-			claimed === mapping.step ||
-			claimed === mapping.title ||
-			claimed === mapping.precondition ||
-			claimed === mapping.category;
-		if (ownedByCase) delete mapping[field];
-	}
-	return mapping;
-}
+export { parseCsv } from "./csv.ts";
+export { csvToRawTable, gridToRawTable, mapColumns, tableCell } from "./table.ts";
 
 function normText(value: string): string {
-	return value
-		.replace(/\r\n/g, "\n")
-		.replace(/\r/g, "\n")
-		.trim()
-		.replace(/[ \t]+/g, " ");
+	return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
 }
 
 function splitSteps(cell: string): string[] {
 	return normText(cell)
 		.split("\n")
-		.map((l) => l.trim())
-		.filter((l) => l.length > 0);
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0);
 }
 
 function contentHash(parts: unknown): string {
 	return createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
+}
+
+/** Fold only adjacent, explicitly identified cases; do not guess that every untitled row belongs
+ * to its predecessor. Context conflicts and source separators end a continuation group. */
+function continuationRows(table: RawTable, mapping: Partial<Record<TcField, string>>): Record<string, string>[] {
+	if (!mapping.id) return table.rows;
+	const cell = (row: Record<string, string>, field: TcField) =>
+		mapping[field] ? tableCell(table, row, mapping[field]) : "";
+	const breaks = new Set(table.rowBreaks);
+	const rows: Record<string, string>[] = [];
+	let previous: Record<string, string> | undefined;
+	let lastSource: Record<string, string> | undefined;
+	for (const [index, source] of table.rows.entries()) {
+		if (breaks.has(index)) previous = undefined;
+		const id = cell(source, "id");
+		const title = cell(source, "title");
+		const sameCase =
+			previous &&
+			cell(previous, "id") &&
+			(id === cell(previous, "id") || (!id && !title)) &&
+			(!title || title === cell(previous, "title"));
+		const context = previous;
+		const conflicting =
+			context &&
+			(["category", "role", "env", "precondition", "priority", "recordedVerdict"] as const).some(
+				(field) => cell(source, field) && cell(source, field) !== cell(context, field),
+			);
+		const hasProcedure = cell(source, "step") || cell(source, "expected");
+		const repeated = lastSource && table.headers.every((header) => source[header] === lastSource?.[header]);
+		if (previous && sameCase && !conflicting && hasProcedure && !repeated) {
+			for (const field of ["step", "expected", "note"] as const) {
+				const header = mapping[field];
+				if (!header) continue;
+				const value = cell(source, field);
+				const prior = cell(previous, field);
+				if (value && (field === "step" || value !== prior)) {
+					previous[header] = [prior, value].filter(Boolean).join("\n");
+					for (const key of table.columnGroups?.[header] ?? []) {
+						if (key !== header) previous[key] = "";
+					}
+				}
+			}
+		} else {
+			previous = { ...source };
+			rows.push(previous);
+		}
+		lastSource = source;
+	}
+	return rows;
 }
 
 /** Map + normalize rows into NormalizedTC[] with deterministic content hashes + caseIds. */
@@ -159,14 +77,13 @@ export function normalizeTable(
 ): NormalizedTC[] {
 	const cell = (row: Record<string, string>, field: TcField): string => {
 		const header = mapping[field];
-		return header ? (row[header] ?? "") : "";
+		return header ? tableCell(table, row, header) : "";
 	};
-	return table.rows.map((row) => {
+	return continuationRows(table, mapping).map((row) => {
 		const rawTitle = normText(cell(row, "title"));
 		let title = rawTitle;
 		let category = normText(cell(row, "category")) || null;
 		if (!category) {
-			// Fall back to a `[말머리]` title prefix as the category, stripping it from the title.
 			const m = rawTitle.match(/^\[\s*([^\]]+?)\s*\]\s*(.+)$/);
 			if (m?.[1] && m[2]) {
 				category = m[1];
@@ -182,10 +99,11 @@ export function normalizeTable(
 		const precondition = normText(cell(row, "precondition")) || undefined;
 		const recordedVerdict = normText(cell(row, "recordedVerdict")) || undefined;
 		const note = normText(cell(row, "note")) || undefined;
-		// `precondition` and the two record-keeping columns are deliberately outside the hash: none of
-		// them is what the case verifies, and hashing them would change every caseId — orphaning every
-		// approved baseline the moment somebody filled a result in.
-		const hash = contentHash([title, steps, expected, role, env]);
+		// Context changes what is exercised. Old baselines must not approve a different starting
+		// state or another tab's identically worded case. Context-free legacy IDs stay unchanged.
+		const identity: unknown[] = [title, steps, expected, role, env];
+		if (category || precondition) identity.push({ category, precondition: precondition ?? null });
+		const hash = contentHash(identity);
 		return {
 			caseId: `TC-${hash}`,
 			sourceId,
@@ -226,27 +144,24 @@ export function dedupe(tcs: NormalizedTC[]): DedupeResult {
 	return { unique, duplicates };
 }
 
-/** Convenience: CSV text → normalized + deduped cases. `mappingOverride` (e.g. an AI-refined
- * rule.mapping) wins over auto-detected columns, so a conversationally-established sheet
- * interpretation actually drives ingestion. */
+/** CSV text to cases. Only overrides naming an existing column may replace auto-detection. */
 export function ingestCsv(
 	text: string,
 	mappingOverride: Partial<Record<TcField, string>> = {},
 ): { all: NormalizedTC[] } & DedupeResult {
 	const table = csvToRawTable(text);
-	const mapping = { ...mapColumns(table.headers), ...mappingOverride };
-	// Spreadsheets carry sub-header and spacer rows (a "Chrome | Edge" band under the real header,
-	// section separators). Those normalize to a case with nothing to do and nothing to check, which
-	// would sit in the review queue as permanent noise — a row with no title, no steps and no
-	// expected result is not a test case. Only prune when the mapping resolved one of those columns:
-	// with nothing mapped, "empty" says nothing about the row.
+	const overrides = Object.fromEntries(
+		Object.entries(mappingOverride).filter(([, header]) => table.headers.includes(header)),
+	);
+	const mapping = { ...mapColumns(table.headers), ...overrides };
 	const mapped = normalizeTable(table, mapping);
+	// Only prune empty content when the sheet actually has identifiable content columns.
 	const canJudgeEmptiness = !!(mapping.title || mapping.step || mapping.expected);
 	const all = canJudgeEmptiness ? mapped.filter((tc) => tc.title || tc.steps.length > 0 || tc.expected) : mapped;
 	return { all, ...dedupe(all) };
 }
 
-/** Convert a Google Sheets URL to its read-only CSV export URL (auth/permission is a Follow-up). */
+/** Convert a Google Sheets URL to its read-only CSV export URL. */
 export function toCsvExportUrl(sheetUrl: string): string {
 	const id = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1];
 	if (!id) throw new Error("not a Google Sheets URL");

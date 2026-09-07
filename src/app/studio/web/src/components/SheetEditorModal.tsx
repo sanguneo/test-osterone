@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { parseCsv, toCsv } from "../../../../../intake/csv.ts";
+import { mergeSheetCsv } from "../../../../../intake/merge.ts";
 import { api } from "../api";
 import { getLang, useLang } from "../i18n";
 import type { Account, AnalyzeResult, ChatMsg, PreviewResult, TestSheet, XlsxSheet } from "../types";
@@ -197,6 +197,7 @@ export function SheetEditorModal({
 	projectId,
 	onSave,
 	onPersist,
+	onAnalyzed,
 	onClose,
 	onImportSheets,
 	accounts,
@@ -205,6 +206,7 @@ export function SheetEditorModal({
 	projectId: string;
 	onSave: (sheet: TestSheet) => void;
 	onPersist: (sheet: TestSheet) => Promise<void>;
+	onAnalyzed: (sheetId: string, mapping: Record<string, string>) => void;
 	onClose: () => void;
 	onImportSheets: (sheets: TestSheet[]) => void;
 	accounts: Account[];
@@ -293,32 +295,29 @@ export function SheetEditorModal({
 			baseUrl: baseUrl || undefined,
 			env: env || undefined,
 			accountId: accountId || undefined,
+			mapping: analyzeResult?.mapping,
 		}),
-		[sheetId, name, kind, sheetUrl, csvText, baseUrl, env, accountId],
+		[sheetId, name, kind, sheetUrl, csvText, baseUrl, env, accountId, analyzeResult],
 	);
 
 	const loadInterpretation = useCallback(() => {
 		const sheet = buildSheet();
 		setInterpretLoading(true);
 		setInterpretError("");
-		Promise.all([
-			api.analyze({ sheetUrl: kind === "sheet" ? sheetUrl : undefined, csvText: kind === "csv" ? csvText : undefined, projectId, sheetId }),
-			api.preview({ sample: false, sheets: [sheet], sheetId, baseUrl: baseUrl || undefined, projectId }),
-		])
-			.then(([analyzeRes, previewRes]) => {
+		api.analyze({ sheetUrl: kind === "sheet" ? sheetUrl : undefined, csvText: kind === "csv" ? csvText : undefined, projectId, sheetId })
+			.then(async (analyzeRes) => {
 				setAnalyzeResult(analyzeRes);
-				setPreview(previewRes);
+				onAnalyzed(sheetId, analyzeRes.mapping);
 				setRuleVersion(analyzeRes.ruleVersion);
 				if (analyzeRes.chat?.length) setMessages(analyzeRes.chat);
+				// Analysis saves a per-sheet override, not the shared rule. Preview consumes
+				// request metadata, so pass that override explicitly after analysis succeeds.
+				const previewRes = await api.preview({ sample: false, sheets: [{ ...sheet, mapping: analyzeRes.mapping }], sheetId, baseUrl: baseUrl || undefined, projectId });
+				setPreview(previewRes);
 			})
 			.catch((error) => setInterpretError((error as Error).message))
 			.finally(() => setInterpretLoading(false));
-	}, [buildSheet, kind, sheetUrl, csvText, projectId, sheetId, baseUrl]);
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies: loadInterpretation is deliberately excluded — it changes on every keystroke in the sheet fields, and depending on it would re-fire the interpretation while the user types. Reaching step 2 is the trigger.
-	useEffect(() => {
-		if (!editSheet && step === 2) loadInterpretation();
-	}, [step, editSheet]);
+	}, [buildSheet, kind, sheetUrl, csvText, projectId, sheetId, baseUrl, onAnalyzed]);
 
 	const canProceedStep1 = name.trim().length > 0 && (kind === "sheet" ? sheetUrl.trim().length > 0 : csvText.trim().length > 0);
 
@@ -329,6 +328,7 @@ export function SheetEditorModal({
 		try {
 			await onPersist(buildSheet());
 			setStep(2);
+			loadInterpretation();
 		} catch (error) {
 			setPersistError((error as Error).message);
 		} finally {
@@ -363,21 +363,6 @@ export function SheetEditorModal({
 			setXlsxError(S[getLang()].pickOne);
 			return;
 		}
-		// A test sheet is per FILE: merge the picked spreadsheet tabs into ONE sheet, tagging each
-		// tab's rows with a leading 분류 (category) column so the tabs become in-sheet categories.
-		//
-		// Merge by CSV *record*, never by physical line: QA sheets put multi-line text in 예상결과,
-		// and splitting on "\n" would prefix the category onto every continuation line — injecting
-		// "분류," garbage inside the quoted cell and dropping its blank lines.
-		const grids = chosen.map((tab) => ({ name: tab.name, rows: parseCsv(tab.csv) }));
-		const header = grids[0]?.rows[0] ?? [];
-		const merged: string[][] = [["분류", ...header]];
-		for (const tab of grids) {
-			for (const row of tab.rows.slice(1)) {
-				if (!row.some((cell) => cell.trim())) continue;
-				merged.push([tab.name, ...row]);
-			}
-		}
 		const fileName = xlsxName.replace(/\.[^.]+$/, "").trim() || "가져온 시트";
 		onImportSheets([
 			{
@@ -385,7 +370,7 @@ export function SheetEditorModal({
 				kind: "csv",
 				name: fileName,
 				sheetUrl: "",
-				csvText: toCsv(merged),
+				csvText: mergeSheetCsv(chosen),
 				origin: "xlsx",
 			},
 		]);
@@ -623,7 +608,7 @@ export function SheetEditorModal({
 					</div>
 
 					<div className="editor-actions" style={{ marginTop: 14 }}>
-						<button className="button secondary" type="button" onClick={() => setStep(2)}>{t.prev}</button>
+						<button className="button secondary" type="button" onClick={() => { setStep(2); loadInterpretation(); }}>{t.prev}</button>
 						<button className="button primary" type="button" onClick={onClose}>{t.done}</button>
 					</div>
 				</div>

@@ -14,7 +14,6 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +28,7 @@ import {
 	toCsvExportUrl,
 } from "../../intake/ingest.ts";
 import type { NormalizedTC } from "../../intake/schema.ts";
+import { convertWorkbook } from "../../intake/workbook.ts";
 import { describeAssertion, MemoryAssertionCache } from "../../interpret/assertion.ts";
 import {
 	type AuthoredPlan,
@@ -193,15 +193,6 @@ function pruneTraces(dir: string): void {
 		// no trace dir yet, or a concurrent run already removed it — nothing to prune
 	}
 }
-
-// SheetJS is CJS; load via createRequire so it works under Node without ESM-interop config.
-const XLSX = createRequire(import.meta.url)("xlsx") as {
-	read: (
-		data: Buffer,
-		opts: { type: string; sheetRows?: number },
-	) => { SheetNames: string[]; Sheets: Record<string, unknown> };
-	utils: { sheet_to_csv: (ws: unknown) => string };
-};
 
 export interface Account {
 	id: string;
@@ -1596,7 +1587,6 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		}
 	}
 	if (req.method === "POST" && url.pathname === "/api/sheet/analyze") {
-		if (!modelClient) return send(res, 400, JSON.stringify({ error: "Connect a model first." }));
 		try {
 			const { sheetUrl, csvText, projectId, sheetId } = JSON.parse((await readBody(req)) || "{}") as {
 				sheetUrl?: string;
@@ -1621,10 +1611,21 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			const st = stateFor(pid);
 			const sid = resolveSheetId(project, sheetId);
 			const ss = sheetState(st, sid);
-			const result = await refineRule(ss.rule, instruction, modelClient, [...ss.refineChat]);
+			const detected = mapColumns(table.headers);
+			let proposed: InterpretationRule["mapping"];
+			let message: string;
+			if (detected.step && detected.expected) {
+				proposed = detected;
+				message = "Columns recognized from sheet headers.";
+			} else {
+				if (!modelClient)
+					return send(res, 400, JSON.stringify({ error: "Connect a model to interpret unrecognized sheet columns." }));
+				const result = await refineRule(ss.rule, instruction, modelClient, [...ss.refineChat]);
+				proposed = result.rule.mapping;
+				message = result.message;
+			}
 			// Don't mutate the project-shared rule here — a sheet's column mapping is a per-sheet
 			// override layered on top of it, so only the delta vs the current rule mapping is kept.
-			const proposed = result.rule.mapping;
 			const delta: Record<string, string> = {};
 			for (const [k, v] of Object.entries(proposed)) {
 				if (v && v !== (ss.rule.mapping as Record<string, string>)[k]) delta[k] = v;
@@ -1634,7 +1635,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 			persistProjects();
 			ss.refineChat.push(
 				{ role: "user", content: `시트 해석 요청 · 헤더: ${table.headers.join(", ")}` },
-				{ role: "assistant", content: result.message },
+				{ role: "assistant", content: message },
 			);
 			if (ss.refineChat.length > 20) ss.refineChat.splice(0, ss.refineChat.length - 20);
 			saveState(pid, st);
@@ -1647,7 +1648,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 					mapping: delta,
 					sheetId,
 					ruleVersion: ss.rule.ruleVersion,
-					message: result.message,
+					message,
 					warnings: ruleLint(ss.rule),
 					chat: ss.refineChat,
 				}),
@@ -1830,13 +1831,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 		try {
 			const { base64 } = JSON.parse((await readBody(req)) || "{}") as { base64?: string };
 			if (!base64) return send(res, 400, JSON.stringify({ error: "no file" }));
-			const wb = XLSX.read(Buffer.from(base64, "base64"), { type: "buffer", sheetRows: 2000 });
-			const sheets = wb.SheetNames.map((name) => {
-				const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name]).slice(0, 200000);
-				const rows = csv.split("\n").filter((l) => l.trim()).length;
-				const map = mapColumns(csvToRawTable(csv).headers);
-				return { name, csv, rows, isTc: Boolean(map.step && map.expected) };
-			}).filter((s) => s.rows > 1);
+			const sheets = convertWorkbook(Buffer.from(base64, "base64"));
 			return send(res, 200, JSON.stringify({ sheets }));
 		} catch (err) {
 			return send(res, 400, JSON.stringify({ error: (err as Error).message }));
