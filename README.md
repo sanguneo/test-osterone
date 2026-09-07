@@ -40,7 +40,7 @@ The name is a pun on *testosterone* (`test` + `osterone`). The persona — **"�
 
 - **Author once, cache forever.** Assertions are authored once and cached by `(caseId + ruleId + ruleVersion + caseHash)`. Re-runs only *evaluate* the cache, so the conclusion is identical. Change the rule or the case and the key changes → re-authoring (cache invalidation).
 - **Self-heal gate.** If a selector self-heals, the run may **not** auto-pass → `needs_review`.
-- **Baseline.** Visual / ambiguous cases are diffed against a human-approved golden baseline with dynamic-region masking. Unapproved or drifted → `needs_review`.
+- **Baseline.** Approval can confirm a repaired execution only after its checks pass, cover the expected outcomes, and discriminate the result. It cannot replace missing or failed verification. Numeric values are preserved by default.
 - **Principle:** *rather than emit a false pass, route to needs_review.*
 
 ## Pipeline
@@ -172,7 +172,7 @@ Both run at **author time**, are human-reviewed before saving, and are injected 
 
 ### Review queue
 
-`needs_review` cases surface with their evidence — a **screenshot**, the page text, and a **plain-language reason** (why this one needs a human: a step that could not run, an AI repair to confirm, a check that does not discriminate, only some of the written outcomes checked, a vision disagreement, a missing baseline). Approve the baseline — the approved **reference screen** for that case — once, and a matching re-run **passes** across every sheet that shares the same case content (a reconcile-on-read — a quick re-check when the queue is opened — clears a stale needs_review elsewhere without re-running); if the page drifts it is re-flagged. Two rules keep that honest: a case whose steps were **skipped, failed, or aborted** can never be signed off with a baseline (the screen it happened to stop on proves nothing about a case that never ran), and there is **no bulk approve** — each approval is a judgement about one screen. A `pass` that came from an approval is **marked as such**, because an approval is something a person decided once, against the build in front of them at the time.
+`needs_review` cases retain their evidence and reason in the review queue. Approval requires a current-policy review with complete, passing, discriminating checks. Both approval and rejection are bound to the execution ID being reviewed; a stale decision is refused. Approval stores the reviewed full-text snapshot, including an intentional replacement for a drifted baseline. An older approval does not hide a newly held execution. Legacy reviews without current execution evidence must be rerun before approval.
 
 Text assertions can use the project's lenient comparison, but **field values preserve signs, decimal points, and whitespace**. Presence assertions use the final screen; text seen only earlier remains supporting evidence, not an automatic pass. Partially checked expectations and unexecuted preparation or steps result in `needs_review`. Vision is supporting evidence, not a substitute verdict.
 
@@ -180,7 +180,7 @@ For held cases the review also embeds a **Playwright trace** — the bundled tra
 
 ### Persistence
 
-Project metadata lives in `~/.test-osterone/studio-projects.json`. Per-project runtime state lives in `~/.test-osterone/studio-state/<projectId>.json` as **per-sheet** rule, refine chat, plan cache, and approved baselines, plus a project **default rule** (cloned by new sheets) and a **legacy baseline fallback** for approvals made before the per-sheet upgrade — a `STATE_VERSION` v2→v3 migration lifts old project-level state into this shape **losslessly and idempotently** (running the migration twice changes nothing). **Sheet CSV content is offloaded to per-sheet files** (`sheet-data/<projectId>/<sheetId>.csv`) so neither file grows with sheet count — hence no cap. `baselineKey`/`assertionCacheKey` formats are unchanged, so false-pass=0 holds across all of this.
+Project metadata lives in `~/.test-osterone/studio-projects.json`, per-sheet CSV content in `sheet-data/<projectId>/<sheetId>.csv`, and rules, plans, history, and reviews in `studio-state/<projectId>.json`. Existing state remains readable. Authoring contract version 8 retires plans without validated step attribution and ordering; preparation keys use `prep2` and preserve significant whitespace. Existing approvals cannot bypass the current execution and verification gates.
 
 ## Architecture
 
@@ -212,6 +212,13 @@ Two interchangeable clients behind one interface:
 - **A reproducible run** — the same sheet, run twice against the same app, returns the same verdict for every case. Two model calls sat on that path and moved verdicts on their own: vision's read of a borderline screen, and the paint-timing race that chose between waiting for a control and giving up on it. Vision answers are now remembered per (case, expectation) and an absence is confirmed on a settled screen. This is what makes a measurement mean anything — a scorecard you accept or reject changes by has to agree with itself first.
 
 **Verification scope:** the historical 98-case measurement came from a deduplicated 100-row slice, not the full original workbook. It does not prove whole-workbook accuracy or the absence of engine defects. Full-source intake preservation, local Chromium execution, and verdict accuracy against a live target are reported separately. Irregular formatting must not destroy source content; unclear meaning or execution conditions must not be guessed into a pass.
+
+### Execution and measurement contracts
+
+- A plain login prerequisite can be satisfied by the runner's verified account state. Additional role or data conditions remain unresolved until their own preparation succeeds. Explicit rule-readable preparation works without a model. Parallel lanes only receive cases for their cloned account; other accounts stay serial.
+- Every model-authored action must name its source step, and action order must preserve the written sequence. Incomplete or unsupported authored plans are blocked before preparation or case actions.
+- Path assertions inspect the URL pathname, not a return URL in a query or a similarly named path. Navigation coverage requires a literal expected path or an unambiguous observed route.
+- `measure` freezes the source text and uses the saved mapping and normalized case identity. Repeated numeric IDs across tabs cannot overwrite one another. Contradictory labels and partial, duplicate, empty, or stale runs are rejected rather than reported as a clean measurement. An optional verdict-column argument resolves which recorded column to compare.
 
 ### Preflight irregular sheets
 
