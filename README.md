@@ -13,7 +13,7 @@ Spreadsheet-authored test cases → an AI agent reads them, writes the assertion
 ![stack](https://img.shields.io/badge/stack-Node%2FTS-3178c6)
 ![runtime](https://img.shields.io/badge/runtime-Bun%20%E2%89%A51.3-black)
 ![browser](https://img.shields.io/badge/engine-Playwright-2ead33)
-![tests](https://img.shields.io/badge/tests-132%2F132-9ccc00)
+![tests](https://img.shields.io/badge/tests-bun%20test-9ccc00)
 ![false--pass](https://img.shields.io/badge/false--pass-0-critical)
 
 </div>
@@ -74,7 +74,7 @@ bun run setup          # if Chromium didn't install above, run it explicitly
 bun run studio         # ← the app: builds the UI and serves http://localhost:8686
 bun run demo           # or watch the pipeline run against a bundled fixture (no extra setup)
 
-bun test               # 322/322 (for contributors)
+bun test               # full regression suite (for contributors)
 ```
 
 > Requires **Bun ≥ 1.3**. test-osterone is **Studio-first** — the day-to-day UI is the browser Studio (`bun run studio`); the CLI is a thin bootstrap that exposes `setup`, `--version`, and `--help`.
@@ -174,7 +174,7 @@ Both run at **author time**, are human-reviewed before saving, and are injected 
 
 `needs_review` cases surface with their evidence — a **screenshot**, the page text, and a **plain-language reason** (why this one needs a human: a step that could not run, an AI repair to confirm, a check that does not discriminate, only some of the written outcomes checked, a vision disagreement, a missing baseline). Approve the baseline — the approved **reference screen** for that case — once, and a matching re-run **passes** across every sheet that shares the same case content (a reconcile-on-read — a quick re-check when the queue is opened — clears a stale needs_review elsewhere without re-running); if the page drifts it is re-flagged. Two rules keep that honest: a case whose steps were **skipped, failed, or aborted** can never be signed off with a baseline (the screen it happened to stop on proves nothing about a case that never ran), and there is **no bulk approve** — each approval is a judgement about one screen. A `pass` that came from an approval is **marked as such**, because an approval is something a person decided once, against the build in front of them at the time.
 
-Evidence handling is robust: text assertions can match **leniently** (ignoring whitespace/punctuation) when the project opts in, they can be satisfied by the value **typed into a field** (an `<input>`'s live text is in no DOM text node, which made every "입력 제한되어야 한다" case unfalsifiable), and a presence check is satisfied by **any screen the case passed through** — a toast that appeared and left still counts, while "…종료되어야 한다" is still judged on the final screen. When the DOM cannot confirm an expectation, a **vision** pass reads the screenshot — and its answer **routes the case to a human, never decides the verdict**. A model's read of an image is a hint; the engine's checks are the judgement. This is the trust model's human-in-the-loop: a human approves the ambiguous few once, then it's automated — never a silent false pass.
+Text assertions can use the project's lenient comparison, but **field values preserve signs, decimal points, and whitespace**. Presence assertions use the final screen; text seen only earlier remains supporting evidence, not an automatic pass. Partially checked expectations and unexecuted preparation or steps result in `needs_review`. Vision is supporting evidence, not a substitute verdict.
 
 For held cases the review also embeds a **Playwright trace** — the bundled trace viewer is served **same-origin** (dodging the public viewer's Private Network Access block), so you can scrub the run action-by-action inline, open it in a new tab, or download the `trace.zip`. Traces are captured per case and kept only for `needs_review`/`error` (a clean pass keeps nothing).
 
@@ -203,7 +203,7 @@ Two interchangeable clients behind one interface:
 
 ## Status
 
-**Built & verified** (static, deterministic — 322/322 automated tests):
+**Implemented features** (run the current regression suite with `bun test`):
 
 - **Core pipeline** — ingest → normalize → dedupe → rule → triage → interpret → assertion cache → execute → judge → baseline → evidence → runner contract, plus the benchmark hard gate.
 - **Platform** — web dashboard · orchestration (node/host) · auth (API key + OAuth proxy + **native OpenAI device-code login**) · JUnit output.
@@ -211,7 +211,21 @@ Two interchangeable clients behind one interface:
 - **Measurement against human verdicts** — `bun run measure <projectId> <sheetId>` runs a labelled sheet live and scores every verdict against the QA verdict already recorded in it: `agree` / `false-pass` / `false-fail` / `held`. It **exits non-zero if any case a human filed as a defect came back green**, refuses to score a run that did not actually happen, and prints the human's own defect note (비고) on a false-pass row and the failing check on a false-fail row — so a disagreement is adjudicated from one line instead of a per-case dig.
 - **A reproducible run** — the same sheet, run twice against the same app, returns the same verdict for every case. Two model calls sat on that path and moved verdicts on their own: vision's read of a borderline screen, and the paint-timing race that chose between waiting for a control and giving up on it. Vision answers are now remembered per (case, expectation) and an absence is confirmed on a settled screen. This is what makes a measurement mean anything — a scorecard you accept or reject changes by has to agree with itself first.
 
-**Live-verified.** The engine is exercised daily against a real application in a browser with a real model connected — the current reference is a **98-case QA sheet with human verdicts**, scored end to end by `measure`. What that measurement is for: every remaining disagreement is a **sheet-vs-reality** question (the sheet quotes copy the app has since changed), not an engine defect. `held` is not a miss — declining to judge is the engine working.
+**Verification scope:** the historical 98-case measurement came from a deduplicated 100-row slice, not the full original workbook. It does not prove whole-workbook accuracy or the absence of engine defects. Full-source intake preservation, local Chromium execution, and verdict accuracy against a live target are reported separately. Irregular formatting must not destroy source content; unclear meaning or execution conditions must not be guessed into a pass.
+
+### Preflight irregular sheets
+
+```bash
+bun run sheet:check "./cases.xlsx"
+bun run sheet:check "./cases.tsv"
+```
+
+This read-only command outputs JSON with tab selection, column mapping, total/unique/duplicate case counts, and source IDs missing procedures or expectations. It never connects to a model or target application. Exit codes: `0` for structurally complete cases, `1` for incomplete or unrecognized cases, `2` for input/format errors. Unrecognized tabs remain listed. Preflight success is not a test verdict.
+
+- Handles CSV/TSV/semicolon delimiters, BOM and Excel `sep=` declarations, banner rows, duplicate/blank columns, repeated headers, and explicitly identified continuation rows.
+- XLSX/XLS imports are not silently truncated by row or character count. Selected tabs are aligned by header meaning rather than column position; duplicate procedure/expectation columns and existing categories are preserved.
+- Recognized procedure/expectation headers can be imported in Studio without a model connection. Interpreting unfamiliar columns still requires a model.
+- **Cache change:** category, precondition, and significant whitespace distinguish cases. IDs previously created while ignoring those differences may change; an old approval must not validate a different execution context.
 
 **Not yet done:** single-binary / desktop packaging, live screencast (CDP) in Studio, and wiring the bun-only `SqliteEvidenceStore` into the Node Studio.
 
@@ -230,7 +244,7 @@ src/
   testing/      fixture app + fixture model
   app/studio/   browser UI (Studio)
   cli.ts · index.ts
-test/           unit + smoke suites (322/322)
+test/           unit + integration + smoke suites
 examples/demo/  CLI live-run example
 scripts/        measure a labelled sheet against its human verdicts
 ```
