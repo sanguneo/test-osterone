@@ -14,6 +14,7 @@ import {
 	type Assertion,
 	type AssertionCache,
 	type AssertionResult,
+	challengesRestriction,
 	declaredFieldLimit,
 	describeAssertion,
 	evaluateAssertion,
@@ -26,6 +27,7 @@ import {
 	parseStep,
 	type RequirementCoverage,
 	requirementCoverage,
+	verificationAssertions,
 } from "../interpret/interpret.ts";
 import {
 	pregroundAction,
@@ -324,6 +326,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		 * and the verdict resolves field checks through this map: no landing, no evidence.
 		 */
 		const landings: Record<string, string> = {};
+		const typedValues: Record<string, string> = {};
 		/**
 		 * `patience` is the per-action budget. The first attempt is deliberately impatient: an element
 		 * that is on screen resolves in milliseconds, so a long wait only ever pays off for one that
@@ -347,6 +350,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				else if (a.kind === "fill") {
 					const landed = await opts.page.fill(a.target, a.value, patience);
 					landings[a.target] = typeof landed === "string" && landed ? landed : a.target;
+					typedValues[a.target] = a.value;
 				}
 				return null;
 			} catch (err) {
@@ -391,6 +395,14 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		 * never touched it.
 		 */
 		let executedAsWritten = true;
+		for (const index of opts.plan?.unresolvedSteps ?? []) {
+			executedAsWritten = false;
+			healEvents.push(`skip: written step ${index} has no validated action or verification`);
+		}
+		if (opts.plan && actions.length === 0 && tc.steps.some((step) => parseStep(step, opts.rule).kind !== "verify")) {
+			executedAsWritten = false;
+			healEvents.push("skip: the authored plan contains no actions for the written steps");
+		}
 		/**
 		 * The screens this case actually passed through, in order, after each successful action.
 		 *
@@ -449,8 +461,19 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		 * `executedAsWritten` false so no approved baseline can sign it off either.
 		 */
 		let preparationFailure: string | undefined;
+		if (tc.precondition?.trim() && !opts.preparation?.length) {
+			preparationFailure = "written precondition has no executable preparation";
+			executedAsWritten = false;
+			healEvents.push(`precondition: ${preparationFailure}`);
+		}
 		for (const prep of opts.preparation ?? []) {
-			if (prep.kind === "verify" || prep.kind === "unknown") continue;
+			if (preparationFailure) break;
+			if (prep.kind === "verify" || prep.kind === "unknown") {
+				preparationFailure = prep.text;
+				executedAsWritten = false;
+				healEvents.push(`precondition: unsupported preparation — ${prep.text}`);
+				break;
+			}
 			/**
 			 * Setup gets the same recovery ladder the case's own steps get.
 			 *
@@ -526,9 +549,16 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		for (let i = 0; i < actionsToRun.length; i++) {
 			let action = actionsToRun[i];
 			if (!action) continue;
-			// `verify` is covered by assertions; `unknown` is a step the rule could not interpret —
-			// record it (capping the verdict) instead of silently pretending the case ran in full.
-			if (action.kind === "verify") continue;
+			// Recognizing verification prose is not evidence that a check was actually authored.
+			if (action.kind === "verify") {
+				const checks = verificationAssertions(action.text);
+				if (
+					checks.length > 0 &&
+					checks.every((check) => assertions.some((a) => JSON.stringify(a) === JSON.stringify(check)))
+				)
+					continue;
+				action = { kind: "unknown", text: action.text };
+			}
 			if (action.kind === "unknown") {
 				healEvents.push(
 					`skip: ${action.text.replace(/\s+/g, " ").slice(0, 80)} — 해석하지 못한 스텝이라 실행하지 않았습니다`,
@@ -636,17 +666,8 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 					// original, and report it as the unblock it was.
 					const unblock = !repairErr && (await openedTheWay(action, fixed));
 					const retryErr = unblock ? await perform(action) : null;
-					if (!repairErr) {
-						// Repaired, not hidden: still a heal event, so the verdict stays capped at needs_review.
-						//
-						// An unblock whose retry failed falls back to standing in for the action, which is
-						// what every repair did before this rung existed. Measured over 98 cases: honouring
-						// the claim strictly here cost six cases the rest of their steps and bought no
-						// verdict — the model simply relabels a substitution it used to offer plainly. A
-						// case action is already under the abort guard and the heal cap, so a fix that
-						// performed is no more dangerous than it was. Preparation is the opposite case and
-						// gets no fallback: booking a trigger as the setup step leaves the case running on a
-						// screen its precondition never reached, with nothing verified at all.
+					if (!repairErr && !retryErr) {
+						// An unblock counts only when the original action actually succeeded.
 						healEvents.push(
 							unblock && !retryErr
 								? `repair: ${targetOf(action)} — AI가 화면을 다시 읽고 '${targetOf(fixed.action)}'(${fixed.action.kind})를 먼저 거쳐 원래 동작을 진행했습니다`
@@ -654,7 +675,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 						);
 						continue;
 					}
-					err = repairErr;
+					err = repairErr ?? retryErr;
 				}
 			}
 			if (err) {
@@ -662,7 +683,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				// running the tail would act on the wrong screen (and can fire destructive clicks).
 				healEvents.push(`${action.kind}: ${targetOf(action)} — ${err.message}`);
 				// Everything still to do that would actually touch the page.
-				const remaining = actions.slice(i + 1).filter((a) => a.kind !== "verify" && a.kind !== "unknown").length;
+				const remaining = actionsToRun.slice(i + 1).filter((a) => a.kind !== "verify" && a.kind !== "unknown").length;
 				if (remaining > 0)
 					healEvents.push(`abort: 남은 동작 ${remaining}개 — 선행 스텝 실패로 화면 상태를 신뢰할 수 없어 중단했습니다`);
 				executedAsWritten = false;
@@ -705,13 +726,8 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		// final state and judge on it, so the verdict and the screenshot always describe one moment.
 		snap = await opts.page.snapshot();
 		results = assertions.map((a) => evaluateAssertion(a, snap, { lenient: opts.lenientMatch, landings }));
-		/**
-		 * The final screen decides absence; presence may be satisfied by any screen the case passed
-		 * through. `textIncludes` says "this must appear", and it did appear — that the run went on to
-		 * dismiss the toast is not the app's failure. `textNotIncludes` and `urlIncludes` keep judging
-		 * the end state, which is the whole point of "종료되어야 한다": matching any moment would pass
-		 * those the instant the popup showed.
-		 */
+		// Assertions without a temporal contract judge the final screen. Earlier text is useful
+		// evidence for review (for example a toast), never a replacement for a failed final check.
 		for (let i = 0; i < results.length; i++) {
 			const r = results[i];
 			if (!r || r.passed || r.assertion.kind !== "textIncludes") continue;
@@ -719,7 +735,19 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 				(s) => evaluateAssertion(r.assertion, s, { lenient: opts.lenientMatch, landings }).passed,
 			);
 			if (seen) {
-				results[i] = { ...r, passed: true, detail: `${r.detail} · 실행 중 화면에서 확인됨(최종 화면에는 없음)` };
+				results[i] = { ...r, detail: `${r.detail} · 실행 중 화면에서 확인됨(최종 화면에는 없음)` };
+				healEvents.push(
+					`verify: ${describeAssertion(r.assertion)} — observed only in an earlier state; timing is unverified`,
+				);
+				executedAsWritten = false;
+			}
+		}
+		for (const a of assertions) {
+			if (a.kind !== "fieldAtMost" && a.kind !== "fieldExcludes") continue;
+			const attempted = typedValues[a.field];
+			if (attempted !== undefined && !challengesRestriction(a, attempted)) {
+				healEvents.push(`verify: ${a.field} — attempted input did not challenge the asserted restriction`);
+				executedAsWritten = false;
 			}
 		}
 		if (opts.visionAssert && snap.screenshot) {
@@ -833,15 +861,9 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			}
 		}
 		/**
-		 * A field assertion is exempt from both gates below, and for the same reason each time.
-		 *
-		 * `fieldAtMost` / `fieldExcludes` check that the app *refused* what the case typed. A working
-		 * restriction changes nothing, so "did anything the assertions talk about change?" answers no —
-		 * and the limit is stated in the step, not the expectation, so "does an assertion quote the
-		 * requirement?" also answers no. Both gates exist to catch checks that cannot tell whether the app
-		 * did its job; these tell exactly that, by reading the field's own value. Unlike the string check
-		 * that had to be reverted, they cannot be satisfied by a field that was never found: an
-		 * unresolvable field fails.
+		 * A restriction can discriminate without changing the field, but only when this case actually
+		 * attempted prohibited input. That exemption belongs to this assertion, not to the whole case;
+		 * an unrelated static label still proves nothing about the action.
 		 *
 		 * The exemption ends where its premise does. When the box itself declares `maxlength` at or below
 		 * the asserted limit, the value was never free to be anything else — `fill` cannot put 260
@@ -852,14 +874,13 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		 */
 		const decidedByTheBrowser = (a: Assertion): boolean => {
 			if (a.kind !== "fieldAtMost") return false;
-			const declared = declaredFieldLimit(snap, a.field);
+			const declared = declaredFieldLimit(snap, landings[a.field] ?? a.field);
 			return declared !== null && declared <= a.max;
 		};
-		const checksField = results.some(
-			(r) =>
-				(r.assertion.kind === "fieldAtMost" || r.assertion.kind === "fieldExcludes") &&
-				!decidedByTheBrowser(r.assertion),
-		);
+		const restrictionEvidence = (a: Assertion): boolean =>
+			(a.kind === "fieldAtMost" || a.kind === "fieldExcludes") &&
+			challengesRestriction(a, typedValues[a.field] ?? "") &&
+			!decidedByTheBrowser(a);
 		/**
 		 * Did anything the assertions talk about actually change during the case?
 		 *
@@ -875,7 +896,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		 *
 		 * Not a `fail`: the app may be fine and the check merely too weak. Hand it to a human.
 		 */
-		if (verdict === "pass" && preInteraction && !checksField) {
+		if (verdict === "pass" && preInteraction) {
 			const pre = preInteraction;
 			/** Is the assertion's subject on this screen, regardless of which way the assertion reads? */
 			const present = (a: Assertion, s: PageSnapshot): boolean =>
@@ -883,7 +904,8 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 					lenient: opts.lenientMatch,
 					landings,
 				}).passed;
-			const informative = results.some((r) => {
+			const informative = results.every((r) => {
+				if (restrictionEvidence(r.assertion)) return true;
 				const truth = (s: PageSnapshot) =>
 					evaluateAssertion(r.assertion, s, { lenient: opts.lenientMatch, landings }).passed;
 				// The end state answers differently than the start: the case changed something.
@@ -902,7 +924,7 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 			if (!informative) {
 				verdict = "needs_review";
 				confidence = 0.5;
-				vacuousNote = `동작 전 화면에서도 모든 검증이 통과합니다 — 이 검증은 동작이 실제로 무엇을 바꿨는지 구분하지 못합니다: ${results
+				vacuousNote = `동작 전 화면에서도 일부 검증이 통과합니다 — 이 검증은 동작이 실제로 무엇을 바꿨는지 구분하지 못합니다: ${results
 					.map((r) => describeAssertion(r.assertion))
 					.join(", ")
 					.replace(/\s+/g, " ")
@@ -922,21 +944,17 @@ export async function runScenario(tc: NormalizedTC, opts: RunOptions): Promise<S
 		 * So: several outcomes must be covered fully, a single outcome must be covered at all. Either
 		 * way it holds rather than fails — the app may be fine and the check merely beside the point.
 		 *
-		 * `fieldHolds` is exempt for the same reason the restriction checks are, stated more plainly by
-		 * its own requirement: "해당란에 반영되어야 한다" points at whatever box the *step* named, so there
-		 * is no literal in the expectation for any assertion to quote. Measured on NO 223 — the value
-		 * landed, the check passed, and the case was held because "테스트 소속 그룹" appears nowhere in the
-		 * sentence demanding it. The exemption is narrow: it reads that field's value, and it fails when
-		 * the field is missing or holds something else.
+		 * Field checks are attributed to their own matching requirement. They cannot waive other
+		 * outcomes. Checks decided by a declared browser limit cannot supply that attribution.
 		 */
-		const coverage = requirementCoverage(tc.expected, assertions) ?? undefined;
-		const underChecked = coverage
-			? coverage.total > 1
-				? coverage.covered < coverage.total
-				: coverage.covered === 0
-			: false;
-		const quotesTheStep = results.some((r) => r.assertion.kind === "fieldHolds");
-		if (verdict === "pass" && coverage && underChecked && !checksField && !quotesTheStep) {
+		const coverage =
+			requirementCoverage(
+				tc.expected,
+				assertions.filter((a) => !decidedByTheBrowser(a)),
+				{ phrases: opts.rule.phrases },
+			) ?? undefined;
+		const underChecked = coverage ? coverage.covered < coverage.total : false;
+		if (verdict === "pass" && coverage && underChecked) {
 			verdict = "needs_review";
 			confidence = round2(coverage.covered / coverage.total);
 		}

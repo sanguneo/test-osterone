@@ -151,6 +151,13 @@ const CHAR_CLASS: Record<CharClass, RegExp> = {
 	nonDigit: /[^0-9]/,
 };
 
+/** A restriction is tested only if the attempted input challenges every claimed restriction. */
+export function challengesRestriction(a: Assertion, value: string): boolean {
+	if (a.kind === "fieldAtMost") return [...value].length > a.max;
+	if (a.kind === "fieldExcludes") return a.classes.length > 0 && a.classes.every((c) => CHAR_CLASS[c].test(value));
+	return false;
+}
+
 /**
  * Find an entry by the label the plan used, tolerating the spacing the app renders.
  *
@@ -291,11 +298,9 @@ export function evaluateAssertion(
 		case "fieldHolds": {
 			const { found, miss } = typedField(a.field);
 			if (!found) return { assertion: a, passed: false, detail: miss };
-			// Punctuation-insensitive on purpose, and only here: an app that reflects "01012345678" as
-			// "010-1234-5678" *did* reflect it, and separators it adds itself are not a rejection. The
-			// check still fails on an empty box, a truncated value, or anything else — which is the whole
-			// class of defect "해당란에 반영되어야 한다" is written to catch.
-			const passed = looseText(found.value).includes(looseText(a.value));
+			// Signs, decimal points, whitespace and extra characters can all change the value.
+			// Formatting equivalence needs an explicit field-specific contract, not a global relaxation.
+			const passed = found.value === a.value;
 			return {
 				assertion: a,
 				passed,
@@ -380,7 +385,7 @@ export function authorableAssertions(assertions: Assertion[]): Assertion[] {
  * filter only landed because plans are re-sanitized on read; a prompt change has no such escape
  * hatch. Making it part of the key is what lets authoring be fixed at all.
  */
-export const AUTHOR_VERSION = 6;
+export const AUTHOR_VERSION = 7;
 
 /** Cache key: any change to the case, the rule, or the authoring contract forces a miss -> re-author. */
 export function assertionCacheKey(caseId: string, ruleId: string, ruleVersion: number, caseHash: string): string {

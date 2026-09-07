@@ -128,13 +128,18 @@ export function isProse(text: string, phrases: readonly string[] = DEFAULT_PHRAS
  * item above it, not a requirement of its own, so it stays attached instead of inflating the count.
  */
 export function expectedRequirements(expected: string): string[] {
-	const lines = (expected ?? "").split("\n");
+	// Inline ordinals are common in single-cell sheets. A space after the ordinal keeps decimals intact.
+	const lines = (expected ?? "").replace(/\s+(?=\d+[.)]\s+\S)/g, "\n").split("\n");
 	const out: string[] = [];
+	let numbered = false;
 	for (const raw of lines) {
 		const line = raw.trim();
 		if (!line) continue;
-		if (/^\d+[.)]\s*\S/.test(line)) out.push(line);
-		else if (out.length > 0) out[out.length - 1] += `\n${line}`;
+		if (/^\d+[.)]\s*\S/.test(line)) {
+			out.push(line);
+			numbered = true;
+		} else if (numbered && out.length > 0) out[out.length - 1] += `\n${line}`;
+		else out.push(line);
 	}
 	return out;
 }
@@ -163,58 +168,72 @@ export interface RequirementCoverage {
  * hint's *content*, which no colour requirement can be read from. Both had a green check that was
  * never about the requirement.
  *
- * Only text assertions count toward attribution: a `urlIncludes` is derived from the expectation by
- * construction, so demanding its path appear in the prose would reject every one of them. A
- * `controlSelected` counts because it is the opposite case — it is derived *only* when the expectation
- * names that control, so its name is a literal quoted from the requirement, which is exactly what this
- * gate asks for.
- *
- * **The field kinds (`fieldAtMost`, `fieldExcludes`, `fieldHolds`) are excluded, and the exclusion is
- * load-bearing today — but not for the reason it first appears.** They look like the `urlIncludes`
- * case: "입력 제한되어야 한다" carries no literal to quote and `fieldAtMost` is the mechanical form of
- * exactly that sentence, so counting them reads like an obvious correction. Counting them releases
- * three cases on the 98-case sheet straight to `pass`, and one of those is recorded `Fail` by a human
- * — "아이디 입력란 내 입력 제한이 동작하지 않는 현상". 22 of 98 cases carry a field-kind assertion, so
- * the blast radius is not small.
- *
- * The honest part: that recorded `Fail` is **stale**. The stored evidence for it shows the box holding
- * exactly 12 characters after more than 12 were typed, the read is of the very element the fill tagged
- * (not a same-named sibling), and `decidedByTheBrowser` did not refuse it — so nothing declared
- * `maxlength` and the app's own logic did the clamping. The engine is right and the sheet is out of
- * date. So the rule to take from here is **not** "the human is always right"; it is that a change which
- * moves verdicts toward green may not lean on labels that have never been re-checked. Re-verify the
- * sheet first, correct it, and only then ask this question again against the 98-case gate.
+ * Field assertions cover only their matching requirement, never an entire multi-outcome case.
+ * Ambiguous shared labels and unsupported state/property checks remain uncovered. Literal expected
+ * values must match in full; prose attribution is conservative and is not a semantic proof.
  */
-export function requirementCoverage(expected: string, assertions: readonly Assertion[]): RequirementCoverage | null {
+export function requirementCoverage(
+	expected: string,
+	assertions: readonly Assertion[],
+	vocab: { phrases?: Record<string, string[]> } = {},
+): RequirementCoverage | null {
 	const reqs = expectedRequirements(expected);
 	if (reqs.length === 0) return null;
+	const phrases = { ...DEFAULT_PHRASES, ...vocab.phrases };
 	const loose = (s: string) => s.replace(/\s+/g, "").toLowerCase();
-	const values = assertions
-		.map((a) =>
-			a.kind === "textIncludes" || a.kind === "textNotIncludes"
-				? a.value
-				: a.kind === "controlSelected"
-					? a.control
-					: "",
+	const covered = new Set<number>();
+	for (const a of assertions) {
+		const hits = reqs.flatMap((req, index) => {
+			const body = req.replace(/^(?:\d+[.)]|[-*•·])\s*/, "").trim();
+			let matches = false;
+			if (a.kind === "fieldAtMost" || a.kind === "fieldExcludes") matches = matchesPhrase(body, phrases.restriction);
+			else if (a.kind === "fieldHolds") matches = matchesPhrase(body, phrases.reflected);
+			else if (a.kind === "controlSelected")
+				matches = matchesPhrase(body, phrases.selected) && loose(body).includes(loose(a.control));
+			else if (a.kind === "textIncludes" || a.kind === "textNotIncludes") {
+				// Text alone cannot prove a restriction, field value, selection, navigation or visual property.
+				const requiresState =
+					matchesPhrase(body, [...phrases.restriction, ...phrases.reflected, ...phrases.navigation]) ||
+					(matchesPhrase(body, phrases.toggleNoun) && matchesPhrase(body, phrases.selected)) ||
+					/\b(?:colou?r|red|green|blue|sorted|ascending|descending|disabled|enabled|masked)\b|붉은색|빨간색|색상|정렬|마스킹|비활성화/i.test(
+						body,
+					);
+				const value = loose(a.value);
+				matches =
+					!requiresState &&
+					!!value &&
+					(isProse(body, phrases.prose) ? value.length >= 2 && loose(body).includes(value) : loose(body) === value);
+			}
+			return matches ? [index] : [];
+		});
+		// A global label shared by several outcomes identifies none of their distinct scopes.
+		if (hits.length === 1 && hits[0] !== undefined) covered.add(hits[0]);
+	}
+	const missing = reqs.filter((_req, index) => !covered.has(index));
+	return { total: reqs.length, covered: covered.size, missing };
+}
+
+/** Only concrete presence/absence checks are executable in rule mode; unresolved verify prose stays held. */
+export function verificationAssertions(step: string): Assertion[] {
+	const values = extractQuoted(step).filter(Boolean);
+	if (values.length === 0) return [];
+	const instruction = step.replace(/"[^"]*"/g, "");
+	// A quoted label is not an oracle for its colour, state, ordering or calculated value.
+	if (
+		/\b(?:colou?r|red|green|blue|sorted|ascending|descending|disabled|enabled|masked|calculated|correctly)\b|붉은색|빨간색|색상|정렬|마스킹|비활성화|계산/i.test(
+			instruction,
 		)
-		.map(loose)
-		.filter((v) => v.length >= 2);
-	const missing = reqs.filter((req) => {
-		const hay = loose(req);
-		return !values.some((v) => hay.includes(v));
-	});
-	return { total: reqs.length, covered: reqs.length - missing.length, missing };
+	)
+		return [];
+	const negative = /\b(?:not|never|absent|hidden)\b|않|없|미표출|비노출/i.test(instruction);
+	return authorableAssertions(values.map((value) => ({ kind: negative ? "textNotIncludes" : "textIncludes", value })));
 }
 
 /** Deterministic baseline assertion authoring from a case + rule. */
 export function authorAssertions(tc: NormalizedTC, rule: InterpretationRule): Assertion[] {
 	const assertions: Assertion[] = [];
 	for (const step of tc.steps) {
-		if (parseStep(step, rule).kind === "verify") {
-			for (const q of extractQuoted(step)) {
-				if (q) assertions.push({ kind: "textIncludes", value: q });
-			}
-		}
+		if (parseStep(step, rule).kind === "verify") assertions.push(...verificationAssertions(step));
 	}
 	if (tc.expected && !isProse(tc.expected)) assertions.push({ kind: "textIncludes", value: tc.expected });
 	// Same funnel the model's plan goes through, so what the engine refuses to judge is refused here too.

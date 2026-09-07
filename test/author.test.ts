@@ -25,8 +25,8 @@ const PLAN_JSON = JSON.stringify({
 		{ kind: "goto", path: "/" },
 		{ kind: "fill", target: "Username", value: "admin" },
 		{ kind: "click", target: "Log in" },
-		{ kind: "bogus", target: "x" }, // dropped: unknown kind
-		{ kind: "fill", target: "only-target" }, // dropped: missing value
+		{ kind: "bogus", target: "x" }, // retained as unknown: unsupported kind
+		{ kind: "fill", target: "only-target" }, // retained as unknown: missing value
 	],
 	assertions: [
 		{ kind: "textIncludes", value: "Welcome" },
@@ -42,6 +42,8 @@ test("authorPlanAI parses + sanitizes model JSON into a valid plan", async () =>
 		{ kind: "goto", path: "/" },
 		{ kind: "fill", target: "Username", value: "admin" },
 		{ kind: "click", target: "Log in" },
+		expect.objectContaining({ kind: "unknown" }),
+		expect.objectContaining({ kind: "unknown" }),
 	]);
 	expect(plan.assertions).toEqual([
 		{ kind: "textIncludes", value: "Welcome" },
@@ -49,11 +51,12 @@ test("authorPlanAI parses + sanitizes model JSON into a valid plan", async () =>
 	]);
 });
 
-test("authorPlanAI tolerates prose around the JSON and empties on garbage", async () => {
+test("authorPlanAI tolerates surrounding prose and records garbage as uninterpreted", async () => {
 	const wrapped = await authorPlanAI(tc(), new FakeModelClient(() => `Here you go:\n${PLAN_JSON}\nThanks.`));
-	expect(wrapped.actions).toHaveLength(3);
+	expect(wrapped.actions).toHaveLength(5);
 	const garbage = await authorPlanAI(tc(), new FakeModelClient(() => "no json here"));
-	expect(garbage).toEqual({ actions: [], assertions: [] });
+	expect(garbage.actions).toEqual([expect.objectContaining({ kind: "unknown" })]);
+	expect(garbage.assertions).toEqual([]);
 });
 
 test("getOrAuthorPlan authors once, then serves from cache (no second model call)", async () => {
@@ -69,7 +72,8 @@ test("getOrAuthorPlan authors once, then serves from cache (no second model call
 	const second = await getOrAuthorPlan(tc(), rule, cache, model);
 	expect(second.cacheHit).toBe(true);
 	expect(calls).toBe(1);
-	expect(second.plan.actions).toHaveLength(3);
+	expect(second.plan.actions).toHaveLength(5);
+	expect(second.plan.actions.filter((a) => a.kind === "unknown")).toHaveLength(2);
 });
 
 test("authorPlanAI feeds rule appContext + step vocabulary into the prompt (human assist reaches AI authoring)", async () => {

@@ -17,13 +17,29 @@ import {
 	type CharClass,
 	type ValueAssertion,
 } from "./assertion.ts";
-import { escapeRe, expectedRequirements, isProse, matchesPhrase, type PageAction } from "./interpret.ts";
+import {
+	escapeRe,
+	expectedRequirements,
+	isProse,
+	matchesPhrase,
+	type PageAction,
+	parseStep,
+	verificationAssertions,
+} from "./interpret.ts";
 import { normLabel, type RouteEntry } from "./recon.ts";
-import { DEFAULT_CHAR_CLASSES, DEFAULT_PHRASES, extractJsonObject, type InterpretationRule } from "./rule.ts";
+import {
+	DEFAULT_CHAR_CLASSES,
+	DEFAULT_PHRASES,
+	establishRuleFromHeaders,
+	extractJsonObject,
+	type InterpretationRule,
+} from "./rule.ts";
 
 export interface AuthoredPlan {
 	actions: PageAction[];
 	assertions: Assertion[];
+	/** 1-based written steps lacking a valid, explicitly attributed action/check. Persisted with AI plans. */
+	unresolvedSteps?: number[];
 }
 
 export interface PlanCacheEntry {
@@ -62,23 +78,23 @@ export class MemoryPlanCache implements PlanCache {
 const ASSERTION_KINDS = new Set<string>(["urlIncludes", "textIncludes", "textNotIncludes"]);
 const isValueKind = (k: Assertion["kind"]): k is ValueAssertion["kind"] => ASSERTION_KINDS.has(k);
 
-/** Keep only well-formed goto/click/fill actions (drops anything the model got wrong). */
+/** Invalid actions remain explicit unknown steps; filtering them out would certify a partial run. */
 function sanitizeActions(raw: unknown): PageAction[] {
-	if (!Array.isArray(raw)) return [];
-	const out: PageAction[] = [];
-	for (const item of raw) {
-		if (!item || typeof item !== "object") continue;
+	if (!Array.isArray(raw)) return [{ kind: "unknown", text: "Invalid authored actions" }];
+	return raw.map((item): PageAction => {
+		if (!item || typeof item !== "object") return { kind: "unknown", text: "Invalid authored action" };
 		const o = item as Record<string, unknown>;
-		if (o.kind === "goto" && typeof o.path === "string" && o.path) out.push({ kind: "goto", path: o.path });
-		else if (o.kind === "click" && typeof o.target === "string" && o.target)
-			out.push({ kind: "click", target: o.target });
-		else if (o.kind === "clickRow") {
-			const nth = typeof o.nth === "number" ? o.nth : 1;
-			if (Number.isInteger(nth) && nth >= 1) out.push({ kind: "clickRow", nth });
-		} else if (o.kind === "fill" && typeof o.target === "string" && typeof o.value === "string" && o.target)
-			out.push({ kind: "fill", target: o.target, value: o.value });
-	}
-	return out;
+		if (o.kind === "goto" && typeof o.path === "string" && o.path.trim()) return { kind: "goto", path: o.path };
+		if (o.kind === "click" && typeof o.target === "string" && o.target.trim())
+			return { kind: "click", target: o.target };
+		if (o.kind === "clickRow" && typeof o.nth === "number" && Number.isInteger(o.nth) && o.nth >= 1)
+			return { kind: "clickRow", nth: o.nth };
+		if (o.kind === "fill" && typeof o.target === "string" && typeof o.value === "string" && o.target.trim())
+			return { kind: "fill", target: o.target, value: o.value };
+		if (o.kind === "unknown" && typeof o.text === "string") return { kind: "unknown", text: o.text };
+		// Do not copy arbitrary model payloads (which can contain credentials) into review messages.
+		return { kind: "unknown", text: `Unsupported or malformed action: ${String(o.kind ?? "missing kind")}` };
+	});
 }
 
 /** Longest a comma-separated part may be and still read as a UI label rather than a sentence. */
@@ -440,7 +456,9 @@ export async function authorPlanAI(
 		// rest got text that is on the page either way, so the outcome went unchecked. Routes only reach
 		// the prompt once app analysis has run, so this stays inert — by design — without them.
 		"When the Expected result says the app must navigate somewhere (이동/전환/moves to/redirects), assert it with urlIncludes using a route that appears in the app context above — never invent a path, and author no url assertion at all if no listed route matches. " +
-		"Prefer one or two specific assertions; if the expected outcome is unclear, author fewer rather than guessing (a missing assertion is safer than a false pass). " +
+		'Cover every expected outcome and every written step. If a step cannot be executed, retain it as {"kind":"unknown","text":"the unsupported step"}; never omit it. Do not replace an unsupported expectation with an easier assertion. ' +
+		"Each action must include sourceStep: the ONE 1-based written step it implements. Every step must be represented. " +
+		"For a verify-only step, put sourceStep on its assertion instead. Do not claim multiple steps for one action. " +
 		"Targets must be user-visible text, never CSS. Output ONLY the JSON.";
 	const ctx: string[] = [];
 	if (context.referenceRepo) ctx.push(`App reference repo (for domain context): ${context.referenceRepo}`);
@@ -461,7 +479,7 @@ export async function authorPlanAI(
 	const guideBlock = guide.length
 		? `\nApp context & vocabulary (use to interpret the steps):\n${guide.map((g) => `- ${g}`).join("\n")}`
 		: "";
-	const user = `TITLE: ${tc.title}\nSTEPS:\n${tc.steps.map((s) => `- ${s}`).join("\n")}\nEXPECTED: ${tc.expected}${guideBlock}${ctxBlock}`;
+	const user = `TITLE: ${tc.title}\nSTEPS:\n${tc.steps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\nEXPECTED: ${tc.expected}${guideBlock}${ctxBlock}`;
 	const obj =
 		extractJsonObject(
 			await model.complete(
@@ -476,10 +494,34 @@ export async function authorPlanAI(
 		) ?? {};
 	// Only what the model wrote. The code-derived checks are applied when the plan is *read*
 	// (`withDerivedAssertions`), never baked in here — see that function for why.
-	return {
-		actions: withRowClicks(sanitizeActions(obj.actions), { phrases: rule?.phrases }),
-		assertions: sanitizeAssertions(obj.assertions),
+	const actions = withRowClicks(sanitizeActions(obj.actions), { phrases: rule?.phrases });
+	const assertions = sanitizeAssertions(obj.assertions);
+	const covered = new Set<number>();
+	const interpretation = rule ?? establishRuleFromHeaders([]);
+	const sourceStep = (item: unknown): number | null => {
+		if (!item || typeof item !== "object") return null;
+		const n = (item as Record<string, unknown>).sourceStep;
+		return typeof n === "number" && Number.isInteger(n) && n >= 1 && n <= tc.steps.length ? n : null;
 	};
+	for (const [i, item] of (Array.isArray(obj.actions) ? obj.actions : []).entries()) {
+		const n = sourceStep(item);
+		const action = actions[i];
+		if (n === null || !action || action.kind === "unknown" || action.kind === "verify") continue;
+		const written = parseStep(tc.steps[n - 1] ?? "", interpretation);
+		// Concrete DSL steps can be checked independently of the model's attribution. Free prose
+		// still requires one explicit binding per step; missing/duplicate source indices cannot hide it.
+		if (written.kind === "verify") continue;
+		if (written.kind !== "unknown" && JSON.stringify(written) !== JSON.stringify(action)) continue;
+		covered.add(n);
+	}
+	for (const item of Array.isArray(obj.assertions) ? obj.assertions : []) {
+		const n = sourceStep(item);
+		if (n === null || parseStep(tc.steps[n - 1] ?? "", interpretation).kind !== "verify") continue;
+		const checks = verificationAssertions(tc.steps[n - 1] ?? "");
+		if (checks.length && checks.every((check) => assertions.some((a) => JSON.stringify(a) === JSON.stringify(check))))
+			covered.add(n);
+	}
+	return { actions, assertions, unresolvedSteps: tc.steps.flatMap((_step, i) => (covered.has(i + 1) ? [] : [i + 1])) };
 }
 
 /**
@@ -517,6 +559,7 @@ export function withDerivedAssertions(
 	const reflections = deriveReflectionAssertions(tc.expected, actions, { phrases: rule?.phrases });
 	const quoted = deriveQuotedAssertions(tc.expected, assertions, { phrases: rule?.phrases });
 	return {
+		...plan,
 		actions,
 		// Deduped and filtered through the one funnel both authoring paths share, so a check the engine
 		// refuses to judge is refused whether the model wrote it or the rule derived it.
@@ -535,9 +578,9 @@ export function withDerivedAssertions(
  * Cache key for a preparation plan: the precondition text itself, not the case.
  *
  * Seven cases in one measured sheet share "계정 관리 페이지 내 신규 계정 생성 버튼 선택된 상태". Keying on
- * the text means they author one plan between them, and editing a precondition invalidates only its
- * own plan — which is also why the precondition stays out of `contentHash` and leaves `caseId`, and
- * every approved baseline, alone.
+ * the text means they author one preparation plan between them. Editing the precondition changes
+ * this preparation key and the intake layer's semantic case identity, deliberately invalidating
+ * approvals for the old starting state.
  */
 export function preparationCacheKey(precondition: string, ruleId: string, ruleVersion: number): string {
 	const canonical = precondition.replace(/\s+/g, " ").trim();
@@ -649,12 +692,19 @@ export async function getOrAuthorPlan(
 	model: ModelClient,
 	context: AuthorContext = {},
 ): Promise<AuthoredPlanResult> {
-	const key = assertionCacheKey(tc.caseId, rule.ruleId, rule.ruleVersion, tc.contentHash);
+	// Account/repository context can change literal actions even when the sheet row did not change.
+	const contextHash = createHash("sha256")
+		.update(JSON.stringify([context.referenceRepo ?? "", context.username ?? "", context.password ?? ""]))
+		.digest("hex");
+	const contextKey = context.referenceRepo || context.username || context.password ? `|ctx:${contextHash}` : "";
+	const key = assertionCacheKey(tc.caseId, rule.ruleId, rule.ruleVersion, tc.contentHash) + contextKey;
 	const cached = cache.get(key);
 	if (cached) {
 		const plan = {
 			actions: withRowClicks(sanitizeActions(cached.actions), { phrases: rule.phrases }),
 			assertions: sanitizeAssertions(cached.assertions),
+			// Old persisted plans without step attribution cannot certify the written procedure.
+			unresolvedSteps: cached.unresolvedSteps ?? tc.steps.map((_step, i) => i + 1),
 		};
 		return { plan: withDerivedAssertions(tc, rule, plan), cacheHit: true, key };
 	}

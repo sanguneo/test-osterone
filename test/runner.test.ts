@@ -619,7 +619,9 @@ test("a case whose last interaction navigates keeps its baseline", async () => {
 			assertions: [{ kind: "urlIncludes", value: "/agency" }],
 		},
 	});
-	expect(r.verdict).toBe("pass");
+	// The URL changed, so discrimination succeeds. No route-to-expectation binding was supplied.
+	expect(r.verdict).toBe("needs_review");
+	expect(r.assertions[0]?.passed).toBe(true);
 	expect(r.vacuousNote).toBeUndefined();
 });
 
@@ -645,10 +647,8 @@ class ToastPage implements Page {
 	}
 }
 
-test("a toast that appeared and vanished still satisfies a presence assertion", async () => {
-	// The engine evaluated, then re-evaluated on a strictly later snapshot and threw the first result
-	// away — so anything transient could only ever fail, and `assertRetryMs` only ever helped content
-	// that appears *and stays*.
+test("a toast without a temporal assertion contract is retained for review, never a final-state pass", async () => {
+	// The earlier snapshot is evidence, but this assertion has no step or time binding.
 	const tc = loginTC({ caseId: "TC-toast", contentHash: "h-toast", steps: [], expected: "저장되었습니다" });
 	const r = await runScenario(tc, {
 		page: new ToastPage(),
@@ -662,8 +662,9 @@ test("a toast that appeared and vanished still satisfies a presence assertion", 
 			assertions: [{ kind: "textIncludes", value: "저장되었습니다" }],
 		},
 	});
-	expect(r.verdict).toBe("pass");
-	expect(r.assertions[0]?.passed).toBe(true);
+	expect(r.verdict).toBe("needs_review");
+	expect(r.assertions[0]?.passed).toBe(false);
+	expect(r.executedAsWritten).toBe(false);
 	expect(r.assertions[0]?.detail).toContain("실행 중");
 });
 
@@ -684,8 +685,10 @@ test("a case that must end with the popup gone is judged on the final screen onl
 			assertions: [{ kind: "textNotIncludes", value: "저장되었습니다" }],
 		},
 	});
-	expect(r.verdict).toBe("pass");
+	// Absence is true at the end, but it does not cover this fixture's written expectation "x".
+	expect(r.verdict).toBe("needs_review");
 	expect(r.assertions[0]?.passed).toBe(true);
+	expect(r.coverage?.covered).toBe(0);
 });
 
 /** A label that is always on the page but blinks out during a re-render. */
@@ -1498,7 +1501,7 @@ test("a glyph never becomes a check, so a case is never failed on iconography", 
 	expect(r.assertions.map((a) => a.assertion)).toEqual([{ kind: "textIncludes", value: "page /login" }]);
 	expect(r.verdict).not.toBe("fail");
 
-	// A real word alongside it still decides the verdict on its own evidence.
+	// A real word keeps its failed check; the unsupported glyph verification still holds the case.
 	const mixed = await run(
 		loginTC({
 			contentHash: "hash-glyph-mixed",
@@ -1507,7 +1510,9 @@ test("a glyph never becomes a check, so a case is never failed on iconography", 
 		}),
 	);
 	expect(mixed.assertions.every((a) => a.assertion.kind !== "textIncludes" || a.assertion.value !== "<<")).toBe(true);
-	expect(mixed.verdict).toBe("fail");
+	expect(mixed.verdict).toBe("needs_review");
+	expect(mixed.assertions.some((a) => !a.passed)).toBe(true);
+	expect(mixed.executedAsWritten).toBe(false);
 });
 
 /** A duplicate-check control: it answers only about what the box beside it holds. */
@@ -1767,7 +1772,7 @@ test("a `before` repair whose retry still fails holds the case on the original e
 	expect(r.executedAsWritten).toBe(false);
 });
 
-test("a `before` repair on a case's own step retries the original, then stands in for it", async () => {
+test("a `before` repair on a case's own step must successfully retry the original", async () => {
 	const page = new MenuPage("admin", "비밀번호 변경");
 	const r = await runPlan(
 		page,
@@ -1783,10 +1788,7 @@ test("a `before` repair on a case's own step retries the original, then stands i
 	expect(r.healEvents[0]).toContain("'admin'(click)를 먼저 거쳐 원래 동작을 진행했습니다");
 	expect(r.verdict).toBe("needs_review");
 
-	// Same shape, but the unblock does not unblock. A case action falls back to the substitution the
-	// fix already performed — which is what every repair did before the flag existed. Measured over 98
-	// cases: holding the claim strictly here cost six cases the rest of their steps and moved no
-	// verdict. The setup ladder is the opposite and gets no fallback (see the test above).
+	// Same shape, but the trigger does not unblock the original. The tail must not run on that state.
 	const dead = new MenuPage("admin", "비밀번호 변경");
 	const r2 = await runPlan(
 		dead,
@@ -1798,10 +1800,10 @@ test("a `before` repair on a case's own step retries the original, then stands i
 			repair: async () => ({ action: { kind: "click", target: "검색" }, before: true }),
 		},
 	);
-	// The retry was attempted (and failed), so the fix stands in and the case carries on.
-	expect(dead.did).toEqual(["click 검색", "click 확인"]);
-	expect(r2.aborted).toBeUndefined();
-	expect(r2.healEvents[0]).toContain("'검색'(click)로 교정해 진행했습니다");
+	expect(dead.did).toEqual(["click 검색"]);
+	expect(r2.aborted).toBe(true);
+	expect(r2.executedAsWritten).toBe(false);
+	expect(r2.healEvents.length).toBeGreaterThan(0);
 	expect(r2.verdict).toBe("needs_review");
 });
 

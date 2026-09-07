@@ -216,8 +216,8 @@ test("fieldHolds asks whether the box kept what the case typed", () => {
 	const kept = withFields({ 연락처: "01012345678" });
 	const a = { kind: "fieldHolds", field: "연락처", value: "01012345678" } as const;
 	expect(evaluateAssertion(a, kept).passed).toBe(true);
-	// Separators the app adds itself are the app reflecting the input, not refusing it.
-	expect(evaluateAssertion(a, withFields({ 연락처: "010-1234-5678" })).passed).toBe(true);
+	// Formatting equivalence is not part of this assertion's contract; exact values are preserved.
+	expect(evaluateAssertion(a, withFields({ 연락처: "010-1234-5678" })).passed).toBe(false);
 	// The defects this is written to catch: the box stayed empty, or kept only part of it.
 	const empty = evaluateAssertion(a, withFields({ 연락처: "" }));
 	expect(empty.passed).toBe(false);
