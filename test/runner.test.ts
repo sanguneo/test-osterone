@@ -428,7 +428,7 @@ test("a verified repaired action can use a baseline and records its contribution
 			env: ENV,
 			baseline: store,
 			baselineEnv: "test",
-			repair: async () => ({ action: { kind: "click", target: "Save" } }),
+			repair: async () => ({ action: { kind: "click", target: "Save" }, before: false }),
 		});
 	const first = await go();
 	expect(first.verdict).toBe("needs_review");
