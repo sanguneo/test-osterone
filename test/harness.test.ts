@@ -1,6 +1,22 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { isCanonicalQc, parseArgs, planStages, stageStops, UsageError } from "../src/app/harness.ts";
+import { fallbackFor, isCanonicalQc, parseArgs, planStages, stageStops, UsageError } from "../src/app/harness.ts";
+
+test("a free-language QC whose 작업시트화 cannot run falls back to running the QC as written", () => {
+	const args = parseArgs(["--spec", "s.md", "--qc", "qc.xlsx", "--fixture", "--out", "o"]);
+	const [worksheet, check, run] = planStages(args, false);
+	if (!worksheet || !check || !run) throw new Error("expected three stages");
+	expect(fallbackFor(worksheet, args)?.map((s) => [s.name, s.args[0]])).toEqual([
+		["check", "qc.xlsx"],
+		["run", "qc.xlsx"],
+	]);
+	// Nothing else has a fallback: a failed generation leaves nothing to run, a failed run is a result.
+	expect(fallbackFor(check, args)).toBeNull();
+	expect(fallbackFor(run, args)).toBeNull();
+	const [generate] = planStages(parseArgs(["--spec", "s.md", "--fixture"]));
+	if (!generate) throw new Error("expected a generate stage");
+	expect(fallbackFor(generate, parseArgs(["--spec", "s.md", "--fixture"]))).toBeNull();
+});
 
 test("a QC already written in the canonical grammar runs as is; a free-language one needs a 작업시트", async () => {
 	expect(await isCanonicalQc("e2e/fixtures/qc-cases.xlsx")).toBe(true);

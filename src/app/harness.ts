@@ -154,6 +154,16 @@ export async function isCanonicalQc(source: string): Promise<boolean> {
 	return cases.length > 0 && cases.every((tc) => tc.steps.length > 0 && tc.steps.every((step) => !stepProblem(step)));
 }
 
+/**
+ * What runs instead when a stage could not finish. Only 작업시트화 has a fallback: real QC sheets are written in
+ * free language, and with no model (or a refused one) the rule interpreter can still read many of those
+ * steps the way Studio does without a connection. Steps it cannot read are held as needs_review by the
+ * engine itself, so falling back can lower coverage but never manufacture a pass.
+ */
+export function fallbackFor(stage: Stage, a: HarnessArgs): Stage[] | null {
+	return stage.name === "worksheet" && a.qc ? planStages(a, true) : null;
+}
+
 export function stageStops(stage: Stage, code: number): boolean {
 	if (stage.name === "run") return code !== 0 && code !== 1 && code !== 3;
 	return code !== 0;
@@ -197,11 +207,23 @@ async function main(): Promise<number> {
 		);
 		log.push(canonical ? "작업시트화: skipped (QC already canonical)" : "작업시트화: needed");
 	}
-	for (const stage of planStages(args, canonical)) {
+	let stages = planStages(args, canonical);
+	for (let i = 0; i < stages.length; i++) {
+		const stage = stages[i] as Stage;
 		console.log(`\n── harness: ${stage.name} ──`);
 		const code = await runStage(stage);
 		log.push(`${stage.name}: exit ${code}`);
 		if (stage.name === "run") runCode = code;
+		const fallback = stageStops(stage, code) ? fallbackFor(stage, args) : null;
+		if (fallback) {
+			console.log(
+				`harness: 작업시트화 could not finish (exit ${code}); running the QC as written with the rule interpreter — steps it cannot read are held as needs_review.`,
+			);
+			log.push("작업시트화 fallback: QC run as written with the rule interpreter");
+			stages = fallback;
+			i = -1;
+			continue;
+		}
 		if (stageStops(stage, code)) {
 			console.error(`harness: stage "${stage.name}" exited ${code}; stopping before the next stage.`);
 			runCode = 2;
