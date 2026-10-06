@@ -355,14 +355,27 @@ export class BskPage implements Page {
 	private closed = false;
 	private seq = 0;
 
+	private readonly run: BskRunner;
+	readonly sessionId: string;
+	private readonly baseUrl: string;
+	private readonly timeoutMs: number;
+	private readonly screenshotEnabled: boolean;
+	private readonly phrases: Record<string, string[]>;
 	private constructor(
-		private readonly run: BskRunner,
-		readonly sessionId: string,
-		private readonly baseUrl: string,
-		private readonly timeoutMs: number,
-		private readonly screenshotEnabled: boolean,
-		private readonly phrases: Record<string, string[]>,
-	) {}
+		run: BskRunner,
+		sessionId: string,
+		baseUrl: string,
+		timeoutMs: number,
+		screenshotEnabled: boolean,
+		phrases: Record<string, string[]>,
+	) {
+		this.run = run;
+		this.sessionId = sessionId;
+		this.baseUrl = baseUrl;
+		this.timeoutMs = timeoutMs;
+		this.screenshotEnabled = screenshotEnabled;
+		this.phrases = phrases;
+	}
 
 	static async create(opts: BskPageOptions): Promise<BskPage> {
 		const run = opts.run ?? defaultBskRunner;

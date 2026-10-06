@@ -6,7 +6,7 @@
  * is auto-restored — every run interprets by rule, the deterministic path. The home is wiped at start
  * rather than at exit because the runner stops this process without running exit hooks.
  *
- *   node --experimental-transform-types e2e/serve-studio.ts <port>
+ *   node --experimental-strip-types e2e/serve-studio.ts <port>
  */
 import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";

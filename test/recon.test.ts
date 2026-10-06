@@ -228,11 +228,13 @@ class SpaLoginPage implements Page {
 	html = SPA_SHELL_HTML;
 	polls = 0;
 	readonly filled: Record<string, string> = {};
-	constructor(
-		private readonly mountAfterPolls: number,
-		/** Whether the app prints an explicit rejection notice (vs. a submit that silently does nothing). */
-		private readonly showsRejection = true,
-	) {}
+	private readonly mountAfterPolls: number;
+	/** Whether the app prints an explicit rejection notice (vs. a submit that silently does nothing). */
+	private readonly showsRejection: boolean;
+	constructor(mountAfterPolls: number, showsRejection = true) {
+		this.mountAfterPolls = mountAfterPolls;
+		this.showsRejection = showsRejection;
+	}
 	async goto(path: string): Promise<void> {
 		this.url = path;
 		this.html = SPA_SHELL_HTML;

@@ -2,7 +2,7 @@
  * Headless sheet runner: take a QC sheet (Excel workbook, CSV/TSV export or Google Sheets URL), run every
  * unique case through the deterministic engine on a real browser, and exit with a code CI can act on.
  *
- *   node --experimental-transform-types src/app/run-sheet.ts <source> (--url <baseUrl> | --fixture)
+ *   node --experimental-strip-types src/app/run-sheet.ts <source> (--url <baseUrl> | --fixture)
  *     [--backend playwright|bsk] [--browser <bsk instance>] [--headed] [--junit <file>] [--json <file>]
  *   bun run run:sheet -- <source> --fixture --junit .e2e/junit.xml
  *

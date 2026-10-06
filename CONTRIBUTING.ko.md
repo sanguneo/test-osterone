@@ -11,7 +11,7 @@
 ## 사전 준비
 
 - **[Bun](https://bun.com) ≥ 1.3** — 테스트·CLI·린트·빌드.
-- **[Node](https://nodejs.org) 22.12 이상, 26 미만** (CI는 24 사용. Node 26은 아래 플래그를 거부합니다) — 브라우저/Studio 경로(`--experimental-transform-types`). Windows의 Bun에서 Playwright 브라우저 런치가 멈추기 때문에 엔진은 브라우저를 Node로 실행합니다.
+- **[Node](https://nodejs.org) 22.12 이상** (CI는 24 사용. 아래 플래그가 모든 버전에서 동작하도록 코드는 소거 가능한 문법만 씁니다 — 생성자 매개변수 프로퍼티·enum 금지) — 브라우저/Studio 경로(`--experimental-strip-types`). Windows의 Bun에서 Playwright 브라우저 런치가 멈추기 때문에 엔진은 브라우저를 Node로 실행합니다.
 - **git**.
 
 ## 셋업
@@ -61,7 +61,7 @@ bun run qa:bsk     # BrowserSkill로 Studio 점검; 콘솔 에러·실패 요청
 
 ### Windows
 
-레포는 `.gitattributes`로 LF 줄바꿈으로 체크아웃됩니다. 브라우저를 띄우는 것은 데모와 마찬가지로 전부 Node(`node --experimental-transform-types`)로 돌립니다. Windows의 Bun에서는 Playwright 브라우저 런치가 멈추기 때문입니다.
+레포는 `.gitattributes`로 LF 줄바꿈으로 체크아웃됩니다. 브라우저를 띄우는 것은 데모와 마찬가지로 전부 Node(`node --experimental-strip-types`)로 돌립니다. Windows의 Bun에서는 Playwright 브라우저 런치가 멈추기 때문입니다.
 
 ## 사람 판정 대비 실측
 

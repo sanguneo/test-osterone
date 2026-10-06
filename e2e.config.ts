@@ -28,7 +28,7 @@ const app = {
 	url: "http://127.0.0.1:0",
 	command: {
 		executable: "node",
-		args: ["--experimental-transform-types", "e2e/serve-studio.ts", "{port}"],
+		args: ["--experimental-strip-types", "e2e/serve-studio.ts", "{port}"],
 		log: ".e2e/logs/studio.log",
 		env: { PLAYWRIGHT_BROWSERS_PATH: browsersPath },
 	},

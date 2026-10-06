@@ -6,7 +6,7 @@
  * assertions, self-heal events, and the needs_review queue.
  *
  *   bun run studio            # then open http://localhost:8686
- *   node --experimental-transform-types examples/studio/server.ts --selftest
+ *   node --experimental-strip-types examples/studio/server.ts --selftest
  *
  * Runs under Node because Playwright's browser launch currently hangs under Bun
  * on Windows; it reuses the same deterministic engine as the CLI.

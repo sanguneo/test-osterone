@@ -222,20 +222,41 @@ export class BrowserPage implements Page {
 	/** HTTP status of the last document navigation (null when the browser served it from cache/SPA). */
 	private lastStatus: number | null = null;
 
+	private readonly browser: Browser;
+	private readonly context: BrowserContext;
+	private readonly pwPage: PwPage;
+	private readonly baseUrl: string;
+	private readonly timeoutMs: number;
+	private readonly ownsBrowser: boolean;
+	private readonly tracing: boolean;
+	private readonly phrases: Record<string, string[]>;
+	/** Ring of failed / 5xx requests, filled by listeners set up in `create`. */
+	private readonly failures: string[];
+	/** Ring of non-GET requests, filled by the listener set up in `create`. */
+	private readonly writes: string[];
 	private constructor(
-		private readonly browser: Browser,
-		private readonly context: BrowserContext,
-		private readonly pwPage: PwPage,
-		private readonly baseUrl: string,
-		private readonly timeoutMs: number,
-		private readonly ownsBrowser: boolean,
-		private readonly tracing: boolean,
-		private readonly phrases: Record<string, string[]>,
-		/** Ring of failed / 5xx requests, filled by listeners set up in `create`. */
-		private readonly failures: string[],
-		/** Ring of non-GET requests, filled by the listener set up in `create`. */
-		private readonly writes: string[],
-	) {}
+		browser: Browser,
+		context: BrowserContext,
+		pwPage: PwPage,
+		baseUrl: string,
+		timeoutMs: number,
+		ownsBrowser: boolean,
+		tracing: boolean,
+		phrases: Record<string, string[]>,
+		failures: string[],
+		writes: string[],
+	) {
+		this.browser = browser;
+		this.context = context;
+		this.pwPage = pwPage;
+		this.baseUrl = baseUrl;
+		this.timeoutMs = timeoutMs;
+		this.ownsBrowser = ownsBrowser;
+		this.tracing = tracing;
+		this.phrases = phrases;
+		this.failures = failures;
+		this.writes = writes;
+	}
 
 	static async create(opts: BrowserPageOptions): Promise<BrowserPage> {
 		const ownsBrowser = !opts.browser;

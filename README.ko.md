@@ -109,7 +109,7 @@ false-pass  : 0 OK
 bun run run:live -- --url https://your.app --cases ./my-cases.csv
 ```
 
-> **Node 22.12 이상, 26 미만** 이 필요합니다 (CI는 24 사용. Node 26은 `--experimental-transform-types`를 거부합니다). Playwright의 브라우저 런치가 현재 Windows의 Bun에서 멈추기 때문에, 데모는 브라우저를 Node(`node --experimental-transform-types`)로 실행합니다. CLI와 결정적 엔진은 Bun 위에서 동작합니다.
+> **Node 22.12 이상** 이 필요합니다 (CI는 24 사용). Node가 `--experimental-strip-types`로 TypeScript를 바로 실행하므로, 코드는 소거 가능한 문법만 씁니다 (tsconfig.json의 `erasableSyntaxOnly`). Playwright의 브라우저 런치가 현재 Windows의 Bun에서 멈추기 때문에, 데모는 브라우저를 Node(`node --experimental-strip-types`)로 실행합니다. CLI와 결정적 엔진은 Bun 위에서 동작합니다.
 
 ## Studio — 터미널 없는 브라우저 UI (비개발자용)
 

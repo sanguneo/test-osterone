@@ -274,7 +274,7 @@ test("recognized sheet analysis and preview work through real HTTP without a con
 	const child = spawn(
 		nodeBin,
 		[
-			"--experimental-transform-types",
+			"--experimental-strip-types",
 			"--input-type=module",
 			"--eval",
 			`

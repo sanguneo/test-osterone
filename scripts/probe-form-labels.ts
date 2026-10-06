@@ -11,7 +11,7 @@
  * Runs the shipped adapter: prints the snapshot's field keys (what a `fieldAtMost`/`fieldExcludes` check
  * can look up), then fills each target and reports whether the check would find that same field.
  *
- * Usage: node --experimental-transform-types scripts/probe-form-labels.ts <baseUrl> <user> <pass>
+ * Usage: node --experimental-strip-types scripts/probe-form-labels.ts <baseUrl> <user> <pass>
  */
 import { BrowserPage } from "../src/execute/browser-page.ts";
 

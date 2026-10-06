@@ -11,7 +11,7 @@
  * map the `controlSelected` check reads, before and after. A state that does not flip is a click that
  * answered for something else; a label that is not in the map is a check that can never pass.
  *
- * Usage: node --experimental-transform-types scripts/probe-radio-control.ts <baseUrl> <user> <pass>
+ * Usage: node --experimental-strip-types scripts/probe-radio-control.ts <baseUrl> <user> <pass>
  */
 import { BrowserPage } from "../src/execute/browser-page.ts";
 

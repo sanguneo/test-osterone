@@ -169,10 +169,12 @@ export class FakePage implements Page {
 	private state: PageSnapshot;
 	private readonly inputs: Record<string, string> = {};
 
+	private readonly reducer: (action: FakeAction, state: PageSnapshot, inputs: Record<string, string>) => PageSnapshot;
 	constructor(
 		initial: PageSnapshot,
-		private readonly reducer: (action: FakeAction, state: PageSnapshot, inputs: Record<string, string>) => PageSnapshot,
+		reducer: (action: FakeAction, state: PageSnapshot, inputs: Record<string, string>) => PageSnapshot,
 	) {
+		this.reducer = reducer;
 		this.state = { ...initial };
 	}
 

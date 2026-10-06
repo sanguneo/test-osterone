@@ -220,10 +220,12 @@ export function clearSheetRuns(st: ProjectState, sheetId: string): boolean {
 }
 
 export class LayeredBaselineStore implements BaselineStore {
-	constructor(
-		private readonly sheet: MemoryBaselineStore,
-		private readonly legacy: MemoryBaselineStore,
-	) {}
+	private readonly sheet: MemoryBaselineStore;
+	private readonly legacy: MemoryBaselineStore;
+	constructor(sheet: MemoryBaselineStore, legacy: MemoryBaselineStore) {
+		this.sheet = sheet;
+		this.legacy = legacy;
+	}
 
 	get(caseId: string, ruleVersion: number, env: string): Baseline | undefined {
 		return this.sheet.get(caseId, ruleVersion, env) ?? this.legacy.get(caseId, ruleVersion, env);

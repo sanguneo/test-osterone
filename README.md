@@ -109,7 +109,7 @@ Point it at your own site — write your own cases file and pass a base URL:
 bun run run:live -- --url https://your.app --cases ./my-cases.csv
 ```
 
-> Requires **Node ≥ 22.12, below 26** (CI uses 24; Node 26 rejects `--experimental-transform-types`). The demo executes the browser under Node (`node --experimental-transform-types`) because Playwright's browser launch currently hangs under Bun on Windows; the CLI and the deterministic engine run on Bun.
+> Requires **Node ≥ 22.12** (CI uses 24). Node runs the TypeScript directly with `--experimental-strip-types`, so the code stays erasable-syntax-only (`erasableSyntaxOnly` in tsconfig.json). The demo executes the browser under Node (`node --experimental-strip-types`) because Playwright's browser launch currently hangs under Bun on Windows; the CLI and the deterministic engine run on Bun.
 
 ## Studio — no-terminal browser UI (for non-developers)
 

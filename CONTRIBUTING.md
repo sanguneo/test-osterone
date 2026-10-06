@@ -11,7 +11,7 @@ Read [`README.md`](README.md) for the architecture and the trust model before yo
 ## Prerequisites
 
 - **[Bun](https://bun.com) ≥ 1.3** — tests, CLI, lint, build.
-- **[Node](https://nodejs.org) ≥ 22.12, below 26** (CI uses 24; Node 26 rejects the flag below) — the browser/Studio path (`--experimental-transform-types`). Playwright's browser launch currently hangs under Bun on Windows, so the engine runs the browser under Node.
+- **[Node](https://nodejs.org) ≥ 22.12** (CI uses 24; keep the code erasable-syntax-only — no parameter properties or enums — so the flag below works on every version) — the browser/Studio path (`--experimental-strip-types`). Playwright's browser launch currently hangs under Bun on Windows, so the engine runs the browser under Node.
 - **git**.
 
 ## Setup
@@ -62,7 +62,7 @@ bun run qa:bsk     # BrowserSkill pass over the Studio; exits 1 on console error
 
 ### Windows
 
-The repo checks out with LF line endings via `.gitattributes`. Anything that launches a browser runs under Node (`node --experimental-transform-types`), same as the demo, because Playwright's browser launch hangs under Bun on Windows.
+The repo checks out with LF line endings via `.gitattributes`. Anything that launches a browser runs under Node (`node --experimental-strip-types`), same as the demo, because Playwright's browser launch hangs under Bun on Windows.
 
 ## Measuring against human verdicts
 

@@ -1,7 +1,7 @@
 /**
  * Visual + runtime QA of the Studio in the user's real browser through BrowserSkill (`bsk`).
  *
- *   node --experimental-transform-types scripts/qa/bsk-studio-qa.ts [--browser <bsk instance>] [--fault]
+ *   node --experimental-strip-types scripts/qa/bsk-studio-qa.ts [--browser <bsk instance>] [--fault]
  *
  * Spawns the Studio on a free port against an isolated home, seeds one project from the sample CSV
  * sheet, walks the project and its four views in an Agent Window, runs the sheet through the UI,
@@ -80,7 +80,7 @@ function freePort(): Promise<number> {
 }
 
 function startStudio(port: number): Promise<ChildProcess> {
-	const child = spawn(process.execPath, ["--experimental-transform-types", "e2e/serve-studio.ts", String(port)], {
+	const child = spawn(process.execPath, ["--experimental-strip-types", "e2e/serve-studio.ts", String(port)], {
 		cwd: repo,
 		stdio: ["ignore", "pipe", "pipe"],
 		windowsHide: true,

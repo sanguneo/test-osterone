@@ -5,7 +5,7 @@
  *   QC given  : QC (Excel / CSV / Google Sheets) + 기획서 + code -> 작업시트 (canonical steps) -> run
  *   no QC     : 기획서 + code -> generated QC (canonical steps)                              -> run
  *
- *   node --experimental-transform-types src/app/harness.ts --spec <기획서.md> [--repo <dir>]
+ *   node --experimental-strip-types src/app/harness.ts --spec <기획서.md> [--repo <dir>]
  *        [--qc <qc.xlsx | qc.csv | Google Sheets URL>] (--url <app> | --fixture)
  *        [--backend playwright|bsk] [--browser <bsk instance>] [--out <dir>] [--export-e2e]
  *
@@ -161,7 +161,7 @@ export function stageStops(stage: Stage, code: number): boolean {
 
 function runStage(stage: Stage): Promise<number> {
 	return new Promise((done) => {
-		const child = spawn(process.execPath, ["--experimental-transform-types", join(REPO, stage.script), ...stage.args], {
+		const child = spawn(process.execPath, ["--experimental-strip-types", join(REPO, stage.script), ...stage.args], {
 			stdio: "inherit",
 			cwd: process.cwd(),
 		});

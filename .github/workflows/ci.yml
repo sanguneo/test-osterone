@@ -36,7 +36,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      # The browser path runs under Node (e2e needs >= 22.12; the engine uses --experimental-transform-types).
+      # The browser path runs under Node (e2e needs >= 22.12; the engine uses --experimental-strip-types).
       - uses: actions/setup-node@v4
         with:
           node-version: 24
