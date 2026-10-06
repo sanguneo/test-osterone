@@ -16,7 +16,7 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -148,6 +148,15 @@ async function main() {
 			cwd: REPO_ROOT,
 			env: {
 				...process.env,
+				// The isolated home would hide the machine's Playwright browsers (Linux and macOS look under
+				// $HOME), so point the server at the real cache before swapping the home out.
+				PLAYWRIGHT_BROWSERS_PATH:
+					process.env.PLAYWRIGHT_BROWSERS_PATH ??
+					(process.platform === "win32"
+						? join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "ms-playwright")
+						: process.platform === "darwin"
+							? join(homedir(), "Library", "Caches", "ms-playwright")
+							: join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "ms-playwright")),
 				HOME: home,
 				USERPROFILE: home,
 				TEST_OSTERONE_STATE_DIR: stateDir,
