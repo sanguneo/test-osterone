@@ -1,7 +1,18 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.5.2/schema.json",
 	"vcs": { "enabled": false, "clientKind": "git", "useIgnoreFile": true },
-	"files": { "includes": ["src/**", "test/**", "examples/**", "!src/app/studio/web/dist"] },
+	"files": {
+		"includes": [
+			"src/**",
+			"test/**",
+			"examples/**",
+			"e2e/**",
+			"e2e.config.ts",
+			"scripts/qa/**",
+			"scripts/make-qc-fixtures.ts",
+			"!src/app/studio/web/dist"
+		]
+	},
 	"formatter": { "enabled": true, "indentStyle": "tab", "lineWidth": 120 },
 	"javascript": { "formatter": { "quoteStyle": "double" } },
 	"linter": {

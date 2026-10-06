@@ -13,6 +13,6 @@
 		"jsx": "react-jsx",
 		"types": ["bun"]
 	},
-	"include": ["src", "test", "examples"],
+	"include": ["src", "test", "examples", "e2e", "e2e.config.ts", "scripts/qa", "scripts/make-qc-fixtures.ts"],
 	"exclude": ["src/app/studio/web"]
 }

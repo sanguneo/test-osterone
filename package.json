@@ -23,7 +23,9 @@
 		"studio:webcheck": "bun node_modules/typescript/bin/tsc -p src/app/studio/web/tsconfig.json",
 		"doctor": "npx react-doctor@latest",
 		"measure": "node --experimental-transform-types scripts/measure-sheet.ts",
-		"sheet:check": "node --experimental-transform-types src/app/check-sheet.ts"
+		"sheet:check": "node --experimental-transform-types src/app/check-sheet.ts",
+		"test:e2e": "bun run studio:build && e2e run",
+		"e2e:install": "e2e-web install chromium"
 	},
 	"engines": {
 		"bun": ">=1.3.0",
@@ -31,11 +33,13 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.2",
+		"@e2e-dev/web": "0.12.0",
 		"@happy-dom/global-registrator": "^20.11.1",
 		"@types/bun": "^1.3.14",
 		"@types/react": "^19.2.17",
 		"@types/react-dom": "^19.2.3",
 		"@vitejs/plugin-react": "^6.0.3",
+		"e2e": "0.17.0",
 		"react-doctor": "^0.8.1",
 		"react-grab": "^0.1.48",
 		"react-scan": "^0.5.7",
