@@ -1,0 +1,172 @@
+{
+	"version": 3,
+	"recorded_at": "2026-10-06T10:58:18.063Z",
+	"started_at": "2026-10-06T10:58:00.808Z",
+	"stopped_by": "cli_stop",
+	"entry": {
+		"start_url": "https://shop.example.com/app/"
+	},
+	"recorder": {
+		"bsk": "0.3.2",
+		"vom": 1
+	},
+	"states": [
+		{
+			"id": "s1",
+			"url": "https://shop.example.com/app/",
+			"body": "# bsk-observation 1\nstate: \"s1\"\nurl: \"https://shop.example.com/app/\"\n---\n@vom 1\nL1 page\n  RootWebArea \"Shop\"\n    heading \"Shop\"\n    @e1 link \"Settings\"\n"
+		},
+		{
+			"id": "s2",
+			"url": "https://shop.example.com/app/settings",
+			"body": "# bsk-observation 1\nstate: \"s2\"\nurl: \"https://shop.example.com/app/settings\"\n---\n@vom 1\nL1 page\n  RootWebArea \"Settings\"\n    heading \"Settings\"\n    @e1 button \"Account\" [has-submenu]\n    @e2 combobox \"Country\"\n    @e3 textbox \"Search\"\n    @e4 button \"Enter details\"\n"
+		},
+		{
+			"id": "s3",
+			"url": "https://shop.example.com/app/settings?saved=1",
+			"body": "# bsk-observation 1\nstate: \"s3\"\nurl: \"https://shop.example.com/app/settings?saved=1\"\n---\n@vom 1\nL1 page\n  RootWebArea \"Settings\"\n    heading \"Settings\"\n    @e1 button \"Account\" [has-submenu]\n"
+		}
+	],
+	"steps": [
+		{
+			"op": "navigate",
+			"id": 1,
+			"state": "s1",
+			"result": {
+				"state": "s2"
+			},
+			"to": "https://shop.example.com/app/settings",
+			"cause": "user_typed"
+		},
+		{
+			"op": "hover",
+			"id": 2,
+			"state": "s2",
+			"result": {
+				"state": "s2"
+			},
+			"target": {
+				"ref": "@e1",
+				"role": "button",
+				"name": "Account"
+			}
+		},
+		{
+			"op": "select",
+			"id": 3,
+			"state": "s2",
+			"result": {
+				"state": "s2"
+			},
+			"target": {
+				"ref": "@e2",
+				"role": "combobox",
+				"name": "Country"
+			},
+			"selection": [
+				{
+					"value": "kr",
+					"label": "Korea"
+				}
+			]
+		},
+		{
+			"op": "fill",
+			"id": 4,
+			"state": "s2",
+			"result": {
+				"state": "s2"
+			},
+			"target": {
+				"ref": "@e3",
+				"role": "textbox",
+				"name": "Search"
+			},
+			"value": "shoes",
+			"commit": "enter"
+		},
+		{
+			"op": "press",
+			"id": 5,
+			"state": "s2",
+			"result": {
+				"state": "s2"
+			},
+			"key": "Enter",
+			"target": {
+				"ref": "@e3",
+				"role": "textbox",
+				"name": "Search"
+			}
+		},
+		{
+			"op": "scroll",
+			"id": 6,
+			"state": "s2",
+			"result": {
+				"state": "s2"
+			}
+		},
+		{
+			"op": "click",
+			"id": 7,
+			"state": "s2",
+			"result": {
+				"state": "s2"
+			},
+			"target": {
+				"role": "button",
+				"name": "Enter details",
+				"unmatched": true
+			}
+		},
+		{
+			"op": "click",
+			"id": 8,
+			"state": "s2",
+			"result": {
+				"state": "s2"
+			},
+			"target": {
+				"role": "generic",
+				"unmatched": true
+			}
+		},
+		{
+			"op": "navigate",
+			"id": 9,
+			"state": "s2",
+			"result": {
+				"state": "s3"
+			},
+			"to": "https://shop.example.com/app/settings?saved=1",
+			"cause": "form_submit"
+		},
+		{
+			"op": "switch_tab",
+			"id": 10,
+			"state": "s3",
+			"result": {
+				"state": "s3"
+			}
+		},
+		{
+			"op": "drag",
+			"id": 11,
+			"state": "s3",
+			"result": {
+				"state": "s3"
+			}
+		},
+		{
+			"op": "navigate",
+			"id": 12,
+			"state": "s3",
+			"result": {
+				"state": "s3"
+			},
+			"to": "https://elsewhere.example.org/help",
+			"cause": "user_typed"
+		}
+	]
+}
