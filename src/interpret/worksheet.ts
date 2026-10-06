@@ -183,7 +183,12 @@ function validate(proposed: ProposedStep[], evidence: string, ctx: CaseContext):
 	if (reasons.length === 0 && sources.at(-1) !== originals.length - 1) {
 		reasons.push(`원문 ${originals.length}개 절차 중 ${(sources.at(-1) ?? -1) + 1}개까지만 대응됨`);
 	}
-	const split = sources.some((s, k) => k > 0 && s === sources[k - 1]);
+	// A check of the expected result placed after the step it follows is the case's assertion, and its text was
+	// verified above to come from the 원문 or 예상결과. Only an extra *action* on one source needs a declared split.
+	const actionSources = proposed
+		.filter((p) => canonicalAction(String(p.step).trim())?.kind !== "verify")
+		.map((p) => p.source as number);
+	const split = actionSources.some((s, k) => k > 0 && s === actionSources[k - 1]);
 	if (split && !/split|분리|나눔|나눠|나누/i.test(evidence)) {
 		reasons.push("원문 1개 절차가 여러 절차로 늘었으나 분리 근거가 없음(지어낸 절차일 수 있음)");
 	}
@@ -227,7 +232,9 @@ function userPrompt(batch: NormalizedTC[], spec: string, codeContext: string): s
 		key: String(i),
 		title: tc.title,
 		precondition: tc.precondition ?? "",
-		steps: tc.steps.map((step, source) => ({ source, original: step })),
+		// The sheet's own list numbers ("1. ", "2) ") are dropped from what the model reads: next to a 0-based
+		// `source` they were read as the index, and a live run shifted every step of a case by one.
+		steps: tc.steps.map((step, source) => ({ source, original: step.replace(/^\s*\d+\s*[.)]\s*/, "") })),
 		expected: tc.expected,
 	}));
 	return [

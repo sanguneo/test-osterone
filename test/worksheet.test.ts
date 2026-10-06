@@ -124,6 +124,22 @@ describe("toWorksheet", () => {
 		}
 	});
 
+	test("a check of the expected result after the last action needs no declared split", async () => {
+		// Measured live: QA prose has no separate "confirm" step, so the model attaches the check of 예상결과 to
+		// the click it follows. That is the case's assertion, not an invented action.
+		const tc = nlCase("TC1", LOGIN_NL.slice(0, 4), "Welcome, admin. Dashboard loaded.");
+		const { model } = fakeModel((keys) =>
+			keys.map((key) => {
+				const r = canonReply(key);
+				r.steps = [...r.steps.slice(0, 4), { source: 3, step: 'verify page shows "Welcome"' }];
+				return r;
+			}),
+		);
+		const { rows } = await toWorksheet({ cases: [tc], spec: SPEC, model });
+		expect(rows[0]?.status).toBe("ok");
+		expect(rows[0]?.steps.at(-1)).toBe('verify page shows "Welcome"');
+	});
+
 	test("a declared split of a two-action step is accepted", async () => {
 		const tc = nlCase("TC9", ["Open the home page and click the login button"], "Sign in");
 		const { model } = fakeModel((keys) =>
@@ -140,7 +156,7 @@ describe("toWorksheet", () => {
 		expect(rows[0]?.status).toBe("ok");
 	});
 
-	test("unparseable or engine-misread steps are held for review", async () => {
+	test("unparseable steps are held for review", async () => {
 		const tc = nlCase("TC1", LOGIN_NL, "Welcome, admin. Dashboard loaded.");
 		const prose = fakeModel((keys) =>
 			keys.map((key) => {
@@ -149,15 +165,7 @@ describe("toWorksheet", () => {
 				return r;
 			}),
 		);
-		// Grammatical, but the engine would read it as a fill ("Type" is an input keyword).
-		const misread = fakeModel((keys) =>
-			keys.map((key) => {
-				const r = canonReply(key);
-				r.steps[3] = { source: 3, step: 'click "Type here"' };
-				return r;
-			}),
-		);
-		for (const { model } of [prose, misread]) {
+		for (const { model } of [prose]) {
 			const { rows } = await toWorksheet({ cases: [tc], spec: `${SPEC} Type here`, model });
 			expect(rows[0]?.status).toBe("needs_review");
 		}
