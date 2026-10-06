@@ -31,7 +31,8 @@
 		"qc:generate": "node --experimental-transform-types src/app/qc-generate.ts",
 		"qc:worksheet": "node --experimental-transform-types src/app/qc-worksheet.ts",
 		"record:case": "node --experimental-transform-types src/app/record-case.ts",
-		"fixtures:qc": "bun scripts/make-qc-fixtures.ts"
+		"fixtures:qc": "bun scripts/make-qc-fixtures.ts",
+		"harness": "node --experimental-transform-types src/app/harness.ts"
 	},
 	"engines": {
 		"bun": ">=1.3.0",
