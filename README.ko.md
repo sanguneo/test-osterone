@@ -194,7 +194,7 @@ bun run harness -- --spec <기획서.md> [--repo <dir>] [--qc <qc.xlsx|qc.csv|Go
 어떤 QC를 주느냐에 따라 흐름이 갈립니다.
 
 - **스텝이 이미 정형 문법인 QC.** 적힌 그대로 돌립니다. 모델은 쓰지 않습니다.
-- **자유 문장으로 쓴 QC.** 먼저 `qc:worksheet`가 레포 코드와 기획서를 근거로 작업시트(정형 스텝)로 바꿉니다.
+- **자유 문장으로 쓴 QC** (QA팀 QC는 대개 이렇습니다). 먼저 `qc:worksheet`가 레포 코드와 기획서를 근거로 작업시트(정형 스텝)로 바꿉니다. 답할 모델이 없으면 하네스는 QC를 그대로 규칙 해석으로 실행합니다. 해석하지 못한 스텝은 추측하지 않고 needs_review로 보류됩니다.
 - **QC 없음.** `qc:generate`가 기획서에서 QC를 만듭니다.
 
 그다음 `sheet:check`, `run:sheet` 순서이고, `--export-e2e`를 주면 `export:e2e`까지 갑니다. 단계마다 같은 이름의 단독 CLI를 그대로 쓰므로, 어느 단계가 거부하면 그 단계의 메시지로 파이프라인이 멈춥니다. 결과물은 `--out`(기본 `.e2e/harness`) 아래 `harness-report.md`, `junit.xml`, `results.json`입니다. 종료 코드는 `run:sheet`의 것을 따릅니다.
@@ -232,7 +232,13 @@ bun run harness -- --spec <기획서.md> [--repo <dir>] [--qc <qc.xlsx|qc.csv|Go
 
 ### 모델 (작성 전용)
 
-`qc:generate`와 `qc:worksheet`는 모델이 필요합니다. `OPENAI_API_KEY`(필요하면 OpenAI 호환 엔드포인트용 `OPENAI_BASE_URL`, `TEST_OSTERONE_MODEL`)를 설정하거나 로컬에서 Codex/ChatGPT에 로그인하세요. 모델이 없으면 추측하지 않고 거부합니다. 판정에는 모델을 쓰지 않습니다.
+`qc:generate`와 `qc:worksheet`는 모델이 필요하며, 다음 순서로 찾습니다.
+
+1. `OPENAI_API_KEY` (필요하면 OpenAI 호환 엔드포인트용 `OPENAI_BASE_URL`, `TEST_OSTERONE_MODEL`).
+2. `TEST_OSTERONE_MODEL_COMMAND`: 자체 로그인으로 답하는 명령줄 에이전트의 출력 모드. 예: `omo -p --no-tools --no-session`, `claude -p`. 대화는 표준입력으로 넣고 답은 표준출력에서 읽습니다.
+3. 로컬 Codex/ChatGPT 로그인.
+
+모델이 없으면 추측하지 않고 거부합니다. 판정에는 모델을 쓰지 않습니다.
 
 ### 이 레포의 자체 QA
 
@@ -242,6 +248,7 @@ bun run harness -- --spec <기획서.md> [--repo <dir>] [--qc <qc.xlsx|qc.csv|Go
 | `bun run test:e2e` | Studio의 tester-army/e2e 실브라우저 스위트(`e2e/studio/*.e2e.ts`), 데스크톱 1280x800과 폰 390x844. Studio는 빈 포트에서 일회용 홈으로 뜹니다(`e2e/serve-studio.ts`, `e2e.config.ts`). |
 | `bun run qa:bsk` | BrowserSkill로 Studio를 한 바퀴 점검. `.artifacts/bsk-qa` 아래 `report.json`과 데스크톱/폰 스크린샷을 남깁니다. 콘솔 에러, 실패한 요청, 빠진 랜드마크가 있으면 1로 종료합니다. `--fault`는 일부러 실패를 넣어 게이트가 걸리는지 증명합니다. |
 | `bun run fixtures:qc` | `e2e/fixtures/*.xlsx` 재생성. |
+| `bun run dogfood` | test-osterone이 자기 Studio를 테스트합니다. 이 README로 쓴 Studio 자연어 QC(`e2e/fixtures/studio-qc.csv`)를 작업시트화해 검토한 결과(`e2e/fixtures/studio-worksheet.xlsx`)를, 하네스가 모델 없이 실제 Studio에 실행합니다. `-- --from-qc`를 주면 설정된 모델로 다시 작업시트화합니다. |
 
 ## 아키텍처
 

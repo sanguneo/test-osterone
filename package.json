@@ -33,7 +33,8 @@
 		"qa:bsk": "node --experimental-strip-types scripts/qa/bsk-studio-qa.ts",
 		"record:case": "node --experimental-strip-types src/app/record-case.ts",
 		"fixtures:qc": "bun scripts/make-qc-fixtures.ts",
-		"harness": "node --experimental-strip-types src/app/harness.ts"
+		"harness": "node --experimental-strip-types src/app/harness.ts",
+		"dogfood": "node --experimental-strip-types e2e/dogfood.ts"
 	},
 	"engines": {
 		"bun": ">=1.3.0",

@@ -194,7 +194,7 @@ bun run harness -- --spec <기획서.md> [--repo <dir>] [--qc <qc.xlsx|qc.csv|Go
 What it does depends on the QC you give it:
 
 - **QC with canonical steps.** It runs as written. No model is involved.
-- **QC in free language.** `qc:worksheet` first turns it into a 작업시트 (canonical steps), grounded in the repo code and the 기획서.
+- **QC in free language** (the usual case: QA teams write prose). `qc:worksheet` first turns it into a 작업시트 (canonical steps), grounded in the repo code and the 기획서. If no model can answer, the harness runs the QC as written with the rule interpreter instead: steps it cannot read are held as needs_review, never guessed.
 - **No QC.** `qc:generate` writes one from the 기획서.
 
 Then `sheet:check`, then `run:sheet`, and `export:e2e` if you pass `--export-e2e`. Each stage is the standalone CLI of the same name, so a stage that refuses stops the pipeline with its own message. The harness writes `harness-report.md`, `junit.xml` and `results.json` under `--out` (default `.e2e/harness`). Its exit code is `run:sheet`'s.
@@ -232,7 +232,13 @@ Then `sheet:check`, then `run:sheet`, and `export:e2e` if you pass `--export-e2e
 
 ### Model (authoring only)
 
-`qc:generate` and `qc:worksheet` need a model. Set `OPENAI_API_KEY` (plus optional `OPENAI_BASE_URL` for any OpenAI-compatible endpoint and `TEST_OSTERONE_MODEL`), or sign in to Codex/ChatGPT locally. Without one they refuse rather than guess. The verdict never uses the model.
+`qc:generate` and `qc:worksheet` need a model, resolved in this order:
+
+1. `OPENAI_API_KEY` (plus optional `OPENAI_BASE_URL` for any OpenAI-compatible endpoint and `TEST_OSTERONE_MODEL`).
+2. `TEST_OSTERONE_MODEL_COMMAND`: a command-line agent in print mode whose own login answers, e.g. `omo -p --no-tools --no-session` or `claude -p`. The conversation goes in on stdin; the reply is read from stdout.
+3. The local Codex/ChatGPT login.
+
+Without one they refuse rather than guess. The verdict never uses the model.
 
 ### Self-QA of this repo
 
@@ -242,6 +248,7 @@ Then `sheet:check`, then `run:sheet`, and `export:e2e` if you pass `--export-e2e
 | `bun run test:e2e` | tester-army/e2e real-browser suite of the Studio (`e2e/studio/*.e2e.ts`) on desktop 1280x800 and phone 390x844. The Studio boots on a free port against a throwaway home (`e2e/serve-studio.ts`, `e2e.config.ts`). |
 | `bun run qa:bsk` | A BrowserSkill pass over the Studio. Writes `report.json` and desktop/phone screenshots under `.artifacts/bsk-qa`. Exits 1 on console errors, failing requests or missing landmarks. `--fault` injects a failure to prove the gate trips. |
 | `bun run fixtures:qc` | Regenerates `e2e/fixtures/*.xlsx`. |
+| `bun run dogfood` | test-osterone tests its own Studio: the Studio's prose QC (`e2e/fixtures/studio-qc.csv`, written from this README) was turned into a reviewed 작업시트 (`e2e/fixtures/studio-worksheet.xlsx`), which the harness runs against a live Studio with no model. `-- --from-qc` re-derives it with the configured model. |
 
 ## Architecture
 

@@ -50,6 +50,8 @@ jobs:
       - run: bun run demo
       # An all-pass Excel QC through the headless runner: exit 0 is the gate, JUnit is the record.
       - run: bun run run:sheet -- e2e/fixtures/qc-pass.xlsx --fixture --junit .e2e/qc-pass.junit.xml
+      # test-osterone runs its own Studio QC (prose, written from the README) through the harness.
+      - run: bun run dogfood
       - name: Upload evidence
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -59,6 +61,7 @@ jobs:
             .e2e/report.json
             .e2e/junit.xml
             .e2e/qc-pass.junit.xml
+            .e2e/dogfood
             .e2e/artifacts
             .e2e/logs
           if-no-files-found: warn
