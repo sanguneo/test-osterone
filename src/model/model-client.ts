@@ -68,6 +68,9 @@ export class FakeModelClient implements ModelClient {
 	}
 }
 
+/** Model used with a plain API key when the caller does not name one. */
+export const DEFAULT_APIKEY_MODEL = "gpt-4o-mini";
+
 export interface ApiKeyModelOptions {
 	baseUrl?: string;
 	apiKey: string;

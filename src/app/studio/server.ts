@@ -59,8 +59,8 @@ import {
 } from "../../interpret/rule.ts";
 import { visionAssert } from "../../interpret/vision.ts";
 import { readCodexLogin, readCodexModel } from "../../model/codex-auth.ts";
-import { ApiKeyModelClient, type ModelClient } from "../../model/model-client.ts";
-import { getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
+import { ApiKeyModelClient, DEFAULT_APIKEY_MODEL, type ModelClient } from "../../model/model-client.ts";
+import { DEFAULT_OAUTH_MODEL, getCodexAccountId, OAuthProxyModelClient } from "../../model/oauth-proxy.ts";
 import { maybePromptStar } from "../../star-prompt.ts";
 import { startFixture } from "../../testing/fixture-app.ts";
 import { readModelPin, writeModelPin } from "./model-pin.ts";
@@ -240,8 +240,6 @@ export interface RunInput {
 	 */
 	lanes?: number;
 }
-const DEFAULT_OAUTH_MODEL = "gpt-5.6-sol";
-const DEFAULT_APIKEY_MODEL = "gpt-4o-mini";
 
 interface AuthState {
 	mode: string;
