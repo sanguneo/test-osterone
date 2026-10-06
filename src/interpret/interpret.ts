@@ -78,25 +78,32 @@ export function stepTarget(step: string, verbs: string[], uiNouns: readonly stri
 	return stripUiNoun(s, uiNouns).replace(/\s+/g, " ").trim();
 }
 
-/** Deterministic NL-step -> page action, using the rule's intent keywords. */
+/**
+ * Deterministic NL-step -> page action, using the rule's intent keywords.
+ *
+ * The intent is read from the words around the quotes, never from inside them: a quoted span is the
+ * label or the copy the step is about. Measured on the Studio's own QC: `verify page shows
+ * "작업할 프로젝트를 선택하세요."` was read as a click on that sentence, because 선택 is a click verb.
+ */
 export function parseStep(step: string, rule: InterpretationRule): PageAction {
-	if (matchesIntent(step, rule.intents.navigate)) {
+	const intentText = step.replace(/"[^"]*"/g, " ");
+	if (matchesIntent(intentText, rule.intents.navigate)) {
 		const path = extractPath(step);
 		if (path) return { kind: "goto", path };
 	}
-	if (matchesIntent(step, rule.intents.input)) {
+	if (matchesIntent(intentText, rule.intents.input)) {
 		const quoted = extractQuoted(step);
 		if (quoted.length >= 2) return { kind: "fill", target: quoted[1] ?? "", value: quoted[0] ?? "" };
 		if (quoted.length === 1) {
 			return { kind: "fill", target: stepTarget(step, rule.intents.input), value: quoted[0] ?? "" };
 		}
 	}
-	if (matchesIntent(step, rule.intents.click)) {
+	if (matchesIntent(intentText, rule.intents.click)) {
 		const target = extractQuoted(step)[0] ?? stepTarget(step, rule.intents.click);
 		// A step whose only content was the verb ("선택한다") names nothing to click.
 		if (target) return { kind: "click", target };
 	}
-	if (matchesIntent(step, rule.intents.verify)) {
+	if (matchesIntent(intentText, rule.intents.verify)) {
 		return { kind: "verify", text: step };
 	}
 	return { kind: "unknown", text: step };

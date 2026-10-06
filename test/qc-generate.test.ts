@@ -104,12 +104,13 @@ describe("generateQc", () => {
 		expect(result.warnings).toEqual([]);
 	});
 
-	test("a canonical-looking step the engine reads differently is flagged", async () => {
-		// "select" is a click keyword, so the engine would click instead of verifying.
+	test("a verb inside quoted copy no longer flags a canonical step", async () => {
+		// "select" is a click keyword, but it sits inside the quoted copy: the engine reads the step as written.
 		const tricky = { ...OK2, steps: ["open /", 'verify page shows "Please select a role"'] };
-		const { model } = scripted([JSON.stringify({ cases: [tricky] }), JSON.stringify({ cases: [tricky] })]);
+		const { model, calls } = scripted([JSON.stringify({ cases: [tricky] })]);
 		const result = await generateQc({ spec: SPEC, specName: "spec.md", model });
-		expect(result.cases[0]?.note).toContain('reads it as "click"');
+		expect(result.cases[0]?.note).toBeUndefined();
+		expect(calls).toHaveLength(1);
 		expect(result.warnings).toContain("FR-1 has no case");
 	});
 

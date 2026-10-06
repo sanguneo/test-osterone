@@ -67,10 +67,11 @@ test("every event the grammar cannot replay is a warning, never silently dropped
 	]);
 	expectAllKnown(row.steps);
 	// Each recorded step id that produced no faithful grammar step is named in a warning.
-	for (const id of [2, 3, 5, 6, 7, 8, 9, 10, 11, 12]) {
+	for (const id of [2, 3, 5, 6, 8, 9, 10, 11, 12]) {
 		expect(row.warnings.some((w) => w.startsWith(`step ${id} (`))).toBe(true);
 	}
-	expect(row.warnings.find((w) => w.startsWith("step 7 "))).toContain("reads back as fill");
+	// "Enter" inside the quoted label does not make the click read back as a fill.
+	expect(row.warnings.some((w) => w.startsWith("step 7 "))).toBe(false);
 	expect(row.warnings.find((w) => w.startsWith("step 9 "))).toContain("not replayed");
 	expect(row.warnings.find((w) => w.startsWith("step 11 "))).toContain("unknown recorded event");
 	// Nothing new appeared after the last action, so no expectation is invented.
