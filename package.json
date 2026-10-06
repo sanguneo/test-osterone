@@ -29,6 +29,7 @@
 		"run:sheet": "node --experimental-transform-types src/app/run-sheet.ts",
 		"export:e2e": "node --experimental-transform-types src/app/export-e2e.ts",
 		"qc:generate": "node --experimental-transform-types src/app/qc-generate.ts",
+		"qc:worksheet": "node --experimental-transform-types src/app/qc-worksheet.ts",
 		"record:case": "node --experimental-transform-types src/app/record-case.ts",
 		"fixtures:qc": "bun scripts/make-qc-fixtures.ts"
 	},
