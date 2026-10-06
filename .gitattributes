@@ -1,0 +1,10 @@
+# One line ending everywhere. Biome (the lint gate) formats with LF, so a Windows checkout under
+# core.autocrlf=true used to fail `bun run lint` on every file before anything was edited.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.xlsx binary
+*.xls binary
+*.zip binary
