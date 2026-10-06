@@ -328,8 +328,10 @@ export function App() {
 						await persistSheets(nextSheets);
 						setSelectedSheetId(sheet.id);
 					}}
-					onImportSheets={(imported) => {
-						void persistSheets([...selectedProject.sheets, ...imported]);
+					onImportSheets={async (imported) => {
+						// Select only once the project holds the sheets: the guard above clears a selection the
+						// project does not contain, which used to drop an imported workbook back on the project home.
+						await persistSheets([...selectedProject.sheets, ...imported]);
 						if (imported[0]) setSelectedSheetId(imported[0].id);
 						setSheetModalOpen(false);
 					}}
