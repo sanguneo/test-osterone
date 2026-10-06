@@ -8,16 +8,24 @@
  *
  *   node --experimental-transform-types e2e/serve-studio.ts <port>
  */
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..");
-const home = join(repo, ".e2e", "studio-home");
-rmSync(home, { recursive: true, force: true });
+const port = process.argv[2] ?? process.env.PORT ?? "0";
+// One home per port: two suites running at once (two checkouts, or a suite beside `bun run qa:bsk`)
+// must not wipe each other's state. Homes left by earlier runs are swept once they are stale.
+const homes = join(repo, ".e2e", "studio-home");
+const home = join(homes, port);
+mkdirSync(homes, { recursive: true });
+for (const entry of readdirSync(homes)) {
+	const dir = join(homes, entry);
+	if (dir === home || Date.now() - statSync(dir).mtimeMs > 6 * 3_600_000) rmSync(dir, { recursive: true, force: true });
+}
 mkdirSync(home, { recursive: true });
 
-process.env.PORT = process.argv[2] ?? process.env.PORT ?? "0";
+process.env.PORT = port;
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.CODEX_HOME = join(home, ".codex");
