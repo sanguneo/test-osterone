@@ -30,6 +30,7 @@
 		"export:e2e": "node --experimental-transform-types src/app/export-e2e.ts",
 		"qc:generate": "node --experimental-transform-types src/app/qc-generate.ts",
 		"qc:worksheet": "node --experimental-transform-types src/app/qc-worksheet.ts",
+		"qa:bsk": "node --experimental-transform-types scripts/qa/bsk-studio-qa.ts",
 		"record:case": "node --experimental-transform-types src/app/record-case.ts",
 		"fixtures:qc": "bun scripts/make-qc-fixtures.ts",
 		"harness": "node --experimental-transform-types src/app/harness.ts"
