@@ -27,6 +27,7 @@
 		"test:e2e": "bun run studio:build && e2e run",
 		"e2e:install": "e2e-web install chromium",
 		"run:sheet": "node --experimental-transform-types src/app/run-sheet.ts",
+		"export:e2e": "node --experimental-transform-types src/app/export-e2e.ts",
 		"fixtures:qc": "bun scripts/make-qc-fixtures.ts"
 	},
 	"engines": {
