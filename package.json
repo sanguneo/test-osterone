@@ -25,7 +25,8 @@
 		"measure": "node --experimental-transform-types scripts/measure-sheet.ts",
 		"sheet:check": "node --experimental-transform-types src/app/check-sheet.ts",
 		"test:e2e": "bun run studio:build && e2e run",
-		"e2e:install": "e2e-web install chromium"
+		"e2e:install": "e2e-web install chromium",
+		"fixtures:qc": "bun scripts/make-qc-fixtures.ts"
 	},
 	"engines": {
 		"bun": ">=1.3.0",
