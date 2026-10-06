@@ -109,7 +109,7 @@ Point it at your own site — write your own cases file and pass a base URL:
 bun run run:live -- --url https://your.app --cases ./my-cases.csv
 ```
 
-> Requires **Node ≥ 22.7**. The demo executes the browser under Node (`node --experimental-transform-types`) because Playwright's browser launch currently hangs under Bun on Windows; the CLI and the deterministic engine run on Bun.
+> Requires **Node ≥ 22.12, below 26** (CI uses 24; Node 26 rejects `--experimental-transform-types`). The demo executes the browser under Node (`node --experimental-transform-types`) because Playwright's browser launch currently hangs under Bun on Windows; the CLI and the deterministic engine run on Bun.
 
 ## Studio — no-terminal browser UI (for non-developers)
 
@@ -182,6 +182,67 @@ For held cases the review also embeds a **Playwright trace** — the bundled tra
 
 Project metadata lives in `~/.test-osterone/studio-projects.json`, per-sheet CSV content in `sheet-data/<projectId>/<sheetId>.csv`, and rules, plans, history, and reviews in `studio-state/<projectId>.json`. Existing state remains readable. Authoring contract version 8 retires plans without validated step attribution and ordering; preparation keys use `prep2` and preserve significant whitespace. Existing approvals cannot bypass the current execution and verification gates.
 
+## Test automation from a QC sheet or a 기획서 (harness)
+
+One command takes whatever the project already has (a QC sheet, a 기획서, the code) to a deterministic verdict on the live app.
+
+```bash
+bun run harness -- --spec <기획서.md> [--repo <dir>] [--qc <qc.xlsx|qc.csv|Google Sheets URL>] \
+  (--url <app> | --fixture) [--backend playwright|bsk] [--browser <id>] [--out <dir>] [--export-e2e]
+```
+
+What it does depends on the QC you give it:
+
+- **QC with canonical steps.** It runs as written. No model is involved.
+- **QC in free language.** `qc:worksheet` first turns it into a 작업시트 (canonical steps), grounded in the repo code and the 기획서.
+- **No QC.** `qc:generate` writes one from the 기획서.
+
+Then `sheet:check`, then `run:sheet`, and `export:e2e` if you pass `--export-e2e`. Each stage is the standalone CLI of the same name, so a stage that refuses stops the pipeline with its own message. The harness writes `harness-report.md`, `junit.xml` and `results.json` under `--out` (default `.e2e/harness`). Its exit code is `run:sheet`'s.
+
+### The individual commands
+
+| Command | Purpose |
+|---|---|
+| `bun run run:sheet -- <source> (--url <baseUrl> \| --fixture)` | Run every unique case on a real browser. Also takes `--backend`, `--browser`, `--headed`, `--junit <file>`, `--json <file>`. |
+| `bun run qc:generate -- --spec <file> [--repo <dir>] --out <qc.xlsx\|qc.csv> [--lang ko\|en]` | Write a QC sheet from a 기획서 when none exists. |
+| `bun run qc:worksheet -- <source> [--spec <file>] [--repo <dir>] --out <worksheet.xlsx\|.csv>` | Turn a free-language QC into a 작업시트 in the canonical grammar. |
+| `bun run export:e2e -- <source> --out <dir> [--url <baseUrl>] [--agent-steps]` | Write a runnable tester-army/e2e suite. Held cases are emitted *skipped* with a `needs_review` reason, never as passing tests. |
+| `bun run record:case -- --out <qc.xlsx\|qc.csv> [--url ...] [--title ...] [--id ...] [--trace <trace.json\|dir>] [--browser <id>]` | Turn a BrowserSkill record trace into a canonical QC row. Recording itself needs a human in the browser to demonstrate the flow and click Finish. |
+| `bun run sheet:check -- <source>` | Read-only preflight (see below). It now reads Google Sheets URLs too. |
+
+`run:sheet` exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | Every case passed |
+| 1 | A case failed or errored, or a false pass was detected |
+| 3 | Nothing failed, but held cases need a human before this is green |
+| 2 | No verdict was produced: bad flags, unreadable sheet, zero cases, or a browser that could not start |
+
+### Inputs
+
+- **Excel (.xlsx / .xls).** Case tabs are selected and merged; cover tabs are ignored.
+- **CSV / TSV.**
+- **Google Sheets URL**, shared as "anyone with the link can view". Without a `gid` the whole workbook is read, like an Excel download. With a `gid` only that tab is read.
+
+### Backends
+
+- **`playwright`** (default) launches its own headless Chromium.
+- **`bsk`** drives the user's real, logged-in Chrome or Edge through [BrowserSkill](https://github.com/Tencent/BrowserSkill) in a no-focus Agent Window. It needs the `bsk` CLI and its browser extension. When several browsers are online, `--browser` or the `BSK_BROWSER` environment variable picks one. `BSK_BIN` overrides the binary. `resetSession` is deliberately not implemented, so a run never signs the user out of their own profile.
+
+### Model (authoring only)
+
+`qc:generate` and `qc:worksheet` need a model. Set `OPENAI_API_KEY` (plus optional `OPENAI_BASE_URL` for any OpenAI-compatible endpoint and `TEST_OSTERONE_MODEL`), or sign in to Codex/ChatGPT locally. Without one they refuse rather than guess. The verdict never uses the model.
+
+### Self-QA of this repo
+
+| Command | What it checks |
+|---|---|
+| `bun run e2e:install` | Once: downloads the Chromium the e2e suite uses. |
+| `bun run test:e2e` | tester-army/e2e real-browser suite of the Studio (`e2e/studio/*.e2e.ts`) on desktop 1280x800 and phone 390x844. The Studio boots on a free port against a throwaway home (`e2e/serve-studio.ts`, `e2e.config.ts`). |
+| `bun run qa:bsk` | A BrowserSkill pass over the Studio. Writes `report.json` and desktop/phone screenshots under `.artifacts/bsk-qa`. Exits 1 on console errors, failing requests or missing landmarks. `--fault` injects a failure to prove the gate trips. |
+| `bun run fixtures:qc` | Regenerates `e2e/fixtures/*.xlsx`. |
+
 ## Architecture
 
 - **Runtime:** single Node/TS stack (Playwright), shipped as a **single binary** via Bun.
@@ -250,10 +311,14 @@ src/
   report/       dashboard · JUnit · benchmark
   testing/      fixture app + fixture model
   app/studio/   browser UI (Studio)
+  app/          CLIs: harness · run-sheet · qc-generate · qc-worksheet · export-e2e · record-case · check-sheet
   cli.ts · index.ts
 test/           unit + integration + smoke suites
 examples/demo/  CLI live-run example
 scripts/        measure a labelled sheet against its human verdicts
+scripts/qa/     BrowserSkill QA pass over the Studio (qa:bsk)
+e2e/            Studio real-browser suite (tester-army/e2e)
+  fixtures/     QC workbooks + login-spec.md
 ```
 
 The bundled fixture app + labeled cases (`src/testing/`) double as a language-neutral benchmark asset.

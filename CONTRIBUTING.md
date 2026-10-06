@@ -11,7 +11,7 @@ Read [`README.md`](README.md) for the architecture and the trust model before yo
 ## Prerequisites
 
 - **[Bun](https://bun.com) ≥ 1.3** — tests, CLI, lint, build.
-- **[Node](https://nodejs.org) ≥ 22.7** — the browser/Studio path (`--experimental-transform-types`). Playwright's browser launch currently hangs under Bun on Windows, so the engine runs the browser under Node.
+- **[Node](https://nodejs.org) ≥ 22.12, below 26** (CI uses 24; Node 26 rejects the flag below) — the browser/Studio path (`--experimental-transform-types`). Playwright's browser launch currently hangs under Bun on Windows, so the engine runs the browser under Node.
 - **git**.
 
 ## Setup
@@ -36,12 +36,33 @@ CI runs exactly these; run them locally first so the loop is fast:
 bun run typecheck        # tsc --noEmit (engine)
 bun run studio:webcheck  # tsc for the web app
 bun run lint             # biome check
-bun test                 # 322/322 must stay green
+bun test                 # 489/489 must stay green
 bun run studio:build     # the UI build is a gate too — nothing else compiles it
 ```
 
 `bun run fmt` (`biome format --write`) is the fixer, not a gate: `bun run lint` already fails on
 formatting, so run `fmt` before committing rather than after CI tells you.
+
+### Real-browser gates (CI job `live`)
+
+The `live` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs these with a real Chromium:
+
+```bash
+bun run e2e:install                                          # once: Chromium for the e2e suite
+bun run test:e2e                                             # Studio in a real browser, desktop + phone
+bun run demo                                                 # engine vs the fixture app; fails on rerun mismatch or false pass
+bun run run:sheet -- e2e/fixtures/qc-pass.xlsx --fixture     # an all-pass Excel QC; exit 0 is the gate
+```
+
+Optional, local only (needs BrowserSkill):
+
+```bash
+bun run qa:bsk     # BrowserSkill pass over the Studio; exits 1 on console errors, failing requests, missing landmarks
+```
+
+### Windows
+
+The repo checks out with LF line endings via `.gitattributes`. Anything that launches a browser runs under Node (`node --experimental-transform-types`), same as the demo, because Playwright's browser launch hangs under Bun on Windows.
 
 ## Measuring against human verdicts
 

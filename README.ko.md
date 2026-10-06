@@ -109,7 +109,7 @@ false-pass  : 0 OK
 bun run run:live -- --url https://your.app --cases ./my-cases.csv
 ```
 
-> **Node ≥ 22.7** 이 필요합니다. Playwright의 브라우저 런치가 현재 Windows의 Bun에서 멈추기 때문에, 데모는 브라우저를 Node(`node --experimental-transform-types`)로 실행합니다. CLI와 결정적 엔진은 Bun 위에서 동작합니다.
+> **Node 22.12 이상, 26 미만** 이 필요합니다 (CI는 24 사용. Node 26은 `--experimental-transform-types`를 거부합니다). Playwright의 브라우저 런치가 현재 Windows의 Bun에서 멈추기 때문에, 데모는 브라우저를 Node(`node --experimental-transform-types`)로 실행합니다. CLI와 결정적 엔진은 Bun 위에서 동작합니다.
 
 ## Studio — 터미널 없는 브라우저 UI (비개발자용)
 
@@ -182,6 +182,67 @@ bun run studio     # React UI(Vite) 빌드 후 서빙 — http://localhost:8686 
 
 프로젝트 메타데이터는 `~/.test-osterone/studio-projects.json`, 시트 CSV는 `sheet-data/<projectId>/<sheetId>.csv`, 규칙·계획·이력·리뷰는 `studio-state/<projectId>.json`에 저장됩니다. 기존 상태는 계속 읽을 수 있습니다. 작성 계약 버전 8은 단계 출처·순서를 검증하지 않은 이전 계획을 재작성 대상으로 만들고, 준비 캐시는 의미 있는 공백을 보존하는 `prep2` 키를 사용합니다. 이전 승인으로 현재의 실행·검증 검사를 우회할 수 없습니다.
 
+## QC 시트나 기획서로 테스트 자동화 (harness)
+
+명령 하나로 프로젝트에 이미 있는 것(QC 시트, 기획서, 코드)에서 라이브 앱에 대한 결정적 판정까지 갑니다.
+
+```bash
+bun run harness -- --spec <기획서.md> [--repo <dir>] [--qc <qc.xlsx|qc.csv|Google Sheets URL>] \
+  (--url <app> | --fixture) [--backend playwright|bsk] [--browser <id>] [--out <dir>] [--export-e2e]
+```
+
+어떤 QC를 주느냐에 따라 흐름이 갈립니다.
+
+- **스텝이 이미 정형 문법인 QC.** 적힌 그대로 돌립니다. 모델은 쓰지 않습니다.
+- **자유 문장으로 쓴 QC.** 먼저 `qc:worksheet`가 레포 코드와 기획서를 근거로 작업시트(정형 스텝)로 바꿉니다.
+- **QC 없음.** `qc:generate`가 기획서에서 QC를 만듭니다.
+
+그다음 `sheet:check`, `run:sheet` 순서이고, `--export-e2e`를 주면 `export:e2e`까지 갑니다. 단계마다 같은 이름의 단독 CLI를 그대로 쓰므로, 어느 단계가 거부하면 그 단계의 메시지로 파이프라인이 멈춥니다. 결과물은 `--out`(기본 `.e2e/harness`) 아래 `harness-report.md`, `junit.xml`, `results.json`입니다. 종료 코드는 `run:sheet`의 것을 따릅니다.
+
+### 개별 명령
+
+| 명령 | 용도 |
+|---|---|
+| `bun run run:sheet -- <source> (--url <baseUrl> \| --fixture)` | 고유 케이스 전부를 실제 브라우저로 실행. `--backend`, `--browser`, `--headed`, `--junit <file>`, `--json <file>`도 받습니다. |
+| `bun run qc:generate -- --spec <file> [--repo <dir>] --out <qc.xlsx\|qc.csv> [--lang ko\|en]` | QC가 없을 때 기획서에서 QC 시트를 작성. |
+| `bun run qc:worksheet -- <source> [--spec <file>] [--repo <dir>] --out <worksheet.xlsx\|.csv>` | 자유 문장 QC를 정형 문법의 작업시트로 변환. |
+| `bun run export:e2e -- <source> --out <dir> [--url <baseUrl>] [--agent-steps]` | 실행 가능한 tester-army/e2e 스위트를 생성. 보류 케이스는 `needs_review` 사유와 함께 *skip*으로 나가며, 통과하는 테스트로 나가는 일은 없습니다. |
+| `bun run record:case -- --out <qc.xlsx\|qc.csv> [--url ...] [--title ...] [--id ...] [--trace <trace.json\|dir>] [--browser <id>]` | BrowserSkill 녹화 trace를 정형 QC 행으로 변환. 녹화 자체는 사람이 브라우저에서 흐름을 시연하고 Finish를 눌러야 합니다. |
+| `bun run sheet:check -- <source>` | 읽기 전용 사전검사(아래 참고). 이제 Google Sheets URL도 읽습니다. |
+
+`run:sheet` 종료 코드:
+
+| 코드 | 의미 |
+|---|---|
+| 0 | 모든 케이스 통과 |
+| 1 | 실패나 에러가 있거나 false pass가 감지됨 |
+| 3 | 실패는 없지만 사람이 봐야 할 보류 케이스가 있음 |
+| 2 | 판정을 못 냄: 잘못된 플래그, 못 읽는 시트, 케이스 0개, 브라우저 시작 실패 |
+
+### 입력
+
+- **Excel (.xlsx / .xls).** 케이스 탭을 골라 합치고, 표지 탭은 무시합니다.
+- **CSV / TSV.**
+- **Google Sheets URL.** "링크가 있는 모든 사용자 보기 가능"으로 공유해야 합니다. `gid`가 없으면 Excel로 내려받은 것처럼 워크북 전체를 읽고, `gid`가 있으면 그 탭만 읽습니다.
+
+### 백엔드
+
+- **`playwright`**(기본)는 자체 헤드리스 Chromium을 띄웁니다.
+- **`bsk`**는 [BrowserSkill](https://github.com/Tencent/BrowserSkill)을 통해 사용자가 이미 로그인한 실제 Chrome·Edge를 포커스를 뺏지 않는 Agent Window에서 조작합니다. `bsk` CLI와 브라우저 확장이 필요합니다. 브라우저가 여러 개 접속돼 있으면 `--browser`나 환경변수 `BSK_BROWSER`로 고릅니다. `BSK_BIN`으로 실행 파일을 바꿀 수 있습니다. `resetSession`은 일부러 구현하지 않았습니다. 사용자 본인 프로필에서 로그아웃시키는 일이 없게 하려는 것입니다.
+
+### 모델 (작성 전용)
+
+`qc:generate`와 `qc:worksheet`는 모델이 필요합니다. `OPENAI_API_KEY`(필요하면 OpenAI 호환 엔드포인트용 `OPENAI_BASE_URL`, `TEST_OSTERONE_MODEL`)를 설정하거나 로컬에서 Codex/ChatGPT에 로그인하세요. 모델이 없으면 추측하지 않고 거부합니다. 판정에는 모델을 쓰지 않습니다.
+
+### 이 레포의 자체 QA
+
+| 명령 | 확인하는 것 |
+|---|---|
+| `bun run e2e:install` | 최초 1회: e2e 스위트가 쓸 Chromium 다운로드. |
+| `bun run test:e2e` | Studio의 tester-army/e2e 실브라우저 스위트(`e2e/studio/*.e2e.ts`), 데스크톱 1280x800과 폰 390x844. Studio는 빈 포트에서 일회용 홈으로 뜹니다(`e2e/serve-studio.ts`, `e2e.config.ts`). |
+| `bun run qa:bsk` | BrowserSkill로 Studio를 한 바퀴 점검. `.artifacts/bsk-qa` 아래 `report.json`과 데스크톱/폰 스크린샷을 남깁니다. 콘솔 에러, 실패한 요청, 빠진 랜드마크가 있으면 1로 종료합니다. `--fault`는 일부러 실패를 넣어 게이트가 걸리는지 증명합니다. |
+| `bun run fixtures:qc` | `e2e/fixtures/*.xlsx` 재생성. |
+
 ## 아키텍처
 
 - **런타임:** Node/TS 단일 스택(Playwright)이며, Bun으로 **단일 바이너리**로 배포합니다.
@@ -250,10 +311,14 @@ src/
   report/       대시보드 · JUnit · 벤치마크
   testing/      fixture 앱 + fixture 모델
   app/studio/   브라우저 UI (Studio)
+  app/          CLI: harness · run-sheet · qc-generate · qc-worksheet · export-e2e · record-case · check-sheet
   cli.ts · index.ts
 test/           유닛 + 통합 + 스모크 스위트
 examples/demo/  CLI 라이브 실행 예제
 scripts/        라벨 시트를 사람 판정과 대조해 실측
+scripts/qa/     BrowserSkill로 Studio QA 점검 (qa:bsk)
+e2e/            Studio 실브라우저 스위트 (tester-army/e2e)
+  fixtures/     QC 워크북 + login-spec.md
 ```
 
 번들 fixture 앱과 라벨링된 케이스(`src/testing/`)는 언어 중립 벤치마크 자산으로도 쓰입니다.
