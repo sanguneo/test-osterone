@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -268,8 +268,11 @@ test("recognized sheet analysis and preview work through real HTTP without a con
 	const home = mkdtempSync(join(tmpdir(), "studio-onboarding-"));
 	// Observe the real server's listening event, with OS-assigned port and isolated user state.
 	const serverUrl = new URL("../src/app/studio/server.ts", import.meta.url).href;
+	// `node` on PATH may be a shim (Volta's node.cmd on Windows) that can carry neither the IPC channel nor
+	// a multi-line --eval argument; ask it for the real executable once and spawn that directly.
+	const nodeBin = execFileSync("node", ["-p", "process.execPath"], { encoding: "utf8" }).trim();
 	const child = spawn(
-		"node",
+		nodeBin,
 		[
 			"--experimental-transform-types",
 			"--input-type=module",
