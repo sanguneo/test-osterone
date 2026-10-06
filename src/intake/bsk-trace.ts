@@ -15,6 +15,7 @@
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, extname, join } from "node:path";
+import type { Range } from "xlsx";
 import { parseStep } from "../interpret/interpret.ts";
 import { establishRuleFromHeaders } from "../interpret/rule.ts";
 import { parseCsv, toCsv } from "./csv.ts";
@@ -373,6 +374,78 @@ function appendCsv(file: string, row: SheetRow): { file: string } {
 	return { file };
 }
 
+function escapeXml(value: string): string {
+	return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/**
+ * Append one row to a tab of an existing workbook by editing that sheet's XML inside the zip.
+ *
+ * Re-encoding the workbook through SheetJS (community edition) drops every cell style, column width and
+ * fill a QA team put on their QC sheet, which is not a side effect a "record one case" command may have.
+ * Here only the target sheet's XML changes: the new row is written with inline strings, takes the style of
+ * the cell above it in each column, and the sheet's dimension is widened to include it.
+ */
+function appendRowInPlace(file: string, tab: string, range: Range, values: string[]): void {
+	const zip = XLSX.CFB.read(readFileSync(file), { type: "buffer" });
+	const entryAt = (path: string) => {
+		const at = zip.FullPaths.findIndex((full: string) => full.toLowerCase().endsWith(`/${path.toLowerCase()}`));
+		const entry = at >= 0 ? zip.FileIndex[at] : undefined;
+		if (!entry?.content) throw new Error(`${file}: workbook part ${path} is missing`);
+		return entry;
+	};
+	const text = (path: string) => Buffer.from(entryAt(path).content as Uint8Array).toString("utf8");
+	const sheetTag = [...text("xl/workbook.xml").matchAll(/<sheet\b[^>]*\/>/g)]
+		.map((m) => m[0])
+		.find((tag) => tag.includes(`name="${escapeXml(tab)}"`));
+	const relId = sheetTag?.match(/\br:id="([^"]+)"/)?.[1];
+	const target = text("xl/_rels/workbook.xml.rels")
+		.match(new RegExp(`<Relationship\\b[^>]*\\bId="${relId}"[^>]*/>`))?.[0]
+		?.match(/\bTarget="([^"]+)"/)?.[1];
+	if (!relId || !target) throw new Error(`${file}: cannot locate the XML of tab ${tab}`);
+	const sheetPath = target.startsWith("/") ? target.slice(1) : `xl/${target}`;
+	let xml = text(sheetPath);
+
+	const rowNumber = range.e.r + 2;
+	const rowXml = (n: number) => xml.match(new RegExp(`<row\\b[^>]*\\br="${n}"[^>]*?(?:/>|>[\\s\\S]*?</row>)`))?.[0];
+	const above = rowXml(rowNumber - 1) ?? "";
+	const styleAbove = (ref: string) => above.match(new RegExp(`<c\\b[^>]*\\br="${ref}"[^>]*\\bs="(\\d+)"`))?.[1];
+	const cells = values
+		.map((value, i) => {
+			const col = XLSX.utils.encode_col(range.s.c + i);
+			const style = styleAbove(`${col}${rowNumber - 1}`);
+			const attrs = `r="${col}${rowNumber}"${style ? ` s="${style}"` : ""}`;
+			return value
+				? `<c ${attrs} t="inlineStr"><is><t xml:space="preserve">${escapeXml(value)}</t></is></c>`
+				: style
+					? `<c ${attrs}/>`
+					: "";
+		})
+		.join("");
+	const newRow = `<row r="${rowNumber}">${cells}</row>`;
+	const existing = rowXml(rowNumber);
+	if (existing) {
+		// A formatted but empty row already sits there (Excel keeps those); a row with values would mean the
+		// sheet's own range lied about where the data ends, and overwriting it would destroy a case.
+		if (/<v>|<is>/.test(existing)) throw new Error(`${file}: row ${rowNumber} of ${tab} is not empty`);
+		xml = xml.replace(existing, newRow);
+	} else {
+		const later = [...xml.matchAll(/<row\b[^>]*\br="(\d+)"/g)].find((m) => Number(m[1]) > rowNumber);
+		xml =
+			later?.index !== undefined
+				? `${xml.slice(0, later.index)}${newRow}${xml.slice(later.index)}`
+				: xml.replace("</sheetData>", `${newRow}</sheetData>`);
+	}
+	const lastCol = Math.max(range.e.c, range.s.c + values.length - 1);
+	const dimension = XLSX.utils.encode_range({ s: range.s, e: { r: rowNumber - 1, c: lastCol } });
+	xml = xml.replace(/<dimension\b[^>]*\/>/, `<dimension ref="${dimension}"/>`);
+
+	const entry = entryAt(sheetPath);
+	entry.content = Buffer.from(xml, "utf8");
+	entry.size = entry.content.length;
+	writeFileSync(file, XLSX.CFB.write(zip, { fileType: "zip", type: "buffer" }));
+}
+
 function appendXlsx(file: string, row: SheetRow): { file: string; tab: string } {
 	const book = existsSync(file) ? XLSX.read(readFileSync(file), { type: "buffer" }) : XLSX.utils.book_new();
 	for (const name of book.SheetNames) {
@@ -388,15 +461,7 @@ function appendXlsx(file: string, row: SheetRow): { file: string; tab: string } 
 			grid.slice(headerAt + 1).map((r) => r.map(String)),
 			row.id,
 		);
-		const r = range.e.r + 1;
-		rowFor(headers, row).forEach((value, i) => {
-			if (value) sheet[XLSX.utils.encode_cell({ r, c: range.s.c + i })] = { t: "s", v: value };
-		});
-		sheet["!ref"] = XLSX.utils.encode_range({
-			s: range.s,
-			e: { r, c: Math.max(range.e.c, range.s.c + headers.length - 1) },
-		});
-		XLSX.writeFile(book, file, { bookType: "xlsx" });
+		appendRowInPlace(file, name, range, rowFor(headers, row));
 		return { file, tab: name };
 	}
 	const name = book.SheetNames.includes("시험항목") ? `시험항목 ${book.SheetNames.length + 1}` : "시험항목";

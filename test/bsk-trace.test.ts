@@ -159,3 +159,50 @@ test("an existing QC workbook gains the row on its first case tab, not the cover
 		expect(sheet.tabs.find((t) => t.name === "표지")?.selected).toBe(false);
 	});
 });
+
+/** Read or replace one part of an .xlsx zip, the way a styled workbook from Excel would carry it. */
+function zipPart(file: string, path: string, replace?: (xml: string) => string): string {
+	const zip = XLSX.CFB.read(readFileSync(file), { type: "buffer" });
+	const at = zip.FullPaths.findIndex((full: string) => full.endsWith(`/${path}`));
+	const entry = zip.FileIndex[at];
+	if (!entry?.content) throw new Error(`no ${path} in ${file}`);
+	const xml = Buffer.from(entry.content as Uint8Array).toString("utf8");
+	if (!replace) return xml;
+	entry.content = Buffer.from(replace(xml), "utf8");
+	entry.size = entry.content.length;
+	writeFileSync(file, XLSX.CFB.write(zip, { fileType: "zip", type: "buffer" }));
+	return replace(xml);
+}
+
+test("appending to a styled QC workbook keeps its styling and styles the new row like the one above", async () => {
+	await withDir(async (dir) => {
+		const file = join(dir, "qc.xlsx");
+		copyFileSync(join(import.meta.dir, "..", "e2e", "fixtures", "qc-cases.xlsx"), file);
+		// Give the case tab a bold style on its header and its last row, as a QA team's workbook has.
+		let bold = -1;
+		const styles = zipPart(file, "xl/styles.xml", (xml) => {
+			const fonts = Number(xml.match(/<fonts count="(\d+)"/)?.[1]);
+			bold = Number(xml.match(/<cellXfs count="(\d+)"/)?.[1]);
+			return xml
+				.replace(/<fonts count="\d+"([^>]*)>/, `<fonts count="${fonts + 1}"$1>`)
+				.replace("</fonts>", '<font><b/><sz val="12"/><name val="Calibri"/></font></fonts>')
+				.replace(/<cellXfs count="\d+"([^>]*)>/, `<cellXfs count="${bold + 1}"$1>`)
+				.replace(
+					"</cellXfs>",
+					`<xf numFmtId="0" fontId="${fonts}" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>`,
+				);
+		});
+		zipPart(file, "xl/worksheets/sheet2.xml", (xml) => xml.replace(/<c r="([A-G])(1|5)"/g, `<c r="$1$2" s="${bold}"`));
+
+		expect(appendCaseToSheet(file, ROW).tab).toBe("로그인");
+
+		expect(zipPart(file, "xl/styles.xml")).toBe(styles);
+		const sheetXml = zipPart(file, "xl/worksheets/sheet2.xml");
+		for (const col of ["A", "B", "C"]) expect(sheetXml).toContain(`<c r="${col}1" s="${bold}"`);
+		expect(sheetXml).toMatch(new RegExp(`<c r="A6" s="${bold}" t="inlineStr">`));
+		expect(sheetXml).toContain('<dimension ref="A1:G6"/>');
+		const cases = ingestCsv((await loadSheet(file)).csv).unique;
+		expect(cases).toHaveLength(5);
+		expect(cases.at(-1)).toMatchObject({ title: "Valid login", steps: ROW.steps, expected: "Welcome" });
+	});
+});
