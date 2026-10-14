@@ -8,7 +8,7 @@
  *
  * Usage (Studio must be running — it owns the model connection, accounts and browser):
  *
- *   node --experimental-transform-types scripts/measure-sheet.ts <projectId> <sheetId> [labelColumn]
+ *   node --experimental-strip-types scripts/measure-sheet.ts <projectId> <sheetId> [labelColumn]
  *
  * `labelColumn` defaults to the saved mapping or detected verdict column. NT/NA/blank are reported separately
  * rather than counted as agreement.

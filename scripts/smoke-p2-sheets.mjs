@@ -2,12 +2,13 @@
 /**
  * Stage 2b live smoke test: per-sheet runtime state + per-sheet mapping isolation.
  *
- * Boots the real Studio server (node --experimental-transform-types server.ts) against
+ * Boots the real Studio server (node --experimental-strip-types server.ts) against
  * an isolated HOME/state dir, saves a two-sheet project where both sheets share one
  * identical case row plus one distinct row each, runs each sheet, and asserts:
  *   (a) each sheet's /api/history is isolated (its own run only),
- *   (b) approving a needs_review case on one sheet reconciles it out of the OTHER
- *       sheet's queue too (the shared case's baseline is approved once, globally).
+ *   (b) the shared self-healed case is refused as a baseline (an approval must name its execution
+ *       and only complete, passing, discriminating checks can be signed off), and each sheet keeps
+ *       its own review item for it.
  *
  * Usage: node scripts/smoke-p2-sheets.mjs
  */
@@ -15,10 +16,11 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const REPO_ROOT = "C:/Users/USER/WebstormProjects/test-osteron/test-osterone";
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER_TS = join(REPO_ROOT, "src/app/studio/server.ts");
 
 const FIXTURE_PAGE = `<!doctype html>
@@ -141,11 +143,20 @@ async function main() {
 
 	const child = spawn(
 		process.execPath,
-		["--experimental-transform-types", SERVER_TS],
+		["--experimental-strip-types", SERVER_TS],
 		{
 			cwd: REPO_ROOT,
 			env: {
 				...process.env,
+				// The isolated home would hide the machine's Playwright browsers (Linux and macOS look under
+				// $HOME), so point the server at the real cache before swapping the home out.
+				PLAYWRIGHT_BROWSERS_PATH:
+					process.env.PLAYWRIGHT_BROWSERS_PATH ??
+					(process.platform === "win32"
+						? join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "ms-playwright")
+						: process.platform === "darwin"
+							? join(homedir(), "Library", "Caches", "ms-playwright")
+							: join(process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"), "ms-playwright")),
 				HOME: home,
 				USERPROFILE: home,
 				TEST_OSTERONE_STATE_DIR: stateDir,
@@ -252,16 +263,28 @@ async function main() {
 		if (!sharedNeedsReview) {
 			console.log("  (no needs_review case found — skipping cross-sheet approve-once assertion, isolation already verified)");
 		} else {
+			// The approval contract this smoke was first written against (approve once, cleared on every sheet)
+			// is gone on purpose: baselines and review queues are per sheet, and an approval must name the
+			// execution it reviewed and may only sign off complete, passing, discriminating checks. TC4 never
+			// reached its button, so the current policy must refuse it - and sheet B must keep its own item.
+			check(sharedNeedsReview.baselineEligible === false, "the self-healed case is not offered for baseline approval");
 			const approveRes = await fetch(`${base}/api/review/approve`, {
 				method: "POST",
 				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ caseId: sharedCaseId, projectId, sheetId: "shA" }),
+				body: JSON.stringify({
+					caseId: sharedCaseId,
+					projectId,
+					sheetId: "shA",
+					executionId: sharedNeedsReview.executionId,
+				}),
 			});
-			check(approveRes.ok, "approve on sheet A succeeded");
+			check(approveRes.status === 400, `approving it on sheet A is refused (HTTP ${approveRes.status}, expected 400)`);
 
 			const queueB = await fetch(`${base}/api/review/queue?projectId=${projectId}&sheetId=shB`).then((r) => r.json());
-			const stillOnB = queueB.find((it) => it.caseId === sharedCaseId);
-			check(!stillOnB, "approving the shared case on sheet A reconciles it out of sheet B's queue (approve-once)");
+			check(
+				queueB.some((it) => it.caseId === sharedCaseId),
+				"sheet B keeps its own review item for the shared case (review state is per sheet)",
+			);
 		}
 
 		console.log(failed.length === 0 ? "SMOKE OK" : `SMOKE FAIL (${failed.length} assertion(s) failed)`);

@@ -18,6 +18,9 @@ export interface OAuthProxyOptions {
 	originator?: string;
 }
 
+/** Model used with a Codex/ChatGPT login when neither a pin nor the Codex config names one. */
+export const DEFAULT_OAUTH_MODEL = "gpt-5.6-sol";
+
 const ACCOUNT_HEADER = "chatgpt-account-id";
 
 export function codexResponsesUrl(base: string): string {

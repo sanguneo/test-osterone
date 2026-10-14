@@ -4,7 +4,7 @@ import { join } from "node:path";
 const root = join(import.meta.dir, "..");
 
 async function check(path: string) {
-	const child = Bun.spawn(["node", "--experimental-transform-types", "src/app/check-sheet.ts", path], {
+	const child = Bun.spawn(["node", "--experimental-strip-types", "src/app/check-sheet.ts", path], {
 		cwd: root,
 		stdout: "pipe",
 		stderr: "pipe",

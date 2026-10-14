@@ -23,3 +23,46 @@ jobs:
       # The UI is a build artifact nothing else compiles: without this, a PR that breaks the vite
       # build merges green and only fails for whoever next runs `bun run studio`.
       - run: bun run studio:build
+
+  # Everything `check` deliberately keeps out: a real Chromium. The unit suite proves the engine is
+  # deterministic against FakePage; this job proves the same verdicts come out of a real browser, through
+  # the Studio UI and through the QC CLIs, from the same Excel workbook a QA team hands over.
+  live:
+    runs-on: ubuntu-latest
+    env:
+      E2E_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # The browser path runs under Node (e2e needs >= 22.12; the engine uses --experimental-strip-types).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: bun install --ignore-scripts
+      # Two Playwright builds on purpose: the engine's own (demo, run:sheet) and the one @e2e-dev/web pins.
+      - run: bunx playwright install --with-deps chromium
+      - run: bunx e2e-web install chromium --with-deps
+      # Studio in a real browser, desktop + phone (builds the UI first).
+      - run: bun run test:e2e -- --reporter list,junit
+      # The engine against the bundled fixture app: exits non-zero on a rerun mismatch or a false pass.
+      - run: bun run demo
+      # An all-pass Excel QC through the headless runner: exit 0 is the gate, JUnit is the record.
+      - run: bun run run:sheet -- e2e/fixtures/qc-pass.xlsx --fixture --junit .e2e/qc-pass.junit.xml
+      # test-osterone runs its own Studio QC (prose, written from the README) through the harness.
+      - run: bun run dogfood
+      - name: Upload evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-evidence
+          path: |
+            .e2e/report.json
+            .e2e/junit.xml
+            .e2e/qc-pass.junit.xml
+            .e2e/dogfood
+            .e2e/artifacts
+            .e2e/logs
+          if-no-files-found: warn
+          retention-days: 7

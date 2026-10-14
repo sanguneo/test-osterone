@@ -570,3 +570,13 @@ test("deriveQuotedAssertions refuses the lines that describe rather than quote",
 	// Nothing written under the requirement at all.
 	expect(deriveQuotedAssertions("1. 수정 팝업 종료되어야 한다.", [])).toEqual([]);
 });
+
+test("a verb inside quoted copy never decides what a step does", () => {
+	// Measured on the Studio's own QC: 선택 (a click verb) inside the copy turned a check into a click.
+	expect(parseStep('verify page shows "작업할 프로젝트를 선택하세요."', RULE).kind).toBe("verify");
+	expect(parseStep('click "Enter details"', RULE)).toEqual({ kind: "click", target: "Enter details" });
+	expect(parseStep('verify page shows "Open the settings"', RULE).kind).toBe("verify");
+	// The words outside the quotes still decide, and an unquoted Korean step reads as before.
+	expect(parseStep('"로그인" 버튼 클릭', RULE)).toEqual({ kind: "click", target: "로그인" });
+	expect(parseStep("로그인 버튼을 클릭한다", RULE)).toEqual({ kind: "click", target: "로그인" });
+});

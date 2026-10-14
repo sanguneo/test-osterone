@@ -1,0 +1,74 @@
+{
+	"version": 3,
+	"purpose": "login as admin",
+	"recorded_at": "2026-10-06T10:58:18.063Z",
+	"started_at": "2026-10-06T10:58:00.808Z",
+	"stopped_by": "user_finish",
+	"entry": {
+		"start_url": "http://localhost:65331/"
+	},
+	"recorder": {
+		"bsk": "0.3.2",
+		"vom": 1
+	},
+	"states": [
+		{
+			"id": "s1",
+			"url": "http://localhost:65331/",
+			"title": "test-osterone demo",
+			"body": "# bsk-observation 1\nstate: \"s1\"\nurl: \"http://localhost:65331/\"\ntitle: \"test-osterone demo\"\nsteps_here: [1, 2, 3]\n---\n@vom 1\n@view 1078x688\n@layers 1 focus=L1\nL1 page\n  RootWebArea \"test-osterone demo\"\n    heading \"Sign in\"\n      StaticText \"Sign in\"\n    @e1 textbox \"Username\" [empty] placeholder=\"Username\" ⟵ step 1: fill\n    @e2 textbox \"Password\" [empty] placeholder=\"Password\" ⟵ step 2: fill\n    @e3 button \"Log in\" ⟵ step 3: click\n    status\n"
+		},
+		{
+			"id": "s2",
+			"url": "http://localhost:65331/",
+			"title": "test-osterone demo",
+			"body": "# bsk-observation 1\nstate: \"s2\"\nurl: \"http://localhost:65331/\"\ntitle: \"test-osterone demo\"\n---\n@vom 1\n@view 1078x688\n@layers 1 focus=L1\nL1 page\n  RootWebArea \"test-osterone demo\"\n    heading \"Sign in\"\n      StaticText \"Sign in\"\n    @e1 textbox \"Username\" value=\"admin\" placeholder=\"Username\"\n    @e2 textbox \"Password\" [filled] placeholder=\"Password\"\n    @e3 button \"Log in\"\n    status\n      StaticText \"Welcome, admin. Dashboard loaded.\"\n"
+		}
+	],
+	"steps": [
+		{
+			"op": "fill",
+			"id": 1,
+			"state": "s1",
+			"result": {
+				"state": "s1"
+			},
+			"target": {
+				"ref": "@e1",
+				"role": "textbox",
+				"name": "Username"
+			},
+			"value": "admin",
+			"commit": "blur"
+		},
+		{
+			"op": "fill",
+			"id": 2,
+			"state": "s1",
+			"result": {
+				"state": "s1"
+			},
+			"target": {
+				"ref": "@e2",
+				"role": "textbox",
+				"name": "Password"
+			},
+			"value": "***",
+			"commit": "blur",
+			"redacted": true
+		},
+		{
+			"op": "click",
+			"id": 3,
+			"state": "s1",
+			"result": {
+				"state": "s2"
+			},
+			"target": {
+				"ref": "@e3",
+				"role": "button",
+				"name": "Log in"
+			}
+		}
+	]
+}

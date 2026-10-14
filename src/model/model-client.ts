@@ -61,12 +61,18 @@ export interface ModelClient {
 
 /** Deterministic, offline fake. The reply fn defaults to echoing nothing. */
 export class FakeModelClient implements ModelClient {
-	constructor(private readonly reply: (messages: ModelMessage[]) => string = () => "") {}
+	private readonly reply: (messages: ModelMessage[]) => string;
+	constructor(reply: (messages: ModelMessage[]) => string = () => "") {
+		this.reply = reply;
+	}
 
 	async complete(messages: ModelMessage[]): Promise<string> {
 		return this.reply(messages);
 	}
 }
+
+/** Model used with a plain API key when the caller does not name one. */
+export const DEFAULT_APIKEY_MODEL = "gpt-4o-mini";
 
 export interface ApiKeyModelOptions {
 	baseUrl?: string;

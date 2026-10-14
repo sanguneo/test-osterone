@@ -11,7 +11,7 @@
 ## 사전 준비
 
 - **[Bun](https://bun.com) ≥ 1.3** — 테스트·CLI·린트·빌드.
-- **[Node](https://nodejs.org) ≥ 22.7** — 브라우저/Studio 경로(`--experimental-transform-types`). Windows의 Bun에서 Playwright 브라우저 런치가 멈추기 때문에 엔진은 브라우저를 Node로 실행합니다.
+- **[Node](https://nodejs.org) 22.12 이상** (CI는 24 사용. 아래 플래그가 모든 버전에서 동작하도록 코드는 소거 가능한 문법만 씁니다 — 생성자 매개변수 프로퍼티·enum 금지) — 브라우저/Studio 경로(`--experimental-strip-types`). Windows의 Bun에서 Playwright 브라우저 런치가 멈추기 때문에 엔진은 브라우저를 Node로 실행합니다.
 - **git**.
 
 ## 셋업
@@ -36,11 +36,32 @@ CI가 정확히 이것들을 돌립니다. 로컬에서 먼저 돌려 루프를 
 bun run typecheck        # tsc --noEmit (엔진)
 bun run studio:webcheck  # 웹 앱 tsc
 bun run lint             # biome check
-bun test                 # 322/322 유지
+bun test                 # 489/489 유지
 bun run studio:build     # UI 빌드도 게이트입니다 — 이걸 컴파일하는 곳이 달리 없습니다
 ```
 
 `bun run fmt`(`biome format --write`)은 게이트가 아니라 **고치는 도구**입니다: `bun run lint`가 이미 포맷으로 실패하므로, CI가 알려주기 전에 커밋 전에 돌리세요.
+
+### 실브라우저 게이트 (CI 잡 `live`)
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml)의 `live` 잡이 실제 Chromium으로 이것들을 돌립니다:
+
+```bash
+bun run e2e:install                                          # 최초 1회: e2e 스위트용 Chromium
+bun run test:e2e                                             # 실제 브라우저의 Studio, 데스크톱 + 폰
+bun run demo                                                 # fixture 앱 대상 엔진; 재실행 불일치나 false pass면 실패
+bun run run:sheet -- e2e/fixtures/qc-pass.xlsx --fixture     # 전부 통과하는 Excel QC; 종료 코드 0이 게이트
+```
+
+선택, 로컬 전용(BrowserSkill 필요):
+
+```bash
+bun run qa:bsk     # BrowserSkill로 Studio 점검; 콘솔 에러·실패 요청·빠진 랜드마크가 있으면 1로 종료
+```
+
+### Windows
+
+레포는 `.gitattributes`로 LF 줄바꿈으로 체크아웃됩니다. 브라우저를 띄우는 것은 데모와 마찬가지로 전부 Node(`node --experimental-strip-types`)로 돌립니다. Windows의 Bun에서는 Playwright 브라우저 런치가 멈추기 때문입니다.
 
 ## 사람 판정 대비 실측
 

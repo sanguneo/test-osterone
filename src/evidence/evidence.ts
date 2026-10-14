@@ -26,10 +26,9 @@ export interface ExecutionRow {
 export class SqliteEvidenceStore {
 	private readonly db: Database;
 
-	constructor(
-		path = ":memory:",
-		private readonly now: () => number = Date.now,
-	) {
+	private readonly now: () => number;
+	constructor(path = ":memory:", now: () => number = Date.now) {
+		this.now = now;
 		this.db = new Database(path);
 		this.db.run(
 			`CREATE TABLE IF NOT EXISTS executions (

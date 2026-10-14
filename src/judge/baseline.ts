@@ -47,7 +47,10 @@ export interface BaselineStore {
 export class MemoryBaselineStore implements BaselineStore {
 	private readonly store = new Map<string, Baseline>();
 
-	constructor(private readonly now: () => number = Date.now) {}
+	private readonly now: () => number;
+	constructor(now: () => number = Date.now) {
+		this.now = now;
+	}
 
 	get(caseId: string, ruleVersion: number, env: string): Baseline | undefined {
 		return this.store.get(baselineKey(caseId, ruleVersion, env));

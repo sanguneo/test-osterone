@@ -25,6 +25,8 @@ HANDOVER.md
 
 # QA scratch / evidence (not product)
 .artifacts/
+# e2e runner output (reports, traces, the Studio's throwaway home)
+.e2e/
 .omo/
 
 # throwaway diagnostics (named *.tmp.* by convention, deleted when the question is answered)

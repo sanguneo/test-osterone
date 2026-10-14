@@ -530,7 +530,10 @@ test("an observation-only case may assert what was already on screen", async () 
 class PaintingPage implements Page {
 	private reads = 0;
 	private clicked = false;
-	constructor(private readonly late: string) {}
+	private readonly late: string;
+	constructor(late: string) {
+		this.late = late;
+	}
 	async goto(): Promise<void> {}
 	async click(): Promise<void> {
 		this.clicked = true;
@@ -744,7 +747,10 @@ test("re-render flicker is not evidence that an action revealed anything", async
 class PrepPage implements Page {
 	readonly did: string[] = [];
 	private opened = false;
-	constructor(private readonly refuse?: string) {}
+	private readonly refuse?: string;
+	constructor(refuse?: string) {
+		this.refuse = refuse;
+	}
 	async goto(path: string): Promise<void> {
 		this.did.push(`goto ${path}`);
 	}
@@ -842,10 +848,12 @@ test("setup is not mistaken for the case's own effect", async () => {
  */
 class InputLimitPage implements Page {
 	private value = "";
-	constructor(
-		private readonly limit: number | null,
-		private readonly declares: number | null = null,
-	) {}
+	private readonly limit: number | null;
+	private readonly declares: number | null;
+	constructor(limit: number | null, declares: number | null = null) {
+		this.limit = limit;
+		this.declares = declares;
+	}
 	async goto(): Promise<void> {}
 	async click(): Promise<void> {}
 	async fill(_target: string, value: string): Promise<void> {
@@ -1260,10 +1268,12 @@ test("trace: a needs_review case exports the chunk to the given path (kept for r
 class LadderPage implements Page {
 	readonly did: string[] = [];
 	dismissals = 0;
-	constructor(
-		private readonly blocked: string[] = [],
-		private readonly missing: string[] = [],
-	) {}
+	private readonly blocked: string[];
+	private readonly missing: string[];
+	constructor(blocked: string[] = [], missing: string[] = []) {
+		this.blocked = blocked;
+		this.missing = missing;
+	}
 	async goto(path: string): Promise<void> {
 		this.did.push(`goto ${path}`);
 	}
@@ -1378,7 +1388,10 @@ test("AI repair is budgeted, and a declined repair still aborts the case", async
 class ScannablePage implements Page {
 	readonly tried: string[] = [];
 	dismissals = 0;
-	constructor(private readonly present: string[]) {}
+	private readonly present: string[];
+	constructor(present: string[]) {
+		this.present = present;
+	}
 	async goto(): Promise<void> {}
 	async click(target: string): Promise<void> {
 		this.tried.push(target);
@@ -1432,10 +1445,12 @@ class RoutedPage implements Page {
 	url = "/";
 	status: number | null = 200;
 	readonly did: string[] = [];
-	constructor(
-		private readonly redirects: Record<string, string> = {},
-		private readonly statuses: Record<string, number> = {},
-	) {}
+	private readonly redirects: Record<string, string>;
+	private readonly statuses: Record<string, number>;
+	constructor(redirects: Record<string, string> = {}, statuses: Record<string, number> = {}) {
+		this.redirects = redirects;
+		this.statuses = statuses;
+	}
 	async goto(path: string): Promise<void> {
 		this.did.push(`goto ${path}`);
 		this.url = this.redirects[path] ?? path;
@@ -1590,7 +1605,10 @@ test("the same case passes once the setup actually enters a value", async () => 
 class LatePaintPage implements Page {
 	readonly tried: string[] = [];
 	private reads = 0;
-	constructor(private readonly paintsAfter: number) {}
+	private readonly paintsAfter: number;
+	constructor(paintsAfter: number) {
+		this.paintsAfter = paintsAfter;
+	}
 	async goto(): Promise<void> {}
 	async click(target: string): Promise<void> {
 		this.tried.push(target);
@@ -1703,10 +1721,12 @@ test("a setup nothing can rescue still holds the case, and its own steps never r
 class MenuPage implements Page {
 	readonly did: string[] = [];
 	private open = false;
-	constructor(
-		private readonly trigger: string,
-		private readonly item: string,
-	) {}
+	private readonly trigger: string;
+	private readonly item: string;
+	constructor(trigger: string, item: string) {
+		this.trigger = trigger;
+		this.item = item;
+	}
 	async goto(path: string): Promise<void> {
 		this.did.push(`goto ${path}`);
 	}
